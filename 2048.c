@@ -780,6 +780,12 @@ WG_EXPORT(wg_option) i32 wg_option(i32 i, i32 v) {
 }
 
 WG_EXPORT(wg_over) i32 wg_over(void) { return S.phase == OVER; }
+/* the page's best on the board these picks play on, so the Best box shows the same as its scores */
+WG_EXPORT(wg_best) i32 wg_best(i32 v) {
+  if (S.magic != MAGIC) defaults();
+  if (v >= 0) { S.best[S.n] = v > S.score ? v : S.score; A.dirty = 1; }
+  return S.best[S.n];
+}
 
 static i32 prev_buttons, drawn;
 

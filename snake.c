@@ -132,6 +132,12 @@ WG_EXPORT(wg_option) i32 wg_option(i32 i, i32 v) {
 
 /* the run ends as the snake crashes, not when the crash has played out */
 WG_EXPORT(wg_over) i32 wg_over(void) { return S.phase >= DYING; }
+/* the page's best on the board these picks play on, so the bar shows the same as its scores */
+WG_EXPORT(wg_best) i32 wg_best(i32 v) {
+  if (S.magic != MAGIC) wg_init(1);
+  if (v >= 0) *best() = v > S.score ? v : S.score;
+  return *best();
+}
 
 /* the way the head came into its square */
 static i32 came(void) {
