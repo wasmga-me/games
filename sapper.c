@@ -111,11 +111,12 @@ static void place_counts(void);
 static i32 rip[MAXR][MAXC], pop[MAXR][MAXC];
 static void ripple_from(i32 ox, i32 oy, i32 step);
 
-/* the first square opened and its neighbours never hold a mine */
-static void place_mines(i32 sx, i32 sy) {
+/* mines at random, never on the first square opened or its neighbours */
+static void scatter(i32 sx, i32 sy) {
   i32 total = S.cols * S.rows, spare = total - 9;
   i32 keep_ring = spare >= S.mines;
   i32 left = S.mines;
+  memset(S.mine, 0, sizeof S.mine);
   while (left) {
     i32 k = (i32)(xorshift(&S.rng) % (u32)total), x = k % S.cols, y = k / S.cols;
     if (S.mine[y][x]) continue;
@@ -124,6 +125,190 @@ static void place_mines(i32 sx, i32 sy) {
     if (keep_ring && dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) continue;
     S.mine[y][x] = 1;
     left--;
+  }
+}
+
+/* ---------- boards that never need a guess ---------- */
+
+/* What a player can prove from the first square on, with the rules people
+ * use: a number with all its mines found clears the rest, one with as many
+ * covered squares as mines left flags them all, two numbers near each other
+ * settle the squares only one of them touches, and the mine count settles
+ * the end. */
+enum { K_UNKNOWN, K_SAFE, K_MINE };
+static u8 kn[MAXR][MAXC];
+static i32 kn_safe, kn_mines;
+
+static void kn_open(i32 x, i32 y) {
+  static u16 stack[MAXR * MAXC];
+  if (kn[y][x] != K_UNKNOWN) return;
+  i32 sp = 0;
+  kn[y][x] = K_SAFE;
+  kn_safe++;
+  stack[sp++] = (u16)(y * MAXC + x);
+  while (sp) {
+    i32 k = stack[--sp], cx = k % MAXC, cy = k / MAXC;
+    if (S.adj[cy][cx]) continue;
+    for (i32 j = -1; j <= 1; j++)
+      for (i32 i = -1; i <= 1; i++) {
+        i32 nx = cx + i, ny = cy + j;
+        if (!on_board(nx, ny) || kn[ny][nx] != K_UNKNOWN) continue;
+        kn[ny][nx] = K_SAFE;
+        kn_safe++;
+        stack[sp++] = (u16)(ny * MAXC + nx);
+      }
+  }
+}
+
+static void kn_mine(i32 x, i32 y) {
+  if (kn[y][x] != K_UNKNOWN) return;
+  kn[y][x] = K_MINE;
+  kn_mines++;
+}
+
+/* an open number's covered neighbours, and how many of them are mines */
+static i32 kn_around(i32 x, i32 y, i32 *need, i32 *cells) {
+  i32 n = 0, m = 0;
+  for (i32 j = -1; j <= 1; j++)
+    for (i32 i = -1; i <= 1; i++) {
+      if (!on_board(x + i, y + j)) continue;
+      u8 k = kn[y + j][x + i];
+      if (k == K_MINE) m++;
+      else if (k == K_UNKNOWN) cells[n++] = (y + j) * MAXC + x + i;
+    }
+  *need = S.adj[y][x] - m;
+  return n;
+}
+
+static i32 near(i32 k, i32 x, i32 y) {
+  i32 dx = k % MAXC - x, dy = k / MAXC - y;
+  return dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1;
+}
+
+/* one number on its own */
+static i32 kn_single(void) {
+  i32 changed = 0, cells[8], need;
+  for (i32 y = 0; y < S.rows; y++)
+    for (i32 x = 0; x < S.cols; x++) {
+      if (kn[y][x] != K_SAFE || !S.adj[y][x]) continue;
+      i32 n = kn_around(x, y, &need, cells);
+      if (!n || (need && need != n)) continue;
+      for (i32 c = 0; c < n; c++)
+        if (need) kn_mine(cells[c] % MAXC, cells[c] / MAXC);
+        else kn_open(cells[c] % MAXC, cells[c] / MAXC);
+      changed = 1;
+    }
+  return changed;
+}
+
+/* two numbers sharing covered squares: the mines in the shared part are
+ * bounded by both, which can settle the parts only one of them touches */
+static i32 kn_pairs(void) {
+  i32 ca[8], cb[8], na, nb;
+  for (i32 y = 0; y < S.rows; y++)
+    for (i32 x = 0; x < S.cols; x++) {
+      if (kn[y][x] != K_SAFE || !S.adj[y][x]) continue;
+      i32 a = kn_around(x, y, &na, ca);
+      if (!a) continue;
+      for (i32 j = -2; j <= 2; j++)
+        for (i32 i = -2; i <= 2; i++) {
+          i32 bx = x + i, by = y + j;
+          if ((!i && !j) || !on_board(bx, by) || kn[by][bx] != K_SAFE || !S.adj[by][bx]) continue;
+          i32 b = kn_around(bx, by, &nb, cb), shared = 0;
+          if (!b) continue;
+          for (i32 c = 0; c < a; c++) shared += near(ca[c], bx, by);
+          if (!shared) continue;
+          i32 only_a = a - shared, only_b = b - shared;
+          i32 lo = na - only_a, hi = na < shared ? na : shared;
+          if (nb - only_b > lo) lo = nb - only_b;
+          if (nb < hi) hi = nb;
+          if (lo < 0) lo = 0;
+          i32 a_mines = only_a && na - hi == only_a, a_safe = only_a && na - lo == 0;
+          i32 b_mines = only_b && nb - hi == only_b, b_safe = only_b && nb - lo == 0;
+          if (!a_mines && !a_safe && !b_mines && !b_safe) continue;
+          for (i32 c = 0; c < a; c++) {
+            if (near(ca[c], bx, by)) continue;
+            if (a_mines) kn_mine(ca[c] % MAXC, ca[c] / MAXC);
+            else if (a_safe) kn_open(ca[c] % MAXC, ca[c] / MAXC);
+          }
+          for (i32 c = 0; c < b; c++) {
+            if (near(cb[c], x, y)) continue;
+            if (b_mines) kn_mine(cb[c] % MAXC, cb[c] / MAXC);
+            else if (b_safe) kn_open(cb[c] % MAXC, cb[c] / MAXC);
+          }
+          return 1;
+        }
+    }
+  return 0;
+}
+
+/* the mines left against the squares left */
+static i32 kn_count(void) {
+  i32 left = S.mines - kn_mines, covered = S.cols * S.rows - kn_safe - kn_mines;
+  if (!covered || (left && left != covered)) return 0;
+  for (i32 y = 0; y < S.rows; y++)
+    for (i32 x = 0; x < S.cols; x++)
+      if (left) kn_mine(x, y);
+      else kn_open(x, y);
+  return 1;
+}
+
+/* works on from what is known; 1 once every safe square is proven */
+static i32 kn_run(void) {
+  while (kn_single() || kn_pairs() || kn_count()) {}
+  return kn_safe == S.cols * S.rows - S.mines;
+}
+
+static void kn_start(i32 sx, i32 sy) {
+  memset(kn, 0, sizeof kn);
+  kn_safe = kn_mines = 0;
+  kn_open(sx, sy);
+}
+
+/* a covered square picked at random: next to an open one (frontier) holding
+ * a mine, or away from them all holding none; -1 if there is none */
+static i32 pick(i32 frontier) {
+  i32 n = 0, k = -1;
+  for (i32 y = 0; y < S.rows; y++)
+    for (i32 x = 0; x < S.cols; x++) {
+      if (kn[y][x] != K_UNKNOWN || S.mine[y][x] != frontier) continue;
+      i32 by_open = 0;
+      for (i32 j = -1; j <= 1 && !by_open; j++)
+        for (i32 i = -1; i <= 1; i++)
+          if (on_board(x + i, y + j) && kn[y + j][x + i] == K_SAFE) { by_open = 1; break; }
+      if (by_open != frontier) continue;
+      /* reservoir sampling keeps one at random */
+      if (xorshift(&S.rng) % (u32)++n == 0) k = y * MAXC + x;
+    }
+  return k;
+}
+
+/* Mines at random, then, wherever logic runs out, a mine on the edge of what
+ * is known moves somewhere still unseen, until the whole board follows from
+ * the first square; a fresh scatter if that ever gets nowhere. */
+static i32 settle(i32 sx, i32 sy) {
+  kn_start(sx, sy);
+  for (i32 moves = 0; moves < S.cols * S.rows; moves++) {
+    if (kn_run()) {
+      /* moved mines change numbers already used, so check from the start */
+      kn_start(sx, sy);
+      if (kn_run()) return 1;
+    }
+    i32 from = pick(1), to = pick(0);
+    if (from < 0 || to < 0) return 0;
+    S.mine[from / MAXC][from % MAXC] = 0;
+    S.mine[to / MAXC][to % MAXC] = 1;
+    place_counts();
+    kn_open(from % MAXC, from / MAXC);
+  }
+  return 0;
+}
+
+static void place_mines(i32 sx, i32 sy) {
+  for (i32 tries = 0; tries < 60; tries++) {
+    scatter(sx, sy);
+    place_counts();
+    if (settle(sx, sy)) break;
   }
   place_counts();
   S.placed = 1;
