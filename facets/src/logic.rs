@@ -42,6 +42,18 @@ pub const MODE_CLASSIC: i32 = 0;
 pub const MODE_TIMED: i32 = 1;
 pub const MODE_MOVES: i32 = 2;
 
+pub const DIFF_EASY: i32 = 0;
+pub const DIFF_NORMAL: i32 = 1;
+pub const DIFF_HARD: i32 = 2;
+/// per difficulty: how often (in 100ths) a new gem takes the colour of a
+/// gem next to it, which makes lines of four and more, and so special gems
+const KIN: [u32; 3] = [30, 18, 0];
+/// per difficulty: how often (in 100ths) new gems that would leave no swap
+/// are dealt again before they land, at level 1, and how much less each
+/// level after; it reaches 0, so a Classic run still ends
+const RESCUE: [i32; 3] = [100, 80, 0];
+const RESCUE_FADE: [i32; 3] = [4, 5, 0];
+
 /// why a run ended
 pub const END_NONE: i32 = 0;
 pub const END_STUCK: i32 = 1;
@@ -85,6 +97,9 @@ pub struct Board {
     pub best_chain: i32,
     pub specials: i32,
     pub biggest: i32,
+    pub diff: i32,
+    /// times the board was shuffled
+    pub shuffled: i32,
     /// gem colour (0 empty, 1..=7, PRISM) and kind of every square
     pub gem: [[u8; N]; N],
     pub kind: [[u8; N]; N],
@@ -128,7 +143,7 @@ impl Board {
         Board {
             rng: 0, mode: 0, phase: 0, t: 0, ax: 0, ay: 0, bx: 0, by: 0, score: 0, level: 1, progress: 0,
             time_left: 0, moves_left: 0, chain: 0, idle_ms: 0, end: 0, end_ms: 0, time_ms: 0, moves: 0,
-            shuffles: 0, cleared: 0, best_chain: 0, specials: 0, biggest: 0, gem: [[0; N]; N], kind: [[0; N]; N],
+            shuffles: 0, cleared: 0, best_chain: 0, specials: 0, biggest: 0, diff: 0, shuffled: 0, gem: [[0; N]; N], kind: [[0; N]; N],
             dying: [[0; N]; N], off: [[0; N]; N], vel: [[0; N]; N],
         }
     }
@@ -156,10 +171,11 @@ impl Board {
         1 + self.rand(COLOURS as u32) as u8
     }
 
-    pub fn start(&mut self, seed: u32, mode: i32) {
+    pub fn start(&mut self, seed: u32, mode: i32, diff: i32) {
         *self = Board::zeroed();
         self.rng = seed | 1;
         self.mode = mode;
+        self.diff = diff;
         self.level = 1;
         self.time_left = if mode == MODE_TIMED { TIMED_MS } else { 0 };
         self.moves_left = if mode == MODE_MOVES { MOVES } else { 0 };
@@ -429,6 +445,7 @@ impl Board {
                 }
                 self.shuffles -= 1;
             }
+            self.shuffled += 1;
             self.set(Phase::Shuffle);
             return EV_BLIP;
         }
@@ -656,6 +673,7 @@ impl Board {
 
     /// cleared squares empty; gems above drop, and new ones come from the top
     fn collapse(&mut self) {
+        let mut fresh = [[false; N]; N];
         for x in 0..N {
             let mut dst = N as i32 - 1;
             for y in (0..N).rev() {
@@ -672,16 +690,72 @@ impl Board {
                 }
                 dst -= 1;
             }
-            let fresh = dst + 1;
+            let count = dst + 1;
             for d in (0..=dst).rev() {
                 let d = d as usize;
-                self.gem[d][x] = self.colour();
+                self.gem[d][x] = self.new_colour(x, d);
                 self.kind[d][x] = NORMAL;
-                self.off[d][x] = -fresh * 1000 - 300;
+                self.off[d][x] = -count * 1000 - 300;
                 self.vel[d][x] = 0;
+                fresh[d][x] = true;
             }
             for y in 0..N {
                 self.dying[y][x] = 0;
+            }
+        }
+        self.rescue_fresh(&fresh);
+    }
+
+    /// how often new gems that leave no swap are dealt again, in 100ths
+    pub fn rescue(&self) -> i32 {
+        let d = self.diff.clamp(0, 2) as usize;
+        let fade = if self.mode == MODE_CLASSIC { RESCUE_FADE[d] * (self.level - 1) } else { 0 };
+        (RESCUE[d] - fade).max(0)
+    }
+
+    /// a colour for a new gem at a square: now and then that of a gem
+    /// beside or below it
+    fn new_colour(&mut self, x: usize, y: usize) -> u8 {
+        let kin = KIN[self.diff.clamp(0, 2) as usize];
+        if kin > 0 && self.rand(100) < kin {
+            let mut near = [0u8; 3];
+            let mut n = 0;
+            for (nx, ny) in [(x as i32 - 1, y as i32), (x as i32 + 1, y as i32), (x as i32, y as i32 + 1)] {
+                if inb(nx, ny) {
+                    let g = self.gem[ny as usize][nx as usize];
+                    if g >= 1 && g <= COLOURS {
+                        near[n] = g;
+                        n += 1;
+                    }
+                }
+            }
+            if n > 0 {
+                return near[self.rand(n as u32) as usize];
+            }
+        }
+        self.colour()
+    }
+
+    /// new gems still above the board that leave nothing to clear and no
+    /// swap are dealt again, now and then, so fewer boards need a shuffle
+    fn rescue_fresh(&mut self, fresh: &[[bool; N]; N]) {
+        if self.has_match() || self.find_move().is_some() {
+            return;
+        }
+        let chance = self.rescue();
+        if chance <= 0 || self.rand(100) as i32 >= chance {
+            return;
+        }
+        for _ in 0..12 {
+            for y in (0..N).rev() {
+                for x in 0..N {
+                    if fresh[y][x] {
+                        self.gem[y][x] = self.new_colour(x, y);
+                    }
+                }
+            }
+            if self.has_match() || self.find_move().is_some() {
+                return;
             }
         }
     }
@@ -728,7 +802,7 @@ impl Board {
 
     /// whether a loaded board is one the rules could have made
     pub fn valid(&self) -> bool {
-        if self.mode < 0 || self.mode > 2 || self.phase < 0 || self.phase > 6 || self.level < 1 || self.level > 100_000 {
+        if self.mode < 0 || self.mode > 2 || self.diff < 0 || self.diff > 2 || self.shuffled < 0 || self.phase < 0 || self.phase > 6 || self.level < 1 || self.level > 100_000 {
             return false;
         }
         if self.score < 0 || self.progress < 0 || self.time_left < 0 || self.time_left > TIMED_MS || self.moves_left < 0 || self.moves_left > MOVES || self.shuffles < 0 || self.shuffles > SHUFFLES {
@@ -780,7 +854,7 @@ mod tests {
     fn fresh_board_has_no_line_and_a_move() {
         for seed in 1..200 {
             let mut b = Board::zeroed();
-            b.start(seed, MODE_CLASSIC);
+            b.start(seed, MODE_CLASSIC, DIFF_NORMAL);
             assert!(!b.has_match());
             assert!(b.find_move().is_some());
             settle(&mut b);
@@ -791,7 +865,7 @@ mod tests {
     #[test]
     fn bad_swap_goes_back() {
         let mut b = Board::zeroed();
-        b.start(7, MODE_MOVES);
+        b.start(7, MODE_MOVES, DIFF_NORMAL);
         settle(&mut b);
         // find a swap that makes nothing
         'o: for y in 0..N {
@@ -815,10 +889,10 @@ mod tests {
         for mode in 0..3 {
             for seed in 1..20 {
                 let mut b = Board::zeroed();
-                b.start(seed * 77, mode);
+                b.start(seed * 77, mode, seed as i32 % 3);
                 settle(&mut b);
                 let mut turns = 0;
-                while !b.over() && turns < 3000 {
+                while !b.over() && turns < 20000 {
                     let (x, y, x2, y2) = b.find_move().expect("idle board without a move");
                     assert!(b.try_swap(x as i32, y as i32, x2 as i32, y2 as i32));
                     settle(&mut b);
@@ -841,7 +915,7 @@ mod tests {
     #[test]
     fn four_in_a_row_makes_a_bomb() {
         let mut b = Board::zeroed();
-        b.start(3, MODE_CLASSIC);
+        b.start(3, MODE_CLASSIC, DIFF_HARD);
         settle(&mut b);
         // a hand-made board: row 7 is 1 1 _ 1 1 with a 1 above the gap
         let pal = [2u8, 3, 4, 5, 6, 7];
@@ -866,19 +940,64 @@ mod tests {
         assert!(made);
     }
 
+    /// every swap that does something, for the bots
+    fn all_moves(b: &Board) -> Vec<(usize, usize, usize, usize)> {
+        let mut out = Vec::new();
+        let mut c = *b;
+        for y in 0..N {
+            for x in 0..N {
+                for (x2, y2) in [(x + 1, y), (x, y + 1)] {
+                    if x2 >= N || y2 >= N {
+                        continue;
+                    }
+                    c.swap_gems(x, y, x2, y2);
+                    if b.gem[y][x] == PRISM || b.gem[y2][x2] == PRISM || c.line_through(x, y) || c.line_through(x2, y2) {
+                        out.push((x, y, x2, y2));
+                    }
+                    c.swap_gems(x, y, x2, y2);
+                }
+            }
+        }
+        out
+    }
+
+    /// plays many runs per mode and difficulty with a bot that takes a
+    /// random swap that does something (the first one with FIRST=1); prints averages (cargo test --release lengths -- --nocapture)
     #[test]
     fn lengths() {
+        let first = std::env::var("FIRST").is_ok();
         for mode in 0..3 {
-            for seed in 1..8u32 {
-                let mut b = Board::zeroed();
-                b.start(seed * 31, mode);
-                settle(&mut b);
-                while !b.over() {
-                    let (x, y, x2, y2) = b.find_move().unwrap();
-                    b.try_swap(x as i32, y as i32, x2 as i32, y2 as i32);
+            for diff in 0..3 {
+                let runs = 40u32;
+                let (mut moves, mut specials, mut shuffled, mut level, mut score, mut min, mut max) = (0i64, 0i64, 0i64, 0i64, 0i64, i32::MAX, 0);
+                for seed in 1..=runs {
+                    let mut b = Board::zeroed();
+                    b.start(seed * 31, mode, diff);
                     settle(&mut b);
+                    let mut r = seed * 977 + 5;
+                    while !b.over() {
+                        let all = all_moves(&b);
+                        let (x, y, x2, y2) = if first { b.find_move().unwrap() } else { all[xorshift(&mut r) as usize % all.len()] };
+                        b.try_swap(x as i32, y as i32, x2 as i32, y2 as i32);
+                        settle(&mut b);
+                        if mode == MODE_TIMED {
+                            b.step(800, &mut NoSink);
+                            settle(&mut b);
+                        }
+                    }
+                    moves += b.moves as i64;
+                    specials += b.specials as i64;
+                    shuffled += b.shuffled as i64;
+                    level += b.level as i64;
+                    score += b.score as i64;
+                    min = min.min(b.moves);
+                    max = max.max(b.moves);
                 }
-                println!("mode {} moves {} score {} level {} chain {} specials {} cleared {} time {}", mode, b.moves, b.score, b.level, b.best_chain, b.specials, b.cleared, b.time_ms / 1000);
+                let n = runs as i64;
+                println!(
+                    "mode {} diff {}: moves {} ({}..{}) specials/100 swaps {:.1} shuffles/100 swaps {:.2} level {:.1} score {}",
+                    mode, diff, moves / n, min, max, specials as f64 * 100.0 / moves as f64, shuffled as f64 * 100.0 / moves as f64, level as f64 / n as f64, score / n
+                );
             }
         }
     }

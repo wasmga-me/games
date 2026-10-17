@@ -8,17 +8,18 @@ pub mod logic;
 use logic::*;
 use wg::{hex, mix, Game, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 1;
-/// options, in catalog `setup` order: mode, theme, hints
+const VERSION: u32 = 2;
+/// options, in catalog `setup` order: mode, difficulty, theme, hints
 const O_MODE: usize = 0;
-const O_THEME: usize = 1;
-const O_HINTS: usize = 2;
+const O_DIFF: usize = 1;
+const O_THEME: usize = 2;
+const O_HINTS: usize = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Save {
     version: u32,
-    opt: [i32; 3],
+    opt: [i32; 4],
     b: Board,
     /// the picked gem (-1 for none) and the keyboard cursor
     sel: [i32; 2],
@@ -525,13 +526,13 @@ fn group(n: i32) -> String {
 impl Game for Facets {
     type Save = Save;
     const PLAN: (f32, f32) = (480.0, 420.0);
-    const CHOICES: &'static [i32] = &[3, 3, 2];
+    const CHOICES: &'static [i32] = &[3, 3, 3, 2];
 
     fn new() -> Self {
         let mut b = Board::zeroed();
-        b.start(1, MODE_CLASSIC);
+        b.start(1, MODE_CLASSIC, DIFF_NORMAL);
         Facets {
-            s: Save { version: VERSION, opt: [0, 0, 0], b, sel: [-1, -1], cur: [3, 3], rep: KeyRepeat(0) },
+            s: Save { version: VERSION, opt: [0, DIFF_NORMAL, 0, 0], b, sel: [-1, -1], cur: [3, 3], rep: KeyRepeat(0) },
             fx: Fx::default(),
             gems: Vec::new(),
             gems_r: 0,
@@ -554,7 +555,7 @@ impl Game for Facets {
     }
     fn start(&mut self, seed: u32) {
         let opt = self.s.opt;
-        self.s.b.start(seed, opt[O_MODE]);
+        self.s.b.start(seed, opt[O_MODE], opt[O_DIFF]);
         self.s.sel = [-1, -1];
         self.s.cur = [3, 3];
         self.fx = Fx { seed, ..Fx::default() };
@@ -711,6 +712,7 @@ impl Game for Facets {
         s.version == VERSION
             && (0..3).contains(&s.opt[O_MODE])
             && s.b.mode == s.opt[O_MODE]
+            && s.b.diff == s.opt[O_DIFF]
             && s.b.valid()
             && (s.sel == [-1, -1] || inb(s.sel[0], s.sel[1]))
             && inb(s.cur[0], s.cur[1])
