@@ -365,7 +365,8 @@ static void trophy(float x, float y, float s, u32 c) {
 static void hud(void) {
   const Theme *t = TH;
   char buf[12];
-  float cy = L.bar / 2, s = L.bar * 0.42f, x = L.fx + s * 0.6f;
+  /* the page puts a pause button in the top left corner in full screen */
+  float cy = L.bar / 2, s = L.bar * 0.42f, x = maxf(L.fx, L.bar * 1.9f) + s * 0.6f;
   apple(x, cy + s * 0.08f, s * 0.48f, 1);
   text_l(itoa10(S.score, buf), x + s * 0.8f, cy, s * 1.05f, t->text, 1);
   float bx = x + s * 0.8f + text_width(buf, s * 1.05f) + s * 1.3f;
@@ -593,6 +594,39 @@ WG_EXPORT(wg_frame) i32 wg_frame(i32 buttons, i32 dt_ms) {
   }
   draw();
   return ev;
+}
+
+/* the first move starts the run, as a key does in wg_frame */
+static void start(void) {
+  if (S.phase != READY) return;
+  S.phase = PLAY;
+  S.acc_ms = 0;
+}
+
+static struct { i32 down, moved, touch; float x, y; } T;
+
+/* Touch and mouse: a swipe anywhere turns as soon as its way is clear, and
+ * the finger can keep going for the next turn without lifting. A tap on a
+ * touch screen starts the run. */
+WG_EXPORT(wg_mouse) void wg_mouse(i32 x, i32 y, i32 buttons) {
+  float fx = (float)x, fy = (float)y;
+  if (x < 0 || y < 0) { T.down = 0; return; }
+  if (!T.down) {
+    if (buttons & 7) { T.down = 1; T.moved = 0; T.touch = buttons & 8; T.x = fx; T.y = fy; }
+    return;
+  }
+  float dx = fx - T.x, dy = fy - T.y, far = maxf(minf((float)FW, (float)FH) * 0.04f, L.cs * 0.6f);
+  if (absf(dx) > far || absf(dy) > far) {
+    i32 d = absf(dx) > absf(dy) ? (dx > 0 ? 0 : 2) : (dy > 0 ? 1 : 3);
+    turn(d);
+    start();
+    T.moved = 1;
+    T.x = fx;
+    T.y = fy;
+  }
+  if (buttons & 7) return;
+  T.down = 0;
+  if (!T.moved && T.touch) start();
 }
 
 /* the catalog's stats: Length, Time, Turns, Squares */
