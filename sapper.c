@@ -6,6 +6,7 @@
 #define WGFB_LAYERS 2 /* the screen, and the empty board */
 #include "wg.h"
 #include "sdf_font.h"
+#include "sapper.glyphs.h"
 #include "wgfb.h"
 #include "wgview.h"
 
@@ -566,14 +567,14 @@ static void draw_board(void) {
 }
 
 static void draw_hud(void) {
-  char buf[24], num[12];
+  char buf[48], num[12];
   float mid = HUD / 2.0f;
   if (S.phase == WON) {
-    v_text(join(buf, "Cleared in ", tenths(S.time_ms / 100, num)), 10, mid, 17, T.accent, 1);
+    v_text(join(buf, tr("Cleared in ", "完成用时 ", "クリアタイム ", "완료 시간 ", "Completado en ", "Concluído em ", "Terminé en ", "Geschafft in ", "Пройдено за "), tenths(S.time_ms / 100, num)), 10, mid, 17, T.accent, 1);
     return;
   }
   if (S.phase == LOST) {
-    v_text("Boom", 10, mid, 17, T.boom, 1);
+    v_text(tr("Boom", "踩雷了", "ドカン", "펑", "Bum", "Bum", "Boum", "Bumm", "Бабах"), 10, mid, 17, T.boom, 1);
     return;
   }
   i32 left = S.mines - S.flags;

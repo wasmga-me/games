@@ -4,6 +4,7 @@
 //! prism. Rules in logic.rs; this file draws them and takes input.
 pub mod gem;
 pub mod logic;
+mod glyphs;
 
 use logic::*;
 use wg::{hex, mix, Game, Input, KeyRepeat, Pointer, Screen};
@@ -287,14 +288,14 @@ impl Facets {
         let score = group(b.score);
         // what the bar shows, and its label and number
         let (label, value, frac) = match b.mode {
-            MODE_TIMED => ("Time", wg::clock(b.time_left), b.time_left as f32 / TIMED_MS as f32),
-            MODE_MOVES => ("Moves", b.moves_left.to_string(), b.moves_left as f32 / MOVES as f32),
-            _ => ("Level", b.level.to_string(), b.progress as f32 / level_need(b.level) as f32),
+            MODE_TIMED => (wg::tr(&["Time", "时间", "タイム", "시간", "Tiempo", "Tempo", "Temps", "Zeit", "Время"]), wg::clock(b.time_left), b.time_left as f32 / TIMED_MS as f32),
+            MODE_MOVES => (wg::tr(&["Moves", "步数", "手数", "이동", "Movimientos", "Movimentos", "Coups", "Züge", "Ходы"]), b.moves_left.to_string(), b.moves_left as f32 / MOVES as f32),
+            _ => (wg::tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень"]), b.level.to_string(), b.progress as f32 / level_need(b.level) as f32),
         };
         let low = (b.mode == MODE_TIMED && b.time_left < 10_000) || (b.mode == MODE_MOVES && b.moves_left <= 3);
         let vc = if low { hex(0xff5a5a) } else { ink };
         if self.lay.tall {
-            s.text("Score", 26.0, 30.0, 12.0, dim, 1.0);
+            s.text(wg::tr(&["Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки"]), 26.0, 30.0, 12.0, dim, 1.0);
             let size = s.fit_size(&score, 28.0, 190.0);
             s.text(&score, 26.0, 55.0, size, ink, 1.0);
             s.text_r(label, 374.0, 30.0, 12.0, dim, 1.0);
@@ -306,7 +307,7 @@ impl Facets {
             s.rect(26.0, 70.0, 348.0 * frac.clamp(0.0, 1.0), 4.0, 2.0, accent, 1.0);
         } else {
             let cx = 433.0;
-            s.text_c("Score", cx, 50.0, 11.0, dim, 1.0);
+            s.text_c(wg::tr(&["Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки"]), cx, 50.0, 11.0, dim, 1.0);
             let size = s.fit_size(&score, 20.0, 64.0);
             s.text_c(&score, cx, 72.0, size, ink, 1.0);
             s.text_c(label, cx, 116.0, 11.0, dim, 1.0);
@@ -489,15 +490,15 @@ impl Facets {
         let b = &self.s.b;
         let text: Option<(String, f32)> = if b.over() && b.end_ms > 0 {
             let msg = match b.end {
-                END_STUCK => "No moves left",
-                END_TIME => "Time is up",
-                _ => "Out of moves",
+                END_STUCK => wg::tr(&["No moves left", "无路可走", "手詰まり", "이동할 수 없습니다", "Sin jugadas posibles", "Sem jogadas possíveis", "Aucun coup possible", "Kein Zug möglich", "Ходов нет"]),
+                END_TIME => wg::tr(&["Time is up", "时间到", "タイムアップ", "시간 종료", "Tiempo agotado", "Tempo esgotado", "Temps écoulé", "Zeit abgelaufen", "Время вышло"]),
+                _ => wg::tr(&["Out of moves", "步数用完", "手数切れ", "남은 이동이 없습니다", "Sin movimientos", "Sem movimentos", "Plus de coups", "Keine Züge mehr", "Ходы закончились"]),
             };
             Some((msg.to_string(), (b.end_ms as f32 / 250.0).min(1.0)))
         } else if self.banner > 0.0 {
-            Some((format!("Level {}", self.banner_level), self.banner.min(1.0)))
+            Some((wg::tr(&["Level {}", "第 {} 关", "レベル {}", "레벨 {}", "Nivel {}", "Nível {}", "Niveau {}", "Level {}", "Уровень {}"]).replace("{}", &self.banner_level.to_string()), self.banner.min(1.0)))
         } else if b.phase() == Phase::Shuffle {
-            Some(("Shuffle".to_string(), 1.0))
+            Some((wg::tr(&["Shuffle", "洗牌", "シャッフル", "셔플", "Mezclando", "Embaralhando", "Mélange", "Mischen", "Перемешивание"]).to_string(), 1.0))
         } else {
             None
         };
@@ -529,6 +530,7 @@ impl Game for Facets {
     const CHOICES: &'static [i32] = &[3, 3, 3, 2];
 
     fn new() -> Self {
+        wg::add_glyphs(&glyphs::GLYPHS);
         let mut b = Board::zeroed();
         b.start(1, MODE_CLASSIC, DIFF_NORMAL);
         Facets {

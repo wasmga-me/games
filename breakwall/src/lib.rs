@@ -7,6 +7,7 @@ pub mod draw;
 pub mod game;
 pub mod levels;
 pub mod math;
+mod glyphs;
 
 use game::*;
 use wg::{Game, Input, Pointer, Screen};
@@ -23,6 +24,7 @@ impl Game for Breakwall {
     const CHOICES: &'static [i32] = &CHOICES;
 
     fn new() -> Self {
+        wg::add_glyphs(&glyphs::GLYPHS);
         let mut s = State::zero();
         s.start(1);
         let mut a = draw::Anim::new();

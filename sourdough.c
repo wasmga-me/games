@@ -7,6 +7,7 @@
 #define WGFB_LAYERS 2 /* the screen, and the empty table */
 #include "wg.h"
 #include "sdf_font.h"
+#include "sourdough.glyphs.h"
 #include "wgfb.h"
 #include "wgview.h"
 
@@ -547,25 +548,25 @@ static void draw_table(void) {
 static i32 undo_hot(void) { return !S.keyboard && inside(S.mx, S.my, UNDO_X, 2, BTN_W, 19) && S.undo_n; }
 
 static void draw_bar(void) {
-  char buf[24], num[12];
+  char buf[48], num[12];
   float mid = (BAR - 2) / 2.0f + 0.5f;
-  v_text(join(buf, "Score ", itoa10(TB.points, num)), 8, mid, 12, T.text, 1);
+  v_text(join(buf, tr("Score ", "得分 ", "スコア ", "점수 ", "Puntos ", "Pontos ", "Score ", "Punkte ", "Очки "), itoa10(TB.points, num)), 8, mid, 12, T.text, 1);
   v_text(clock_text(S.time_ms / 1000, buf), 120, mid, 12, T.text, 1);
-  v_text(join(buf, "Moves ", itoa10(S.moves, num)), 190, mid, 12, T.dim, 1);
+  v_text(join(buf, tr("Moves ", "步数 ", "手数 ", "이동 ", "Movimientos ", "Movimentos ", "Coups ", "Züge ", "Ходы "), itoa10(S.moves, num)), 190, mid, 12, T.dim, 1);
   i32 hot = undo_hot();
   float a = S.undo_n ? 1 : 0.4f;
   v_box(UNDO_X, 2, BTN_W, 19, 6, hot ? T.accent : T.panel, a);
-  v_text_c("Undo", UNDO_X + BTN_W / 2.0f, 2 + 9.5f, 12, hot ? T.panel : T.text, a);
+  v_text_c(tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена"), UNDO_X + BTN_W / 2.0f, 2 + 9.5f, 12, hot ? T.panel : T.text, a);
 }
 
 static void draw_won(void) {
-  char buf[24], num[12];
+  char buf[48], num[12];
   float pw = 240, ph = 100, px = (PW - pw) / 2, py = 160;
   v_shadow(px, py + 4, pw, ph, 14, 12, RGB(0, 0, 0), 0.4f);
   v_box(px, py, pw, ph, 14, T.panel, 0.96f);
-  v_text_c("Solved", PW / 2.0f, py + 28, 26, T.accent, 1);
-  v_text_c(join(buf, "Time bonus ", itoa10(S.bonus, num)), PW / 2.0f, py + 56, 12, T.dim, 1);
-  v_text_c(join(buf, "Score ", itoa10(S.score, num)), PW / 2.0f, py + 78, 17, T.text, 1);
+  v_text_c(tr("Solved", "完成", "完成", "완성", "Resuelto", "Resolvido", "Résolu", "Gelöst", "Решено"), PW / 2.0f, py + 28, 26, T.accent, 1);
+  v_text_c(join(buf, tr("Time bonus ", "时间奖励 ", "タイムボーナス ", "시간 보너스 ", "Bonus de tiempo ", "Bônus de tempo ", "Bonus de temps ", "Zeitbonus ", "Бонус за время "), itoa10(S.bonus, num)), PW / 2.0f, py + 56, 12, T.dim, 1);
+  v_text_c(join(buf, tr("Score ", "得分 ", "スコア ", "점수 ", "Puntos ", "Pontos ", "Score ", "Punkte ", "Очки "), itoa10(S.score, num)), PW / 2.0f, py + 78, 17, T.text, 1);
 }
 
 static void draw(void) {
