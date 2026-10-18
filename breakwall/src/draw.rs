@@ -68,7 +68,19 @@ pub static THEMES: [Theme; 4] = [
 ];
 
 pub const BOOST_LETTER: [&str; NBOOST] = ["W", "N", "M", "S", "L", "C", "F", "+", "B", "R"];
-pub const BOOST_NAME: [&str; NBOOST] = ["Wide", "Narrow", "Multi", "Slow", "Laser", "Catch", "Fire", "Life", "Barrier", "Rush"];
+/// Each boost's name, in wg::LANGS order.
+const BOOST_NAME: [[&str; 9]; NBOOST] = [
+    ["Wide", "加宽", "ワイド", "넓게", "Ancha", "Larga", "Large", "Breit", "Широкая"],
+    ["Narrow", "变窄", "ナロー", "좁게", "Estrecha", "Estreita", "Étroite", "Schmal", "Узкая"],
+    ["Multi", "多球", "マルチ", "멀티볼", "Multibola", "Multibola", "Multi", "Multi", "Мульти"],
+    ["Slow", "减速", "スロー", "감속", "Lenta", "Lenta", "Lente", "Langsam", "Медленно"],
+    ["Laser", "激光", "レーザー", "레이저", "Láser", "Laser", "Laser", "Laser", "Лазер"],
+    ["Catch", "接球", "キャッチ", "캐치", "Atrapar", "Pegar", "Colle", "Fangen", "Захват"],
+    ["Fire", "火球", "ファイア", "불덩이", "Fuego", "Fogo", "Feu", "Feuer", "Огонь"],
+    ["Life", "生命", "ライフ", "생명", "Vida", "Vida", "Vie", "Leben", "Жизнь"],
+    ["Barrier", "屏障", "バリア", "방벽", "Barrera", "Barreira", "Barrière", "Barriere", "Барьер"],
+    ["Rush", "加速", "ラッシュ", "가속", "Rápida", "Rápida", "Rapide", "Schnell", "Быстро"],
+];
 const BOOST_COLOUR: [u32; NBOOST] = [
     rgb(60, 190, 110), rgb(120, 110, 130), rgb(70, 140, 255), rgb(240, 180, 40), rgb(240, 70, 70),
     rgb(160, 90, 230), rgb(255, 120, 30), rgb(240, 80, 150), rgb(40, 190, 200), rgb(110, 90, 100),
@@ -375,14 +387,21 @@ fn paddle(g: &mut Screen, t: &Theme, s: &State, a: &Anim, x: f32, w: f32) {
     }
 }
 
+/// The words around a level's number: "Level 3", "第 3 关".
+fn level_words() -> (&'static str, &'static str) {
+    (wg::tr(&["Level ", "第 ", "レベル ", "레벨 ", "Nivel ", "Nível ", "Niveau ", "Level ", "Уровень "]), wg::tr(&["", " 关", "", "", "", "", "", "", ""]))
+}
+
 fn hud(g: &mut Screen, t: &Theme, s: &State) {
     let cy = 19.0;
     g.text(&s.score.to_string(), FIELD_L - 4.0, cy, 17.0, t.text, 1.0);
     let n = (s.level + 1).to_string();
-    let lw = g.text_width("Level ", 13.0);
-    let x = PW / 2.0 - (lw + g.text_width(&n, 13.0)) / 2.0;
-    g.text("Level ", x, cy, 13.0, t.dim, 1.0);
-    g.text(&n, x + lw, cy, 13.0, t.text, 1.0);
+    let (pre, post) = level_words();
+    let lw = g.text_width(pre, 13.0);
+    let x = PW / 2.0 - (lw + g.text_width(&n, 13.0) + g.text_width(post, 13.0)) / 2.0;
+    g.text(pre, x, cy, 13.0, t.dim, 1.0);
+    let x = g.text(&n, x + lw, cy, 13.0, t.text, 1.0);
+    g.text(post, x, cy, 13.0, t.dim, 1.0);
     // lives, as hearts, right-aligned
     for i in 0..s.lives.clamp(0, 9) {
         heart(g, FIELD_R - 2.0 - i as f32 * 15.0, cy - 1.0, 5.2, rgb(255, 84, 112));
@@ -485,21 +504,25 @@ pub fn draw(g: &mut Screen, s: &State, a: &mut Anim) {
     if a.caught < 900.0 {
         let k = a.caught / 900.0;
         let x = clampf(a.caught_x, FIELD_L + 30.0, FIELD_R - 30.0);
-        g.text_c(BOOST_NAME[a.caught_kind as usize], x, PADDLE_Y - 22.0 - 18.0 * k, 12.0, t.text, 1.0 - k * k);
+        let kind = a.caught_kind as usize;
+        g.text_c(wg::tr(&BOOST_NAME[kind]), x, PADDLE_Y - 22.0 - 18.0 * k, 12.0, t.text, 1.0 - k * k);
     }
     // the level's number as it starts, and a word when it's cleared
     let mid = BRICK_Y0 + 12.0 * CELL_H + 28.0;
     if s.phase == PLAY && a.banner < 1600.0 {
         let al = clampf((1600.0 - a.banner) / 400.0, 0.0, 1.0) * clampf(a.banner / 150.0, 0.0, 1.0);
         let n = (s.level + 1).to_string();
-        let w1 = g.text_width("Level ", 30.0);
-        let x = PW / 2.0 - (w1 + g.text_width(&n, 30.0)) / 2.0;
-        g.text("Level ", x, mid, 30.0, t.text, al);
-        g.text(&n, x + w1, mid, 30.0, t.text, al);
+        let (pre, post) = level_words();
+        let w1 = g.text_width(pre, 30.0);
+        let x = PW / 2.0 - (w1 + g.text_width(&n, 30.0) + g.text_width(post, 30.0)) / 2.0;
+        g.text(pre, x, mid, 30.0, t.text, al);
+        let x = g.text(&n, x + w1, mid, 30.0, t.text, al);
+        g.text(post, x, mid, 30.0, t.text, al);
     }
     if s.phase == CLEAR {
         let al = clampf(s.phase_ms as f32 / 200.0, 0.0, 1.0);
-        let word = if s.won != 0 { "Every level cleared" } else { "Cleared" };
-        g.text_c(word, PW / 2.0, mid, 30.0, t.text, al);
+        let word = if s.won != 0 { wg::tr(&["Every level cleared", "全部过关", "全レベルクリア", "모든 레벨 클리어", "Todos los niveles superados", "Todos os níveis concluídos", "Tous les niveaux terminés", "Alle Level geschafft", "Все уровни пройдены"]) } else { wg::tr(&["Cleared", "过关", "クリア", "클리어", "Nivel superado", "Nível concluído", "Niveau terminé", "Geschafft", "Уровень пройден"]) };
+        let size = g.fit_size(word, 30.0, FIELD_R - FIELD_L - 24.0);
+        g.text_c(word, PW / 2.0, mid, size, t.text, al);
     }
 }

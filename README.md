@@ -7,6 +7,7 @@ setup, pause and game over screens around it.
 | Game | Play | Source | Written in |
 | --- | --- | --- | --- |
 | 2048 | [wasmga.me/games/2048](https://wasmga.me/games/2048) | [2048.c](2048.c) | C |
+| Branchwise | [wasmga.me/games/branchwise](https://wasmga.me/games/branchwise) | [branchwise/](branchwise) | Rust |
 | Breakwall | [wasmga.me/games/breakwall](https://wasmga.me/games/breakwall) | [breakwall/](breakwall) | Rust |
 | Facets | [wasmga.me/games/facets](https://wasmga.me/games/facets) | [facets/](facets) | Rust |
 | Flipside | [wasmga.me/games/flipside](https://wasmga.me/games/flipside) | [flipside.c](flipside.c) | C |
@@ -38,4 +39,6 @@ modules land in `out/<id>/<id>.wasm`.
 ## Licence
 
 MIT, see [LICENSE](LICENSE). The text in every game is drawn from glyphs of
-[Inter](https://rsms.me/inter/), under the SIL Open Font License 1.1.
+[Inter](https://rsms.me/inter/), and its Chinese from glyphs of
+[Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) (the
+`.zh.h` and `zh_glyphs` files), both under the SIL Open Font License 1.1.
