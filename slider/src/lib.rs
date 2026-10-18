@@ -4,6 +4,7 @@
 //! column to slide it (and any tiles between) into the gap, swipe, or use
 //! the arrows. The page shows the setup, pause and game over screens.
 mod puzzle;
+mod glyphs;
 
 use puzzle::{Board, MAXN};
 use wg::{hex, mix, Game, Input, KeyRepeat, Pointer, Rng, Screen, Sprite};
@@ -224,6 +225,7 @@ impl Game for Slider {
     const CHOICES: &'static [i32] = &[SIZES.len() as i32, 2, THEMES as i32];
 
     fn new() -> Self {
+        wg::add_glyphs(&glyphs::GLYPHS);
         let opt = [1, 0, 0];
         let n = n_of(&opt);
         Slider {
@@ -500,9 +502,9 @@ impl Slider {
             }
         }
         let rows: [(&str, String); 3] = [
-            ("Moves", format!("{}", self.s.moves)),
-            ("Time", wg::clock(self.s.time_ms)),
-            ("In place", format!("{} / {}", self.s.board.in_place(), n * n - 1)),
+            (wg::tr(&["Moves", "步数", "手数", "이동", "Movimientos", "Movimentos", "Coups", "Züge", "Ходы"]), format!("{}", self.s.moves)),
+            (wg::tr(&["Time", "时间", "タイム", "시간", "Tiempo", "Tempo", "Temps", "Zeit", "Время"]), wg::clock(self.s.time_ms)),
+            (wg::tr(&["In place", "已归位", "正しい位置", "제자리", "En su sitio", "No lugar", "En place", "Richtig", "На месте"]), format!("{} / {}", self.s.board.in_place(), n * n - 1)),
         ];
         for (i, (label, value)) in rows.iter().enumerate() {
             let (x, y) = if tall {
@@ -510,7 +512,8 @@ impl Slider {
             } else {
                 (px + pw / 2.0, py + 104.0 + i as f32 * 58.0)
             };
-            s.text_c(label, x, y - 11.0, 11.0, hex(th.dim), 1.0);
+            let size = s.fit_size(label, 11.0, if tall { (pw - 76.0) / 3.0 - 10.0 } else { pw - 12.0 });
+            s.text_c(label, x, y - 11.0, size, hex(th.dim), 1.0);
             let size = s.fit_size(value, 20.0, if tall { 58.0 } else { pw - 12.0 });
             s.text_c(value, x, y + 9.0, size, hex(th.text), 1.0);
         }

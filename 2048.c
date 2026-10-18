@@ -8,6 +8,7 @@
 #define WG_OWN_FB
 #include "wg.h"
 #include "sdf_font.h"
+#include "2048.glyphs.h"
 
 #define MAXN 6
 #define UNDO_MAX 64
@@ -129,21 +130,32 @@ static void rrect(float x, float y, float w, float h, float r, u32 c, float alph
 
 /* ---------- text ---------- */
 
-static i32 glyph(char ch) {
-  for (i32 i = 0; SDF_CHARS[i]; i++)
-    if (SDF_CHARS[i] == ch) return i;
-  return 0;
+/* Inter, and the Chinese glyphs this game draws (2048.glyphs.h) */
+static const struct sdf_glyph *glyph(u32 ch, const unsigned char **data) {
+  *data = SDF_DATA;
+  if (ch < 128) {
+    for (i32 i = 0; SDF_CHARS[i]; i++)
+      if ((u32)SDF_CHARS[i] == ch) return &SDF_GLYPHS[i];
+  } else {
+    for (i32 i = 0; i < SDF_EXTRA_N; i++)
+      if (SDF_EXTRA_CHARS[i] == ch) {
+        *data = SDF_EXTRA_DATA;
+        return &SDF_EXTRA_GLYPHS[i];
+      }
+  }
+  return &SDF_GLYPHS[0];
 }
 
 static float text_width(const char *s, float size) {
   float k = size / SDF_EM, w = 0;
-  for (; *s; s++) w += SDF_GLYPHS[glyph(*s)].adv * k;
+  const unsigned char *d;
+  for (u32 ch; (ch = utf8_next(&s));) w += glyph(ch, &d)->adv * k;
   return w;
 }
 
-static void draw_glyph(i32 g, float gx, float gy, float k, u32 c, float alpha) {
-  const unsigned char *f = SDF_DATA + SDF_GLYPHS[g].off;
-  i32 w = SDF_GLYPHS[g].w, h = SDF_GLYPHS[g].h;
+static void draw_glyph(const struct sdf_glyph *g, const unsigned char *data, float gx, float gy, float k, u32 c, float alpha) {
+  const unsigned char *f = data + g->off;
+  i32 w = g->w, h = g->h;
   if (!w) return;
   i32 x0 = floori(gx), y0 = floori(gy), x1 = ceili(gx + w * k), y1 = ceili(gy + h * k);
   if (x0 < 0) x0 = 0;
@@ -192,10 +204,11 @@ static void draw_glyph(i32 g, float gx, float gy, float k, u32 c, float alpha) {
 /* draws s centred on (cx, cy); size is the em size in pixels */
 static void text_c(const char *s, float cx, float cy, float size, u32 c, float alpha) {
   float k = size / SDF_EM, x = cx - text_width(s, size) / 2, top = cy - DIGIT_MID * k;
-  for (; *s; s++) {
-    i32 g = glyph(*s);
-    draw_glyph(g, x + SDF_GLYPHS[g].left * k, top + SDF_GLYPHS[g].top * k, k, c, alpha);
-    x += SDF_GLYPHS[g].adv * k;
+  const unsigned char *d;
+  for (u32 ch; (ch = utf8_next(&s));) {
+    const struct sdf_glyph *g = glyph(ch, &d);
+    draw_glyph(g, d, x + g->left * k, top + g->top * k, k, c, alpha);
+    x += g->adv * k;
   }
 }
 
@@ -612,8 +625,8 @@ static void draw(void) {
   }
   for (i32 i = 0, e = FW * FH; i < e; i++) fb[i] = under[i];
 
-  score_box(L.px, L.py, "Score", S.score);
-  score_box(L.px + L.pdx, L.py + L.pdy, "Best", S.best[n]);
+  score_box(L.px, L.py, tr("Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки"), S.score);
+  score_box(L.px + L.pdx, L.py + L.pdy, tr("Best", "最高分", "ベスト", "최고", "Récord", "Recorde", "Record", "Rekord", "Рекорд"), S.best[n]);
   if (A.gain && A.gain_t < 700) {
     /* the points of the last move float up beside the score */
     char buf[16];
@@ -626,7 +639,7 @@ static void draw(void) {
   }
   if (S.undo_on) {
     float a = S.hist_n ? 1 : 0.45f;
-    button(L.ux, L.uy, L.uw, L.uh, "Undo", S.hist_n ? ACT_UNDO : ACT_NONE, 0, a);
+    button(L.ux, L.uy, L.uw, L.uh, tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена"), S.hist_n ? ACT_UNDO : ACT_NONE, 0, a);
   }
 
 
@@ -664,8 +677,8 @@ static void draw(void) {
       float cx = L.bx + L.bs / 2, cy = L.by + L.bs * 0.4f, bh = L.bs * 0.12f, bw = L.bs * 0.34f;
       float by = L.by + L.bs * 0.56f;
       text_fit("2048!", cx, cy, L.bs * 0.2f, L.bs * 0.9f, title_colour(), a);
-      button(cx - bw - L.bs * 0.02f, by, bw, bh, "Keep going", ACT_KEEP, S.sel == 0, a);
-      button(cx + L.bs * 0.02f, by, bw, bh, "Finish", ACT_FINISH, S.sel == 1, a);
+      button(cx - bw - L.bs * 0.02f, by, bw, bh, tr("Keep going", "继续", "続ける", "계속하기", "Seguir", "Continuar", "Continuer", "Weiter", "Дальше"), ACT_KEEP, S.sel == 0, a);
+      button(cx + L.bs * 0.02f, by, bw, bh, tr("Finish", "结束", "終了", "끝내기", "Terminar", "Encerrar", "Terminer", "Beenden", "Закончить"), ACT_FINISH, S.sel == 1, a);
     }
   }
 }

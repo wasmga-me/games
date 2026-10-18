@@ -4,6 +4,7 @@
 //! alone (logic.rs), so each has one solution and needs no guessing. Notes,
 //! undo and hints that say why; the page draws setup, pause and game over.
 mod logic;
+mod glyphs;
 
 use logic::{Why, ALL, PEERS, UNITS, UNIT_OF};
 use wg::{ease_out, hex, mix, Game, Input, KeyRepeat, Pointer, Rng, Screen};
@@ -209,8 +210,49 @@ const THEME: [Theme; THEMES] = [
     },
 ];
 
-const LEVEL_NAMES: [&str; 4] = ["Easy", "Medium", "Hard", "Expert"];
-const UNIT_NAMES: [&str; 3] = ["row", "column", "box"];
+/// Each level's name, in wg::LANGS order.
+const LEVEL_NAMES: [[&str; 9]; 4] = [
+    ["Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий"],
+    ["Medium", "中等", "ふつう", "보통", "Medio", "Médio", "Moyen", "Mittel", "Средний"],
+    ["Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный"],
+    ["Expert", "专家", "エキスパート", "전문가", "Experto", "Especialista", "Expert", "Experte", "Эксперт"],
+];
+/// "Last place for {} in this row", then column and box, in wg::LANGS order.
+const LAST_PLACE: [[&str; 9]; 3] = [
+    [
+        "Last place for {} in this row",
+        "这一行里 {} 只剩这个位置",
+        "この行で {} が入るのはここだけ",
+        "이 행에서 {}의 마지막 자리",
+        "Último lugar del {} en esta fila",
+        "Último lugar do {} nesta linha",
+        "Dernière case du {} sur cette ligne",
+        "Letztes Feld für die {} in dieser Zeile",
+        "Последнее место для {} в этой строке",
+    ],
+    [
+        "Last place for {} in this column",
+        "这一列里 {} 只剩这个位置",
+        "この列で {} が入るのはここだけ",
+        "이 열에서 {}의 마지막 자리",
+        "Último lugar del {} en esta columna",
+        "Último lugar do {} nesta coluna",
+        "Dernière case du {} dans cette colonne",
+        "Letztes Feld für die {} in dieser Spalte",
+        "Последнее место для {} в этом столбце",
+    ],
+    [
+        "Last place for {} in this box",
+        "这一宫里 {} 只剩这个位置",
+        "このブロックで {} が入るのはここだけ",
+        "이 박스에서 {}의 마지막 자리",
+        "Último lugar del {} en este bloque",
+        "Último lugar do {} neste bloco",
+        "Dernière case du {} dans ce bloc",
+        "Letztes Feld für die {} in diesem Block",
+        "Последнее место для {} в этом блоке",
+    ],
+];
 
 const POP_MS: i32 = 220;
 const FLASH_MS: i32 = 650;
@@ -558,9 +600,35 @@ impl Sudoku {
         let msg = match self.msg {
             _ if self.msg_ms <= 0 => None,
             Msg::None => None,
-            Msg::Only(d) => Some(format!("Only {} fits here", d)),
-            Msg::Last(d, u) => Some(format!("Last place for {} in this {}", d, UNIT_NAMES[u as usize])),
-            Msg::Wrong(d) => Some(format!("That {} was wrong", d)),
+            Msg::Only(d) => Some(
+                wg::tr(&[
+                    "Only {} fits here",
+                    "这里只能填 {}",
+                    "ここに入るのは {} だけ",
+                    "여기에는 {}만 들어갑니다",
+                    "Aquí solo cabe el {}",
+                    "Aqui só cabe o {}",
+                    "Seul le {} va ici",
+                    "Hier passt nur die {}",
+                    "Сюда подходит только {}",
+                ])
+                .replace("{}", &d.to_string()),
+            ),
+            Msg::Last(d, u) => Some(wg::tr(&LAST_PLACE[u as usize]).replace("{}", &d.to_string())),
+            Msg::Wrong(d) => Some(
+                wg::tr(&[
+                    "That {} was wrong",
+                    "这个 {} 填错了",
+                    "この {} は間違いです",
+                    "잘못 넣은 {}입니다",
+                    "Ese {} estaba mal",
+                    "Esse {} estava errado",
+                    "Ce {} était faux",
+                    "Die {} war falsch",
+                    "Цифра {} была неверной",
+                ])
+                .replace("{}", &d.to_string()),
+            ),
         };
         if self.lay.tall {
             let cy = h.y + h.h / 2.0;
@@ -570,7 +638,7 @@ impl Sudoku {
                     s.text(m, h.x + 2.0, cy, size, t.ink, 1.0);
                 }
                 None => {
-                    s.text(LEVEL_NAMES[self.s.level as usize & 3], h.x + 2.0, cy, 15.0, t.dim, 1.0);
+                    s.text(self.level_name(), h.x + 2.0, cy, 15.0, t.dim, 1.0);
                 }
             }
             s.text_r(&clock, h.x + h.w - 2.0, cy, 17.0, t.text, 1.0);
@@ -581,9 +649,14 @@ impl Sudoku {
                     let size = s.fit_size(m, 11.0, h.w);
                     s.text_c(m, h.x + h.w / 2.0, h.y + 36.0, size, t.ink, 1.0);
                 }
-                None => s.text_c(LEVEL_NAMES[self.s.level as usize & 3], h.x + h.w / 2.0, h.y + 36.0, 11.0, t.dim, 1.0),
+                None => s.text_c(self.level_name(), h.x + h.w / 2.0, h.y + 36.0, 11.0, t.dim, 1.0),
             }
         }
+    }
+
+    fn level_name(&self) -> &'static str {
+        let i = self.s.level as usize & 3;
+        wg::tr(&LEVEL_NAMES[i])
     }
 
     fn draw_buttons(&self, s: &mut Screen) {
@@ -615,21 +688,21 @@ impl Sudoku {
                 }
             } else {
                 let name = match i as u8 {
-                    T_UNDO => "Undo",
-                    T_ERASE => "Erase",
-                    T_NOTES => "Notes",
-                    _ => "Hint",
+                    T_UNDO => wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена"]),
+                    T_ERASE => wg::tr(&["Erase", "擦除", "消す", "지우기", "Borrar", "Apagar", "Effacer", "Löschen", "Стереть"]),
+                    T_NOTES => wg::tr(&["Notes", "笔记", "メモ", "메모", "Notas", "Notas", "Notes", "Notizen", "Заметки"]),
+                    _ => wg::tr(&["Hint", "提示", "ヒント", "힌트", "Pista", "Dica", "Indice", "Tipp", "Подсказка"]),
                 };
                 let icon = (r.h * 0.5).min(r.w * 0.5).min(20.0);
                 if self.lay.wide_tools {
-                    let label = (r.h * 0.34).min(14.0);
+                    let label = s.fit_size(name, (r.h * 0.34).min(14.0), r.w - icon - 14.0);
                     let tw = s.text_width(name, label);
                     let x0 = r.x + (r.w - (icon + 6.0 + tw)) / 2.0;
                     draw_icon(s, i as u8, x0 + icon / 2.0, r.y + r.h / 2.0, icon, ink);
                     s.text(name, x0 + icon + 6.0, r.y + r.h / 2.0, label, ink, 1.0);
                 } else if r.h >= 36.0 {
                     draw_icon(s, i as u8, r.x + r.w / 2.0, r.y + r.h * 0.38, icon * 0.9, ink);
-                    s.text_c(name, r.x + r.w / 2.0, r.y + r.h * 0.78, (r.h * 0.2).min(10.0), ink, 0.85);
+                    s.text_c(name, r.x + r.w / 2.0, r.y + r.h * 0.78, s.fit_size(name, (r.h * 0.2).min(10.0), r.w - 4.0), ink, 0.85);
                 } else {
                     draw_icon(s, i as u8, r.x + r.w / 2.0, r.y + r.h / 2.0, icon, ink);
                 }
@@ -692,6 +765,7 @@ impl Game for Sudoku {
     const CHOICES: &'static [i32] = &[4, THEMES as i32];
 
     fn new() -> Self {
+        wg::add_glyphs(&glyphs::GLYPHS);
         // SAFETY: Save is Plain, so all zeroes is a valid value
         let mut s: Save = unsafe { core::mem::zeroed() };
         s.version = VERSION;

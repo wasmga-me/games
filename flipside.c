@@ -7,6 +7,7 @@
 #define WGFB_LAYERS 2 /* the screen, and the empty board */
 #include "wg.h"
 #include "sdf_font.h"
+#include "flipside.glyphs.h"
 #include "wgfb.h"
 #include "wgview.h"
 
@@ -30,7 +31,13 @@ enum { O_FOE, O_SIDE, O_SIZE, O_THEME, O_HINTS, NOPT };
 static const i32 CHOICES[NOPT] = {4, 2, 3, THEMES, 2};
 enum { EASY, NORMAL, HARD, FRIEND };
 
-static const char *FOES[4] = {"Easy", "Normal", "Hard", "A friend"};
+/* the computer's name per level, in each language (en zh ja ko es pt fr de ru) */
+static const char *const FOES[4][9] = {
+  {"Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий"},
+  {"Normal", "普通", "ふつう", "보통", "Normal", "Normal", "Normal", "Normal", "Обычный"},
+  {"Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный"},
+  {"A friend", "朋友", "友だち", "친구", "Un amigo", "Um amigo", "Un ami", "Ein Freund", "Друг"},
+};
 static const i32 SIZES[3] = {6, 8, 10};
 static const i32 MULT[3] = {1, 2, 4};
 
@@ -434,9 +441,15 @@ static void draw_board(void) {
   }
 }
 
+/* a size at which s fits in w */
+static float fit(const char *s, float size, float w) {
+  float t = v_text_w(s, size);
+  return t > w ? size * w / t : size;
+}
+
 static const char *name_of(i32 who) {
-  if (S.opt[O_FOE] == FRIEND) return who == DARK ? "Dark" : "Light";
-  return human(who) ? "You" : FOES[S.opt[O_FOE]];
+  if (S.opt[O_FOE] == FRIEND) return who == DARK ? tr("Dark", "黑棋", "黒", "흑", "Negras", "Pretas", "Noirs", "Schwarz", "Чёрные") : tr("Light", "白棋", "白", "백", "Blancas", "Brancas", "Blancs", "Weiß", "Белые");
+  return human(who) ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : wg_tr(FOES[S.opt[O_FOE]], 9);
 }
 
 static i32 thinking(void) { return S.phase == PLAY && !human(S.turn) && !S.pass_ms; }
@@ -456,13 +469,14 @@ static void draw_side(void) {
     }
     draw_disc(SIDE_X + 15, y + 15, 12, who, 1, 1);
     v_text(itoa10(who == DARK ? d : l, buf), SIDE_X + 35, y + 15, 22, T.text, 1);
-    v_text(name_of(who), SIDE_X + 4, y + 41, 12, active || won ? T.accent : T.dim, 1);
+    const char *name = name_of(who);
+    v_text(name, SIDE_X + 4, y + 41, fit(name, 12, SIDE_W - 4), active || won ? T.accent : T.dim, 1);
   }
   float mid = SIDE_X + SIDE_W / 2.0f;
   if (S.phase == OVER) {
-    const char *msg = S.result == 3 ? "Draw" : S.opt[O_FOE] == FRIEND ? (S.result == DARK ? "Dark wins" : "Light wins")
-                    : human(S.result) ? "You win" : "You lose";
-    v_text_c(msg, mid, 160, 15, T.accent, 1);
+    const char *msg = S.result == 3 ? tr("Draw", "平局", "引き分け", "무승부", "Empate", "Empate", "Égalité", "Remis", "Ничья") : S.opt[O_FOE] == FRIEND ? (S.result == DARK ? tr("Dark wins", "黑棋胜", "黒の勝ち", "흑 승리", "Ganan negras", "Pretas vencem", "Les noirs gagnent", "Schwarz gewinnt", "Победа чёрных") : tr("Light wins", "白棋胜", "白の勝ち", "백 승리", "Ganan blancas", "Brancas vencem", "Les blancs gagnent", "Weiß gewinnt", "Победа белых"))
+                    : human(S.result) ? tr("You win", "你赢了", "あなたの勝ち", "이겼습니다", "Ganaste", "Você venceu", "Vous gagnez", "Gewonnen", "Победа") : tr("You lose", "你输了", "あなたの負け", "졌습니다", "Perdiste", "Você perdeu", "Vous perdez", "Verloren", "Поражение");
+    v_text_c(msg, mid, 160, fit(msg, 15, SIDE_W + 8), T.accent, 1);
     return;
   }
   if (thinking()) {
@@ -475,7 +489,8 @@ static void draw_side(void) {
   i32 hot = !S.keyboard && side_button_at(S.mx, S.my) == 0 && S.hist_n;
   float a = S.hist_n ? 1 : 0.4f;
   v_box(SIDE_X, BTN1_Y, SIDE_W, BTN_H, 9, hot ? T.accent : T.panel, a);
-  v_text_c("Undo", mid, BTN1_Y + BTN_H / 2.0f, 14, hot ? T.bg : T.text, a);
+  const char *undo = tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена");
+  v_text_c(undo, mid, BTN1_Y + BTN_H / 2.0f, fit(undo, 14, SIDE_W - 8), hot ? T.bg : T.text, a);
 }
 
 static void draw(void) {
@@ -483,8 +498,8 @@ static void draw(void) {
   draw_board();
   draw_side();
   if (S.pass_ms) {
-    const char *who = S.opt[O_FOE] == FRIEND ? (S.pass_who == DARK ? "No move for dark" : "No move for light")
-                    : human(S.pass_who) ? "No move for you" : "No move for the computer";
+    const char *who = S.opt[O_FOE] == FRIEND ? (S.pass_who == DARK ? tr("No move for dark", "黑棋无处可下", "黒は打つ手がありません", "흑은 둘 곳이 없습니다", "Las negras no pueden mover", "As pretas não têm jogada", "Les noirs ne peuvent pas jouer", "Schwarz kann nicht ziehen", "Чёрным некуда ходить") : tr("No move for light", "白棋无处可下", "白は打つ手がありません", "백은 둘 곳이 없습니다", "Las blancas no pueden mover", "As brancas não têm jogada", "Les blancs ne peuvent pas jouer", "Weiß kann nicht ziehen", "Белым некуда ходить"))
+                    : human(S.pass_who) ? tr("No move for you", "你无处可下", "打つ手がありません", "둘 곳이 없습니다", "No puedes mover", "Você não tem jogada", "Vous ne pouvez pas jouer", "Du kannst nicht ziehen", "Вам некуда ходить") : tr("No move for the computer", "电脑无处可下", "コンピューターは打つ手がありません", "컴퓨터는 둘 곳이 없습니다", "La computadora no puede mover", "O computador não tem jogada", "L'ordinateur ne peut pas jouer", "Der Computer kann nicht ziehen", "Компьютеру некуда ходить");
     float w = v_text_w(who, 13) + 28, size = (float)(S.cell * S.n);
     float x = S.bx + (size - w) / 2, y = S.by + size / 2 - 15;
     v_shadow(x, y + 3, w, 30, 10, 8, RGB(0, 0, 0), 0.4f);
