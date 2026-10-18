@@ -38,6 +38,6 @@ modules land in `out/<id>/<id>.wasm`.
 ## Licence
 
 MIT, see [LICENSE](LICENSE). The text in every game is drawn from glyphs of
-[Inter](https://rsms.me/inter/), and its Chinese from glyphs of
-[Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) (the
-`.zh.h` and `zh_glyphs` files), both under the SIL Open Font License 1.1.
+[Inter](https://rsms.me/inter/), and its other scripts from glyphs of Noto
+Sans JP, KR and SC (the `.glyphs.h` and `glyphs.rs` files), all under the SIL
+Open Font License 1.1.
