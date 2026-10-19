@@ -1,0 +1,12 @@
+[package]
+name = "zmachine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "A Z-machine version 3 interpreter on the wg engine, for Infocom's story files"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+wg = { git = "https://github.com/wasmga-me/wasmgame-wg" }

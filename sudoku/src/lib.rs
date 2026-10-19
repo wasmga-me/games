@@ -688,7 +688,7 @@ impl Sudoku {
                 }
             } else {
                 let name = match i as u8 {
-                    T_UNDO => wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена"]),
+                    T_UNDO => wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена"]),
                     T_ERASE => wg::tr(&["Erase", "擦除", "消す", "지우기", "Borrar", "Apagar", "Effacer", "Löschen", "Стереть"]),
                     T_NOTES => wg::tr(&["Notes", "笔记", "メモ", "메모", "Notas", "Notas", "Notes", "Notizen", "Заметки"]),
                     _ => wg::tr(&["Hint", "提示", "ヒント", "힌트", "Pista", "Dica", "Indice", "Tipp", "Подсказка"]),

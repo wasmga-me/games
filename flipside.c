@@ -31,15 +31,13 @@ enum { O_FOE, O_SIDE, O_SIZE, O_THEME, O_HINTS, NOPT };
 static const i32 CHOICES[NOPT] = {4, 2, 3, THEMES, 2};
 enum { EASY, NORMAL, HARD, FRIEND };
 
-static const char *FOES[4] = {"Easy", "Normal", "Hard", "A friend"};
-static const char *FOES_ZH[4] = {"简单", "普通", "困难", "朋友"};
-static const char *FOES_JA[4] = {"かんたん", "ふつう", "むずかしい", "友だち"};
-static const char *FOES_KO[4] = {"쉬움", "보통", "어려움", "친구"};
-static const char *FOES_ES[4] = {"Fácil", "Normal", "Difícil", "Un amigo"};
-static const char *FOES_PT[4] = {"Fácil", "Normal", "Difícil", "Um amigo"};
-static const char *FOES_FR[4] = {"Facile", "Normal", "Difficile", "Un ami"};
-static const char *FOES_DE[4] = {"Leicht", "Normal", "Schwer", "Ein Freund"};
-static const char *FOES_RU[4] = {"Лёгкий", "Обычный", "Сложный", "Друг"};
+/* the computer's name per level, in each language (en zh ja ko es pt fr de ru) */
+static const char *const FOES[4][9] = {
+  {"Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий"},
+  {"Normal", "普通", "ふつう", "보통", "Normal", "Normal", "Normal", "Normal", "Обычный"},
+  {"Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный"},
+  {"A friend", "朋友", "友だち", "친구", "Un amigo", "Um amigo", "Un ami", "Ein Freund", "Друг"},
+};
 static const i32 SIZES[3] = {6, 8, 10};
 static const i32 MULT[3] = {1, 2, 4};
 
@@ -451,8 +449,7 @@ static float fit(const char *s, float size, float w) {
 
 static const char *name_of(i32 who) {
   if (S.opt[O_FOE] == FRIEND) return who == DARK ? tr("Dark", "黑棋", "黒", "흑", "Negras", "Pretas", "Noirs", "Schwarz", "Чёрные") : tr("Light", "白棋", "白", "백", "Blancas", "Brancas", "Blancs", "Weiß", "Белые");
-  return human(who) ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : tr(FOES[S.opt[O_FOE]], FOES_ZH[S.opt[O_FOE]], FOES_JA[S.opt[O_FOE]], FOES_KO[S.opt[O_FOE]], FOES_ES[S.opt[O_FOE]],
-                                       FOES_PT[S.opt[O_FOE]], FOES_FR[S.opt[O_FOE]], FOES_DE[S.opt[O_FOE]], FOES_RU[S.opt[O_FOE]]);
+  return human(who) ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : wg_tr(FOES[S.opt[O_FOE]], 9);
 }
 
 static i32 thinking(void) { return S.phase == PLAY && !human(S.turn) && !S.pass_ms; }
@@ -472,7 +469,8 @@ static void draw_side(void) {
     }
     draw_disc(SIDE_X + 15, y + 15, 12, who, 1, 1);
     v_text(itoa10(who == DARK ? d : l, buf), SIDE_X + 35, y + 15, 22, T.text, 1);
-    v_text(name_of(who), SIDE_X + 4, y + 41, fit(name_of(who), 12, SIDE_W - 4), active || won ? T.accent : T.dim, 1);
+    const char *name = name_of(who);
+    v_text(name, SIDE_X + 4, y + 41, fit(name, 12, SIDE_W - 4), active || won ? T.accent : T.dim, 1);
   }
   float mid = SIDE_X + SIDE_W / 2.0f;
   if (S.phase == OVER) {
@@ -491,7 +489,7 @@ static void draw_side(void) {
   i32 hot = !S.keyboard && side_button_at(S.mx, S.my) == 0 && S.hist_n;
   float a = S.hist_n ? 1 : 0.4f;
   v_box(SIDE_X, BTN1_Y, SIDE_W, BTN_H, 9, hot ? T.accent : T.panel, a);
-  const char *undo = tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена");
+  const char *undo = tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена");
   v_text_c(undo, mid, BTN1_Y + BTN_H / 2.0f, fit(undo, 14, SIDE_W - 8), hot ? T.bg : T.text, a);
 }
 
