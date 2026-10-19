@@ -13,8 +13,12 @@ wg = { git = "https://github.com/wasmga-me/wasmgame-wg" }
 
 [profile.release]
 panic = "abort"
-opt-level = 3
+opt-level = "s"
 lto = true
 codegen-units = 1
 # keep the name section, so a crash names its functions
 strip = "debuginfo"
+
+[features]
+# exports bw_check, which plays every lesson's solution (tools/check.mjs)
+selfcheck = []

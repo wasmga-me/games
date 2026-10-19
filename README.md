@@ -20,6 +20,12 @@ setup, pause and game over screens around it.
 | Tilestack | [wasmga.me/games/tilestack](https://wasmga.me/games/tilestack) | [tilestack/](tilestack) | Rust |
 | Zork I, II and III (Infocom's) | [wasmga.me/games/zork1](https://wasmga.me/games/zork1) | [zmachine/](zmachine), [zork1/](zork1), [zork2/](zork2), [zork3/](zork3) | Rust |
 
+`branchwise/` links [libgit2](https://github.com/libgit2/libgit2) 1.9.1 (GPL-2.0
+with a linking exception), built for WebAssembly by `branchwise/libgit2/build.sh`,
+which fetches wasi-sdk and libgit2 and applies `wasi.diff`; each lesson runs real
+git on an in-memory file system. `node branchwise/tools/check.mjs` plays every
+lesson's solution.
+
 `wgdemo/` is the smallest whole game on the Rust engine, to copy for a new one.
 
 `zmachine/` is a Z-machine (version 3) on the Rust engine, which plays
