@@ -389,26 +389,33 @@ fn paddle(g: &mut Screen, t: &Theme, s: &State, a: &Anim, x: f32, w: f32) {
 
 /// The words around a level's number: "Level 3", "第 3 关".
 fn level_words() -> (&'static str, &'static str) {
-    (wg::tr(&["Level ", "第 ", "レベル ", "레벨 ", "Nivel ", "Nível ", "Niveau ", "Level ", "Уровень "]), wg::tr(&["", " 关", "", "", "", "", "", "", ""]))
+    (wg::tr(&["Level ", "第 ", "レベル ", "레벨 ", "Nivel ", "Nível ", "Niveau ", "Level ", "Уровень "]), wg::tr(&["", " 关"]))
 }
 
 fn hud(g: &mut Screen, t: &Theme, s: &State) {
     let cy = 19.0;
     g.text(&s.score.to_string(), FIELD_L - 4.0, cy, 17.0, t.text, 1.0);
+    // the level sits in the middle, clear of the boost pills on its left and
+    // the hearts on its right, smaller if a long word doesn't fit between them
+    let timers = [(s.laser_ms, LASER_MS, B_LASER), (s.catch_ms, CATCH_MS, B_CATCH), (s.fire_ms, FIRE_MS, B_FIRE), (s.slow_ms, SLOW_MS, B_SLOW)];
+    let pills = timers.iter().filter(|t| t.0 > 0).count() as f32;
+    let left = FIELD_L + 92.0 + pills * 40.0 + if s.shield != 0 { 13.0 } else { 0.0 } + 6.0;
+    let right = FIELD_R - 2.0 - s.lives.clamp(0, 9) as f32 * 15.0 - 4.0;
     let n = (s.level + 1).to_string();
     let (pre, post) = level_words();
-    let lw = g.text_width(pre, 13.0);
-    let x = PW / 2.0 - (lw + g.text_width(&n, 13.0) + g.text_width(post, 13.0)) / 2.0;
-    g.text(pre, x, cy, 13.0, t.dim, 1.0);
-    let x = g.text(&n, x + lw, cy, 13.0, t.text, 1.0);
-    g.text(post, x, cy, 13.0, t.dim, 1.0);
+    let width = |g: &Screen, size: f32| g.text_width(pre, size) + g.text_width(&n, size) + g.text_width(post, size);
+    let size = (13.0 * (right - left) / width(g, 13.0)).clamp(9.0, 13.0);
+    let w = width(g, size);
+    let x = (PW / 2.0 - w / 2.0).max(left).min(right - w);
+    let x = g.text(pre, x, cy, size, t.dim, 1.0);
+    let x = g.text(&n, x, cy, size, t.text, 1.0);
+    g.text(post, x, cy, size, t.dim, 1.0);
     // lives, as hearts, right-aligned
     for i in 0..s.lives.clamp(0, 9) {
         heart(g, FIELD_R - 2.0 - i as f32 * 15.0, cy - 1.0, 5.2, rgb(255, 84, 112));
     }
     // timed boosts: a pill each, its bar running down
     let mut x = FIELD_L + 92.0;
-    let timers = [(s.laser_ms, LASER_MS, B_LASER), (s.catch_ms, CATCH_MS, B_CATCH), (s.fire_ms, FIRE_MS, B_FIRE), (s.slow_ms, SLOW_MS, B_SLOW)];
     for (ms, full, kind) in timers {
         if ms <= 0 {
             continue;

@@ -556,7 +556,10 @@ static void draw_bar(void) {
   i32 hot = undo_hot();
   float a = S.undo_n ? 1 : 0.4f;
   v_box(UNDO_X, 2, BTN_W, 19, 6, hot ? T.accent : T.panel, a);
-  v_text_c(tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена"), UNDO_X + BTN_W / 2.0f, 2 + 9.5f, 12, hot ? T.panel : T.text, a);
+  const char *undo = tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена");
+  float size = 12, w = v_text_w(undo, size);
+  if (w > BTN_W - 8) size *= (BTN_W - 8) / w;
+  v_text_c(undo, UNDO_X + BTN_W / 2.0f, 2 + 9.5f, size, hot ? T.panel : T.text, a);
 }
 
 static void draw_won(void) {

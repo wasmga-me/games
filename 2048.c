@@ -639,7 +639,7 @@ static void draw(void) {
   }
   if (S.undo_on) {
     float a = S.hist_n ? 1 : 0.45f;
-    button(L.ux, L.uy, L.uw, L.uh, tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена"), S.hist_n ? ACT_UNDO : ACT_NONE, 0, a);
+    button(L.ux, L.uy, L.uw, L.uh, tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена"), S.hist_n ? ACT_UNDO : ACT_NONE, 0, a);
   }
 
 
