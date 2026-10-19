@@ -1,0 +1,86 @@
+diff --git a/src/libgit2/streams/socket.c b/src/libgit2/streams/socket.c
+index a463312..f8f2340 100644
+--- a/src/libgit2/streams/socket.c
++++ b/src/libgit2/streams/socket.c
+@@ -12,6 +12,25 @@
+ #include "runtime.h"
+ #include "stream.h"
+ 
++#if defined(__wasi__)
++/* No sockets in WASI: only local transports work. */
++int git_socket_stream__connect_timeout = 0;
++int git_socket_stream__timeout = 0;
++
++int git_socket_stream_new(git_stream **out, const char *host, const char *port)
++{
++	GIT_UNUSED(out);
++	GIT_UNUSED(host);
++	GIT_UNUSED(port);
++	git_error_set(GIT_ERROR_NET, "there is no socket stream available");
++	return -1;
++}
++
++int git_socket_stream_global_init(void)
++{
++	return 0;
++}
++#else
+ #ifndef _WIN32
+ # include <sys/types.h>
+ # include <sys/socket.h>
+@@ -426,3 +445,4 @@ int git_socket_stream_global_init(void)
+ }
+ 
+  #endif
++#endif
+diff --git a/src/libgit2/sysdir.c b/src/libgit2/sysdir.c
+index 7838a67..81c17c8 100644
+--- a/src/libgit2/sysdir.c
++++ b/src/libgit2/sysdir.c
+@@ -17,7 +17,9 @@
+ # include "win32/utf-conv.h"
+ #else
+ # include <unistd.h>
+-# include <pwd.h>
++# ifndef __wasi__
++#  include <pwd.h>
++# endif
+ #endif
+ 
+ #ifdef GIT_WIN32
+@@ -283,7 +285,17 @@ static int git_sysdir_guess_system_dirs(git_str *out)
+ #endif
+ }
+ 
+-#ifndef GIT_WIN32
++#if defined(__wasi__)
++/* WASI has no users: HOME is all there is. */
++# define getuid() 0
++# define geteuid() 0
++static int get_passwd_home(git_str *out, uid_t uid)
++{
++	GIT_UNUSED(out);
++	GIT_UNUSED(uid);
++	return GIT_ENOTFOUND;
++}
++#elif !defined(GIT_WIN32)
+ static int get_passwd_home(git_str *out, uid_t uid)
+ {
+ 	struct passwd pwd, *pwdptr;
+diff --git a/src/util/unix/process.c b/src/util/unix/process.c
+index a1a2cf1..b404796 100644
+--- a/src/util/unix/process.c
++++ b/src/util/unix/process.c
+@@ -5,6 +5,7 @@
+  * a Linking Exception. For full terms see the included COPYING file.
+  */
+ 
++#ifndef __wasi__
+ #include <stdio.h>
+ #include <sys/wait.h>
+ #include <signal.h>
+@@ -627,3 +628,4 @@ void git_process_free(git_process *process)
+ 	git_strlist_free_with_null(process->env);
+ 	git__free(process);
+ }
++#endif

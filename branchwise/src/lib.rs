@@ -2,18 +2,25 @@
 //! a goal; the commit graph redraws as each command runs, and a level is
 //! cleared when the repository matches the goal. Lessons run from the first
 //! commit to rebasing stacks, remotes, bisect and worktrees.
+#[cfg(feature = "selfcheck")]
+mod check;
+mod cmd;
+mod flow;
 mod git;
 mod glyphs;
 mod graph;
 mod levels;
+mod lg;
 mod play;
+mod shell;
+mod vfs;
 
 use git::{Snap, World, CMD, ERR, FAIL, GOOD, HINT};
 use graph::{Area, Motion, Spot, Theme, THEMES};
 use levels::LEVELS;
 use wg::{hex, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const N: usize = LEVELS.len();
 /// the commands run on this level, one per line
 const CMDS: usize = 4096;
@@ -382,7 +389,7 @@ impl Branchwise {
                 return;
             }
             "help" | "?" => {
-                self.say(OUT_HELP, "Type git commands, such as git status or git log. Also: hint, solution, undo, clear.");
+                self.say(OUT_HELP, "Type git commands, such as git status or git log; git help lists them all. Also: hint, solution, undo, clear.");
                 return;
             }
             _ => {}
@@ -965,7 +972,7 @@ impl Branchwise {
         width: f32,
         small: bool,
     ) -> f32 {
-        if !w.uses_files {
+        if w.files.is_empty() && w.stash.is_empty() {
             return y;
         }
         let fs = if small { 11.5 } else { 13.5 };
@@ -976,7 +983,9 @@ impl Branchwise {
         outline(s, x, y, width, h, 8.0, 1.0, hex(t.line), 1.0);
         let mut yy = y + 6.0 + lh / 2.0;
         for f in &w.files {
-            let (label, c) = if f.staged && f.modified {
+            let (label, c) = if f.conflict {
+                ("conflict", t.bad)
+            } else if f.staged && f.modified {
                 ("staged, edited", t.warn)
             } else if f.staged {
                 ("staged", t.good)
@@ -1549,17 +1558,13 @@ impl Branchwise {
             1.0,
         );
         let r = &self.world.repo;
-        let path = r
-            .wts
-            .get(r.cur)
-            .map(|w| w.path.clone())
-            .unwrap_or_else(|| git::REPO.to_string());
-        let head = match r.wts.get(r.cur).map(|w| &w.head) {
+let head = match r.wts.get(r.cur).map(|w| &w.head) {
+            _ if !self.world.in_repo => String::new(),
             Some(git::Head::Branch(b)) => format!(" ({b})"),
             Some(git::Head::Detached(c)) => format!(" ({}...)", r.commits[*c].id),
             None => String::new(),
         };
-        let prompt = format!("~/{path}{head} $ ");
+        let prompt = format!("{}{head} $ ", self.world.where_label());
         let ifs = fs + 1.0;
         let px = a.x + 14.0;
         let pw = s.text_width(&prompt, ifs);
@@ -1746,11 +1751,7 @@ impl Branchwise {
             182.0,
             true,
         );
-        let gtop = if self.goal.uses_files {
-            fy + 4.0
-        } else {
-            ga.y + 26.0
-        };
+        let gtop = (fy + 4.0).max(ga.y + 26.0);
         self.draw_world(
             s,
             t,
@@ -1884,15 +1885,12 @@ impl Branchwise {
             };
             let w = if goal { &self.goal } else { &self.world };
             let fy = Self::draw_files(s, t, w, gra.x + 4.0, gra.y + 36.0, 230.0, true);
-            let inner = if w.uses_files {
-                Area {
-                    x: inner.x,
-                    y: fy + 4.0,
-                    w: inner.w,
-                    h: inner.y + inner.h - fy - 4.0,
-                }
-            } else {
-                inner
+            let top = (fy + 4.0).max(inner.y);
+            let inner = Area {
+                x: inner.x,
+                y: top,
+                w: inner.w,
+                h: inner.y + inner.h - top,
             };
             self.draw_world(s, t, goal, &inner, true, false);
             let label = if goal {
