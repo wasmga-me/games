@@ -26,6 +26,12 @@ which fetches wasi-sdk and libgit2 and applies `wasi.diff`; each lesson runs rea
 git on an in-memory file system. `node branchwise/tools/check.mjs` plays every
 lesson's solution.
 
+`tilestack/art/riichi/` holds the tile pictures of FluffyStuff's
+[riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles)
+(public domain, CC0); the flowers, seasons and white dragon in
+`tilestack/art/extra/` are ours. `node tilestack/art/build.mjs` (needs sharp)
+renders them all into `tilestack/src/art.bin`, which the module embeds.
+
 `wgdemo/` is the smallest whole game on the Rust engine, to copy for a new one.
 
 `zmachine/` is a Z-machine (version 3) on the Rust engine, which plays

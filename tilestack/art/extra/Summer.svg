@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="400" viewBox="0 0 300 400">
+  <circle cx="150" cy="200" r="138" fill="#fffaf0" stroke="#000037" stroke-width="10"/>
+  <circle cx="150" cy="200" r="121" fill="none" stroke="#b93c3c" stroke-width="4"/>
+  <path d="M206.0 213.0 L246.0 200.0 L206.0 187.0 Z M193.5 236.7 L222.7 242.0 L203.5 219.3 Z M166.7 255.0 L198.0 283.1 L189.3 242.0 Z M140.0 256.0 L150.0 284.0 L160.0 256.0 Z M110.7 242.0 L102.0 283.1 L133.3 255.0 Z M96.5 219.3 L77.3 242.0 L106.5 236.7 Z M94.0 187.0 L54.0 200.0 L94.0 213.0 Z M106.5 163.3 L77.3 158.0 L96.5 180.7 Z M133.3 145.0 L102.0 116.9 L110.7 158.0 Z M160.0 144.0 L150.0 116.0 L140.0 144.0 Z M189.3 158.0 L198.0 116.9 L166.7 145.0 Z M203.5 180.7 L222.7 158.0 L193.5 163.3 Z" fill="#ff8a1e" stroke="#000037" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="150" cy="200" r="54" fill="#d71e1e" stroke="#000037" stroke-width="6"/>
+  <circle cx="150" cy="200" r="38" fill="none" stroke="#ff8a1e" stroke-width="6"/>
+</svg>

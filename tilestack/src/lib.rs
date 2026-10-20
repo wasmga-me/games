@@ -4,6 +4,7 @@
 //! that can slide out to the left or right. Every deal can be cleared
 //! (board.rs). Hints, undo and three shuffles; the page draws setup, pause
 //! and game over.
+mod art;
 mod board;
 mod faces;
 #[rustfmt::skip]

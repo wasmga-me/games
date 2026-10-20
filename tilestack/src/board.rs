@@ -14,8 +14,6 @@ pub const N: usize = 144;
 /// Faces: dots 1-9, bamboo 1-9, characters 1-9, the four winds, the three
 /// dragons, four flowers and four seasons.
 pub const FACES: u8 = 42;
-pub const WINDS: u8 = 27;
-pub const DRAGONS: u8 = 31;
 pub const FLOWERS: u8 = 34;
 pub const SEASONS: u8 = 38;
 

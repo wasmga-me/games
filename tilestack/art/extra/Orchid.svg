@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="400" viewBox="0 0 300 400">
+  <defs>
+    <g id="orchid">
+      <!-- three sepals and two petals, a lip below -->
+      <g fill="#142896" stroke="#000037" stroke-width="5" stroke-linejoin="round">
+        <path d="M0 0 C -14 -30, -10 -62, 0 -78 C 10 -62, 14 -30, 0 0 Z"/>
+        <path d="M0 0 C -14 -30, -10 -62, 0 -78 C 10 -62, 14 -30, 0 0 Z" transform="rotate(115)"/>
+        <path d="M0 0 C -14 -30, -10 -62, 0 -78 C 10 -62, 14 -30, 0 0 Z" transform="rotate(-115)"/>
+        <path d="M0 0 C -12 -18, -14 -42, -4 -52 C 6 -40, 8 -20, 0 0 Z" transform="rotate(-48)" fill="#3c55c8"/>
+        <path d="M0 0 C 12 -18, 14 -42, 4 -52 C -6 -40, -8 -20, 0 0 Z" transform="rotate(48)" fill="#3c55c8"/>
+      </g>
+      <path d="M-16 6 C -22 30, 22 30, 16 6 Z" fill="#d71e1e" stroke="#000037" stroke-width="5" stroke-linejoin="round"/>
+      <circle cx="-5" cy="10" r="3.5" fill="#fff"/><circle cx="5" cy="10" r="3.5" fill="#fff"/>
+      <circle r="7" fill="#fff" stroke="#000037" stroke-width="4"/>
+    </g>
+    <path id="leaf" d="M0 0 C 0 0, -6 -6, 0 0 Z"/>
+  </defs>
+  <!-- long arching leaves -->
+  <g fill="#004900" stroke="#000037" stroke-width="4" stroke-linejoin="round">
+    <path d="M154 390 C 120 300, 64 236, 14 222 C 80 236, 126 290, 132 390 Z"/>
+    <path d="M150 390 C 172 286, 236 222, 290 240 C 232 244, 190 300, 172 390 Z"/>
+    <path d="M150 390 C 128 326, 90 296, 30 300 C 96 296, 140 326, 128 390 Z"/>
+    <path d="M150 390 C 186 340, 226 326, 280 342 C 226 336, 192 356, 172 390 Z"/>
+  </g>
+  <!-- the flower stem -->
+  <path d="M150 386 C 150 300, 146 220, 180 130" fill="none" stroke="#000037" stroke-width="13" stroke-linecap="round"/>
+  <path d="M150 386 C 150 300, 146 220, 180 130" fill="none" stroke="#2f7d2f" stroke-width="5" stroke-linecap="round"/>
+  <path d="M148 262 C 120 232, 96 200, 84 168" fill="none" stroke="#000037" stroke-width="11" stroke-linecap="round"/>
+  <path d="M148 262 C 120 232, 96 200, 84 168" fill="none" stroke="#2f7d2f" stroke-width="4" stroke-linecap="round"/>
+  <use xlink:href="#orchid" transform="translate(184 124) scale(1.4) rotate(12)"/>
+  <use xlink:href="#orchid" transform="translate(82 160) scale(1.2) rotate(-18)"/>
+  <ellipse cx="222" cy="236" rx="15" ry="23" transform="rotate(30 222 236)" fill="#142896" stroke="#000037" stroke-width="5"/>
+</svg>
