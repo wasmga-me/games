@@ -80,6 +80,11 @@ static const Theme THEME[THEMES] = {
 };
 #define T (THEME[S.opt[O_THEME]])
 
+/* Online play (wg_net below): the side this screen plays, 0 when offline, and
+ * the cell of its last move for the page to send. Kept outside the state, so
+ * a save of an online game loads as a game between friends on one screen. */
+static i32 net_side, net_out = -1;
+
 static const i32 DX[8] = {1, 1, 0, -1, -1, -1, 0, 1}, DY[8] = {0, 1, 1, 1, 0, -1, -1, -1};
 
 /* ---------- rules ---------- */
@@ -252,7 +257,10 @@ static i32 choose_move(void) {
 
 /* ---------- game flow ---------- */
 
-static i32 human(i32 who) { return S.opt[O_FOE] == FRIEND || who == (S.opt[O_SIDE] ? LIGHT : DARK); }
+static i32 human(i32 who) {
+  if (net_side) return who == net_side;
+  return S.opt[O_FOE] == FRIEND || who == (S.opt[O_SIDE] ? LIGHT : DARK);
+}
 
 /* board size and where it sits, from the options */
 static void layout(void) {
@@ -290,6 +298,11 @@ static void finish(void) {
   S.phase = OVER;
   S.end_ms = END_MS;
   S.result = d > l ? DARK : l > d ? LIGHT : 3;
+  if (net_side) {
+    if (S.result == net_side) S.pend_ev |= WG_EV_WIN;
+    else if (S.result != 3) S.pend_ev |= WG_EV_LOSE;
+    return;
+  }
   if (S.opt[O_FOE] == FRIEND) {
     S.pend_ev |= WG_EV_WIN;
     return;
@@ -331,6 +344,7 @@ static void push_history(void) {
 
 static void play_at(i32 x, i32 y) {
   if (!legal(S.b, S.n, x, y, S.turn)) return;
+  if (net_side && S.turn == net_side) net_out = y * MAXN + x;
   push_history();
   S.hist[S.hist_n - 1].turned = (u8)legal(S.b, S.n, x, y, S.turn);
   apply(S.b, S.n, x, y, S.turn, S.anim);
@@ -343,7 +357,7 @@ static void play_at(i32 x, i32 y) {
 
 /* goes back to the last position where a person was to move */
 static void undo(void) {
-  if (!S.hist_n || S.phase != PLAY) return;
+  if (!S.hist_n || S.phase != PLAY || net_side) return;
   do {
     Snap *h = &S.hist[--S.hist_n];
     memcpy(S.b, h->b, sizeof S.b);
@@ -448,6 +462,7 @@ static float fit(const char *s, float size, float w) {
 }
 
 static const char *name_of(i32 who) {
+  if (net_side) return who == net_side ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : tr("Friend", "朋友", "友だち", "친구", "Amigo", "Amigo", "Ami", "Freund", "Друг");
   if (S.opt[O_FOE] == FRIEND) return who == DARK ? tr("Dark", "黑棋", "黒", "흑", "Negras", "Pretas", "Noirs", "Schwarz", "Чёрные") : tr("Light", "白棋", "白", "백", "Blancas", "Brancas", "Blancs", "Weiß", "Белые");
   return human(who) ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : wg_tr(FOES[S.opt[O_FOE]], 9);
 }
@@ -474,7 +489,7 @@ static void draw_side(void) {
   }
   float mid = SIDE_X + SIDE_W / 2.0f;
   if (S.phase == OVER) {
-    const char *msg = S.result == 3 ? tr("Draw", "平局", "引き分け", "무승부", "Empate", "Empate", "Égalité", "Remis", "Ничья") : S.opt[O_FOE] == FRIEND ? (S.result == DARK ? tr("Dark wins", "黑棋胜", "黒の勝ち", "흑 승리", "Ganan negras", "Pretas vencem", "Les noirs gagnent", "Schwarz gewinnt", "Победа чёрных") : tr("Light wins", "白棋胜", "白の勝ち", "백 승리", "Ganan blancas", "Brancas vencem", "Les blancs gagnent", "Weiß gewinnt", "Победа белых"))
+    const char *msg = S.result == 3 ? tr("Draw", "平局", "引き分け", "무승부", "Empate", "Empate", "Égalité", "Remis", "Ничья") : S.opt[O_FOE] == FRIEND && !net_side ? (S.result == DARK ? tr("Dark wins", "黑棋胜", "黒の勝ち", "흑 승리", "Ganan negras", "Pretas vencem", "Les noirs gagnent", "Schwarz gewinnt", "Победа чёрных") : tr("Light wins", "白棋胜", "白の勝ち", "백 승리", "Ganan blancas", "Brancas vencem", "Les blancs gagnent", "Weiß gewinnt", "Победа белых"))
                     : human(S.result) ? tr("You win", "你赢了", "あなたの勝ち", "이겼습니다", "Ganaste", "Você venceu", "Vous gagnez", "Gewonnen", "Победа") : tr("You lose", "你输了", "あなたの負け", "졌습니다", "Perdiste", "Você perdeu", "Vous perdez", "Verloren", "Поражение");
     v_text_c(msg, mid, 160, fit(msg, 15, SIDE_W + 8), T.accent, 1);
     return;
@@ -486,6 +501,7 @@ static void draw_side(void) {
       v_disc(mid - 12 + i * 12, 160 - maxf(ph, 0) * 4, 3, T.dim, 0.55f + 0.45f * maxf(ph, 0));
     }
   }
+  if (net_side) return; /* no undo against a friend elsewhere */
   i32 hot = !S.keyboard && side_button_at(S.mx, S.my) == 0 && S.hist_n;
   float a = S.hist_n ? 1 : 0.4f;
   v_box(SIDE_X, BTN1_Y, SIDE_W, BTN_H, 9, hot ? T.accent : T.panel, a);
@@ -498,7 +514,8 @@ static void draw(void) {
   draw_board();
   draw_side();
   if (S.pass_ms) {
-    const char *who = S.opt[O_FOE] == FRIEND ? (S.pass_who == DARK ? tr("No move for dark", "黑棋无处可下", "黒は打つ手がありません", "흑은 둘 곳이 없습니다", "Las negras no pueden mover", "As pretas não têm jogada", "Les noirs ne peuvent pas jouer", "Schwarz kann nicht ziehen", "Чёрным некуда ходить") : tr("No move for light", "白棋无处可下", "白は打つ手がありません", "백은 둘 곳이 없습니다", "Las blancas no pueden mover", "As brancas não têm jogada", "Les blancs ne peuvent pas jouer", "Weiß kann nicht ziehen", "Белым некуда ходить"))
+    const char *who = net_side && !human(S.pass_who) ? tr("No move for your friend", "朋友无处可下", "友だちは打つ手がありません", "친구는 둘 곳이 없습니다", "Tu amigo no puede mover", "Seu amigo não tem jogada", "Votre ami ne peut pas jouer", "Dein Freund kann nicht ziehen", "Другу некуда ходить")
+                    : !net_side && S.opt[O_FOE] == FRIEND ? (S.pass_who == DARK ? tr("No move for dark", "黑棋无处可下", "黒は打つ手がありません", "흑은 둘 곳이 없습니다", "Las negras no pueden mover", "As pretas não têm jogada", "Les noirs ne peuvent pas jouer", "Schwarz kann nicht ziehen", "Чёрным некуда ходить") : tr("No move for light", "白棋无处可下", "白は打つ手がありません", "백은 둘 곳이 없습니다", "Las blancas no pueden mover", "As brancas não têm jogada", "Les blancs ne peuvent pas jouer", "Weiß kann nicht ziehen", "Белым некуда ходить"))
                     : human(S.pass_who) ? tr("No move for you", "你无处可下", "打つ手がありません", "둘 곳이 없습니다", "No puedes mover", "Você não tem jogada", "Vous ne pouvez pas jouer", "Du kannst nicht ziehen", "Вам некуда ходить") : tr("No move for the computer", "电脑无处可下", "コンピューターは打つ手がありません", "컴퓨터는 둘 곳이 없습니다", "La computadora no puede mover", "O computador não tem jogada", "L'ordinateur ne peut pas jouer", "Der Computer kann nicht ziehen", "Компьютеру некуда ходить");
     float w = v_text_w(who, 13) + 28, size = (float)(S.cell * S.n);
     float x = S.bx + (size - w) / 2, y = S.by + size / 2 - 15;
@@ -584,6 +601,8 @@ WG_EXPORT(wg_init) void wg_init(u32 seed) {
   S.rng = seed | 1;
   memcpy(S.opt, opt, sizeof opt);
   S.mx = S.my = -1;
+  net_side = 0;
+  net_out = -1;
   setup_board();
 }
 
@@ -593,6 +612,63 @@ WG_EXPORT(wg_option) i32 wg_option(i32 i, i32 v) {
 }
 
 WG_EXPORT(wg_over) i32 wg_over(void) { return S.phase == OVER; }
+
+/* Online play (src/scripts/online.ts, and the room in worker/src/referee.ts,
+ * which runs this module too): the wg_net exports below are what a game needs
+ * to be played on two screens (catalog `online`).
+ * wg_net(side) starts a run in which this
+ * screen plays side (1 dark, 2 light) and a friend elsewhere the other, on the
+ * board picked with wg_option; wg_net(0) only reads the side (0 offline, which
+ * any wg_init or loaded save goes back to). */
+WG_EXPORT(wg_net) i32 wg_net(i32 side) {
+  if (side == DARK || side == LIGHT) {
+    S.opt[O_FOE] = FRIEND;
+    S.opt[O_SIDE] = side == LIGHT;
+    wg_init(S.rng);
+    net_side = side;
+  }
+  return net_side;
+}
+
+/* A move made on either screen, by side, as the cell y * 10 + x: 0 if it
+ * wasn't that side's turn or a legal move (the screens are out of step), else
+ * 2 if this screen is to move next, 1 if not. */
+WG_EXPORT(wg_net_move) i32 wg_net_move(i32 k, i32 side) {
+  if (!net_side || S.phase != PLAY || side != S.turn || k < 0 || k >= MAXN * MAXN) return 0;
+  i32 x = k % MAXN, y = k / MAXN;
+  if (x >= S.n || y >= S.n || !legal(S.b, S.n, x, y, side)) return 0;
+  S.pass_ms = 0;
+  play_at(x, y);
+  net_out = -1;
+  return S.phase == PLAY && S.turn == net_side ? 2 : 1;
+}
+
+/* Side gives up (or left the room): the other side wins. 1 if the run was on. */
+WG_EXPORT(wg_net_resign) i32 wg_net_resign(i32 side) {
+  if (!net_side || S.phase != PLAY || (side != DARK && side != LIGHT)) return 0;
+  S.pass_ms = 0;
+  S.phase = OVER;
+  S.end_ms = END_MS;
+  S.result = 3 - side;
+  S.pend_ev |= S.result == net_side ? WG_EV_WIN : WG_EV_LOSE;
+  return 1;
+}
+
+/* How the online run ended for this screen: 1 won, 2 lost, 3 a draw, 0 not yet. */
+WG_EXPORT(wg_net_result) i32 wg_net_result(void) {
+  if (!net_side || S.phase != OVER) return 0;
+  return S.result == 3 ? 3 : S.result == net_side ? 1 : 2;
+}
+
+/* The side to move in the online run (1 or 2), or 0 once it's over. */
+WG_EXPORT(wg_net_turn) i32 wg_net_turn(void) { return net_side && S.phase == PLAY ? S.turn : 0; }
+
+/* The cell of this screen's latest move, once, or -1. */
+WG_EXPORT(wg_net_out) i32 wg_net_out(void) {
+  i32 k = net_out;
+  net_out = -1;
+  return k;
+}
 
 WG_EXPORT(wg_frame) i32 wg_frame(i32 buttons, i32 dt_ms) {
   u32 pressed = (u32)buttons & ~(u32)S.prev_buttons;
@@ -618,7 +694,7 @@ WG_EXPORT(wg_frame) i32 wg_frame(i32 buttons, i32 dt_ms) {
     if (S.pass_ms) {
       S.pass_ms -= dt_ms;
       if (S.pass_ms <= 0) { S.pass_ms = 0; S.wait_ms = 300; }
-    } else if (!human(S.turn) && !busy) {
+    } else if (!human(S.turn) && !busy && !net_side) {
       S.wait_ms -= dt_ms;
       if (S.wait_ms <= 0) {
         i32 k = choose_move();
@@ -699,6 +775,7 @@ WG_EXPORT(wg_state_loaded) i32 wg_state_loaded(void) {
     wg_init(0x1234);
     return 0;
   }
+  net_side = 0;
   S.prev_buttons = 0xFF;
   S.mbtn = 0;
   S.pend_ev = 0;
