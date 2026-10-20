@@ -304,7 +304,8 @@ static void finish(void) {
     return;
   }
   if (S.opt[O_FOE] == FRIEND) {
-    S.pend_ev |= WG_EV_WIN;
+    // a draw is a finish, not a win for either screen's sound
+    if (S.result != 3) S.pend_ev |= WG_EV_WIN;
     return;
   }
   i32 me = S.opt[O_SIDE] ? LIGHT : DARK;
