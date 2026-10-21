@@ -31,9 +31,9 @@ lesson's solution.
 (`src/scene.rs`) and the play page draws it with WebGL2, with the module's
 framebuffer as the HUD over it. Its models and effect pictures come from CC0
 packs by [Quaternius](https://quaternius.com) and [Kenney](https://kenney.nl);
-`node partial-combat/assets/pack.mjs out/partial-combat` (after `npm install`
+`COMBAT_OUT=out node partial-combat/assets/pack.mjs` (after `npm install`
 there) downloads the packs and builds the `.glb` files and `fx.png` the game
-loads. `cargo test --release -- --nocapture` in `partial-combat/` has bots play
+loads into `out/`. `cargo test --release -- --nocapture` in `partial-combat/` has bots play
 every level and the endless pier.
 
 `tilestack/art/riichi/` holds the tile pictures of FluffyStuff's

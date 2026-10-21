@@ -17,7 +17,7 @@ mod track;
 use wg::{Game, Input, Pointer, Rng, Screen};
 
 /// 1: the first
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// options, in catalog order: mode, level to start at
 pub const O_MODE: usize = 0;
@@ -114,11 +114,106 @@ pub struct Weapon {
     pub scale: f32,
 }
 pub const WEAPONS: [Weapon; 5] = [
-    Weapon { names: ["Pistol", "手枪", "ピストル", "권총", "Pistola", "Pistola", "Pistolet", "Pistole", "Пистолет", "手槍"], rate: 1.5, dmg: 1, pellets: 1, spread: 0.5, pierce: 0, scale: 0.36 },
-    Weapon { names: ["SMG", "冲锋枪", "サブマシンガン", "기관단총", "Subfusil", "Submetralhadora", "Mitraillette", "MP", "Пистолет-пулемёт", "衝鋒槍"], rate: 3.2, dmg: 1, pellets: 1, spread: 0.9, pierce: 0, scale: 0.3 },
-    Weapon { names: ["Rifle", "步枪", "ライフル", "소총", "Fusil", "Fuzil", "Fusil", "Gewehr", "Винтовка", "步槍"], rate: 2.2, dmg: 2, pellets: 1, spread: 0.4, pierce: 0, scale: 0.27 },
-    Weapon { names: ["Shotgun", "霰弹枪", "ショットガン", "샷건", "Escopeta", "Espingarda", "Fusil à pompe", "Schrotflinte", "Дробовик", "霰彈槍"], rate: 1.3, dmg: 1, pellets: 4, spread: 2.6, pierce: 0, scale: 0.22 },
-    Weapon { names: ["Sniper rifle", "狙击枪", "スナイパーライフル", "저격총", "Rifle de francotirador", "Rifle de precisão", "Fusil de précision", "Scharfschützengewehr", "Снайперская винтовка", "狙擊槍"], rate: 0.9, dmg: 6, pellets: 1, spread: 0.2, pierce: 2, scale: 0.17 },
+    Weapon {
+        names: [
+            "Pistol",
+            "手枪",
+            "ピストル",
+            "권총",
+            "Pistola",
+            "Pistola",
+            "Pistolet",
+            "Pistole",
+            "Пистолет",
+            "手槍",
+        ],
+        rate: 1.5,
+        dmg: 1,
+        pellets: 1,
+        spread: 0.5,
+        pierce: 0,
+        scale: 0.36,
+    },
+    Weapon {
+        names: [
+            "SMG",
+            "冲锋枪",
+            "サブマシンガン",
+            "기관단총",
+            "Subfusil",
+            "Submetralhadora",
+            "Mitraillette",
+            "MP",
+            "Пистолет-пулемёт",
+            "衝鋒槍",
+        ],
+        rate: 3.2,
+        dmg: 1,
+        pellets: 1,
+        spread: 0.9,
+        pierce: 0,
+        scale: 0.3,
+    },
+    Weapon {
+        names: [
+            "Rifle",
+            "步枪",
+            "ライフル",
+            "소총",
+            "Fusil",
+            "Fuzil",
+            "Fusil",
+            "Gewehr",
+            "Винтовка",
+            "步槍",
+        ],
+        rate: 2.2,
+        dmg: 2,
+        pellets: 1,
+        spread: 0.4,
+        pierce: 0,
+        scale: 0.27,
+    },
+    Weapon {
+        names: [
+            "Shotgun",
+            "霰弹枪",
+            "ショットガン",
+            "샷건",
+            "Escopeta",
+            "Espingarda",
+            "Fusil à pompe",
+            "Schrotflinte",
+            "Дробовик",
+            "霰彈槍",
+        ],
+        rate: 1.3,
+        dmg: 1,
+        pellets: 4,
+        spread: 2.6,
+        pierce: 0,
+        scale: 0.22,
+    },
+    Weapon {
+        names: [
+            "Sniper rifle",
+            "狙击枪",
+            "スナイパーライフル",
+            "저격총",
+            "Rifle de francotirador",
+            "Rifle de precisão",
+            "Fusil de précision",
+            "Scharfschützengewehr",
+            "Снайперская винтовка",
+            "狙擊槍",
+        ],
+        rate: 0.9,
+        dmg: 6,
+        pellets: 1,
+        spread: 0.2,
+        pierce: 2,
+        scale: 0.17,
+    },
 ];
 /// damage a second one soldier puts out with gun w, all pellets hitting
 pub fn gun_dps(w: i32) -> f32 {
@@ -160,8 +255,8 @@ pub struct Enemy {
 /// A thing on the pier. Gates: value, op in a, the other gate of the pair
 /// in b, hits so far in c, state 1 taken and 2 passed by. Barrels and
 /// crates: hp of hp_max, soldiers or the gun inside in value. Holes: x..x+w
-/// by d..d+len. Ships: shells fired in c, time to the next in t. Groups:
-/// how many it had in value. The arena: where the boss stands.
+/// by d..d+len. Ships: time to the next shell in cool. Groups: how many it
+/// had in value. The arena: where the boss stands.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Thing {
@@ -177,9 +272,7 @@ pub struct Thing {
     pub a: i32,
     pub b: i32,
     pub c: i32,
-    pub t: f32,
     pub flash: f32,
-    /// a ship's time to its next shell
     pub cool: f32,
 }
 
@@ -256,7 +349,6 @@ pub struct Save {
     pub kills: i32,
     pub bosses: i32,
     pub biggest: i32,
-    pub gates: i32,
     pub count: i32,
     pub weapon: i32,
     /// the squad's middle, where it steers to, and how far down the pier it is
@@ -272,9 +364,8 @@ pub struct Save {
     pub chunk: i32,
     pub expect: f32,
     pub expect_gun: i32,
-    /// where this level's boss fight starts (0 till it is laid), and the level's start
+    /// where this level's boss fight starts (0 till it is laid)
     pub arena_d: f32,
-    pub start_d: f32,
     pub banner: i32,
     pub banner_ms: i32,
     pub banner_v: i32,
@@ -299,12 +390,76 @@ unsafe impl wg::Plain for Shell {}
 unsafe impl wg::Plain for Boss {}
 unsafe impl wg::Plain for Save {}
 
-const NO_SOL: Sol = Sol { x: 0.0, d: 0.0, y: DECK, vy: 0.0, state: S_OK, t: 0.0, flash: 0.0 };
-const NO_ENEMY: Enemy = Enemy { kind: 0, state: ES_DOWN, x: 0.0, d: 0.0, hp: 0, group: -1, t: 0.0, cool: 0.0, flash: 0.0, yaw: 0.0 };
-pub const NO_THING: Thing = Thing { kind: K_NONE, state: 0, x: 0.0, d: 0.0, w: 0.0, len: 0.0, value: 0, hp: 0, hp_max: 0, a: 0, b: 0, c: 0, t: 0.0, flash: 0.0, cool: 0.0 };
-const NO_BULLET: Bullet = Bullet { x: 0.0, d: 0.0, y: 0.0, vx: 0.0, vd: 0.0, life: 0.0, dmg: 0, pierce: 0, side: 0 };
-const NO_SHELL: Shell = Shell { x: 0.0, d: 0.0, r: 0.0, t: 0.0, t_max: 0.0, kind: 0 };
-const NO_BOSS: Boss = Boss { state: 0, kind: 0, x: 0.0, d: 0.0, hp: 0, hp_max: 1, t: 0.0, cool: 0.0, atk: 0, atk_t: 0.0, flash: 0.0, sway: 0.0 };
+const NO_SOL: Sol = Sol {
+    x: 0.0,
+    d: 0.0,
+    y: DECK,
+    vy: 0.0,
+    state: S_OK,
+    t: 0.0,
+    flash: 0.0,
+};
+const NO_ENEMY: Enemy = Enemy {
+    kind: 0,
+    state: ES_DOWN,
+    x: 0.0,
+    d: 0.0,
+    hp: 0,
+    group: -1,
+    t: 0.0,
+    cool: 0.0,
+    flash: 0.0,
+    yaw: 0.0,
+};
+pub const NO_THING: Thing = Thing {
+    kind: K_NONE,
+    state: 0,
+    x: 0.0,
+    d: 0.0,
+    w: 0.0,
+    len: 0.0,
+    value: 0,
+    hp: 0,
+    hp_max: 0,
+    a: 0,
+    b: 0,
+    c: 0,
+    flash: 0.0,
+    cool: 0.0,
+};
+const NO_BULLET: Bullet = Bullet {
+    x: 0.0,
+    d: 0.0,
+    y: 0.0,
+    vx: 0.0,
+    vd: 0.0,
+    life: 0.0,
+    dmg: 0,
+    pierce: 0,
+    side: 0,
+};
+const NO_SHELL: Shell = Shell {
+    x: 0.0,
+    d: 0.0,
+    r: 0.0,
+    t: 0.0,
+    t_max: 0.0,
+    kind: 0,
+};
+const NO_BOSS: Boss = Boss {
+    state: 0,
+    kind: 0,
+    x: 0.0,
+    d: 0.0,
+    hp: 0,
+    hp_max: 1,
+    t: 0.0,
+    cool: 0.0,
+    atk: 0,
+    atk_t: 0.0,
+    flash: 0.0,
+    sway: 0.0,
+};
 
 impl Save {
     fn new() -> Self {
@@ -324,7 +479,6 @@ impl Save {
             kills: 0,
             bosses: 0,
             biggest: 0,
-            gates: 0,
             count: 0,
             weapon: 0,
             cx: 0.0,
@@ -338,7 +492,6 @@ impl Save {
             expect: 0.0,
             expect_gun: 0,
             arena_d: 0.0,
-            start_d: 0.0,
             banner: B_NONE,
             banner_ms: 0,
             banner_v: 0,
@@ -371,20 +524,31 @@ impl Save {
     fn frand(&mut self, a: f32, b: f32) -> f32 {
         a + (b - a) * self.rng.float()
     }
-    /// How hard the pier is here: the level, or in endless how far it has come.
+    /// How hard the pier is where the squad is.
     pub fn hardness(&self) -> f32 {
+        self.hardness_at(self.d)
+    }
+    /// How hard the pier is at d: the level, or in endless also how far it has come.
+    pub fn hardness_at(&self, d: f32) -> f32 {
         if self.endless() {
-            self.d / 160.0 + self.level as f32 * 1.0
+            d / 160.0 + self.level as f32
         } else {
             self.level as f32
         }
+    }
+    /// How many soldiers are still standing.
+    pub fn alive(&self) -> usize {
+        self.soldiers().iter().filter(|q| q.state == S_OK).count()
     }
     /// The pier is there to stand on at x, d.
     pub fn deck(&self, x: f32, d: f32) -> bool {
         if x.abs() > HALF - 0.05 {
             return false;
         }
-        !self.things().iter().any(|t| t.kind == K_HOLE && x >= t.x && x < t.x + t.w && d >= t.d && d < t.d + t.len)
+        !self
+            .things()
+            .iter()
+            .any(|t| t.kind == K_HOLE && x >= t.x && x < t.x + t.w && d >= t.d && d < t.d + t.len)
     }
     /// How wide the pier is at d, as the lane edges either side of x.
     pub fn deck_span(&self, x: f32, d: f32) -> (f32, f32) {
@@ -405,6 +569,16 @@ impl Save {
 }
 
 /// the squad's radius for n soldiers
+/// A squad of n through a gate of op and value; dividing rounds up.
+pub fn gate_sum(op: i32, v: i32, n: i32) -> i32 {
+    match op {
+        OP_ADD => n + v,
+        OP_SUB => n - v,
+        OP_MUL => n * v,
+        _ => (n + v - 1) / v.max(1),
+    }
+}
+
 pub fn radius(n: i32) -> f32 {
     SPACING * (n.clamp(1, MAXV as i32) as f32 + 0.5).sqrt() + 0.3
 }
@@ -432,7 +606,14 @@ pub struct Combat {
 impl Combat {
     pub fn fx(&mut self, kind: u32, x: f32, y: f32, d: f32, a: f32, b: f32, c: f32, rgba: u32) {
         if self.fx.len() < 256 {
-            self.fx.push(scene::Fx { kind, pos: [x, y, -d], a, b, c, rgba });
+            self.fx.push(scene::Fx {
+                kind,
+                pos: [x, y, -d],
+                a,
+                b,
+                c,
+                rgba,
+            });
         }
     }
 
@@ -447,7 +628,6 @@ impl Combat {
         s.cx = 0.0;
         s.tx = 0.0;
         s.d = 0.0;
-        s.start_d = 0.0;
         s.speed = 6.5 + (s.level as f32 * 0.08).min(1.4);
         s.fire_acc = 0.0;
         s.next_d = 12.0;
@@ -461,7 +641,11 @@ impl Combat {
         s.nbul = 0;
         s.nshell = 0;
         s.boss = NO_BOSS;
-        s.track_rng = if s.endless() { Rng::new(s.rng.next()) } else { Rng::new(0x51ed_270b ^ (s.level as u32 + 1).wrapping_mul(0x9e37_79b9)) };
+        s.track_rng = if s.endless() {
+            Rng::new(s.rng.next())
+        } else {
+            Rng::new(0x51ed_270b ^ (s.level as u32 + 1).wrapping_mul(0x9e37_79b9))
+        };
         s.banner = if s.endless() { B_NONE } else { B_LEVEL };
         s.banner_v = s.level + 1;
         s.banner_ms = 0;
@@ -484,11 +668,19 @@ impl Combat {
             let i = s.nsol as usize;
             let (ox, oz) = slot(i);
             let t = s.rng.float() * 3.0;
-            s.sol[i] = Sol { x: s.cx + ox * 0.4, d: s.d + oz * 0.4 - 0.6, y: DECK, vy: 0.0, state: S_OK, t, flash: 0.6 };
+            s.sol[i] = Sol {
+                x: s.cx + ox * 0.4,
+                d: s.d + oz * 0.4 - 0.6,
+                y: DECK,
+                vy: 0.0,
+                state: S_OK,
+                t,
+                flash: 0.6,
+            };
             s.nsol += 1;
         }
         // fewer: the last ones go
-        let mut alive = s.soldiers().iter().filter(|q| q.state == S_OK).count();
+        let mut alive = s.alive();
         let mut i = s.nsol as usize;
         while alive > want && i > 0 {
             i -= 1;
@@ -508,7 +700,7 @@ impl Combat {
         if s.sol[i].state != S_OK {
             return;
         }
-        let alive = s.soldiers().iter().filter(|q| q.state == S_OK).count().max(1) as i32;
+        let alive = s.alive().max(1) as i32;
         // each one shown stands for a share of a big squad
         let share = ((s.count + alive - 1) / alive).max(1);
         s.count = (s.count - share).max(0);
@@ -642,7 +834,7 @@ impl Combat {
     fn move_soldiers(&mut self, dt: f32) {
         let ease = 1.0 - (-9.0 * dt).exp();
         let n = self.s.nsol as usize;
-        let alive = self.s.soldiers().iter().filter(|q| q.state == S_OK).count();
+        let alive = self.s.alive();
         // the deck under the squad, front to back; it squeezes in to fit
         let r = radius(alive as i32);
         let (mut lo, mut hi) = (-HALF, HALF);
@@ -656,10 +848,12 @@ impl Combat {
         let room = ((hi - lo) * 0.5 - EDGE).max(0.2);
         let squeeze = (room / spread).min(1.0);
         let used = spread * squeeze;
-        let mid = self.s.cx.clamp(lo + EDGE + used, (hi - EDGE - used).max(lo + EDGE + used));
+        let mid = self
+            .s
+            .cx
+            .clamp(lo + EDGE + used, (hi - EDGE - used).max(lo + EDGE + used));
         let cheer = self.s.phase == P_CLEAR || self.s.phase == P_WON;
         let mut k = 0;
-        let mut falls = vec![];
         for i in 0..n {
             let q = &mut self.s.sol[i];
             q.t += dt;
@@ -672,9 +866,6 @@ impl Combat {
                     let gd = self.s.d + oz;
                     q.x += (gx - q.x) * ease;
                     q.d += (gd - q.d) * ease;
-                    if !cheer {
-                        falls.push(i);
-                    }
                 }
                 S_FALL => {
                     q.vy -= 18.0 * dt;
@@ -683,9 +874,10 @@ impl Combat {
                 _ => {}
             }
         }
-        for i in falls {
+        // off the deck they fall
+        for i in 0..n {
             let q = self.s.sol[i];
-            if !self.s.deck(q.x, q.d) {
+            if !cheer && q.state == S_OK && !self.s.deck(q.x, q.d) {
                 self.lose(i, true);
             }
         }
@@ -707,8 +899,7 @@ impl Combat {
 
     /// The squad fires ahead: up to MAX_SHOOTERS soldiers, each at its gun's rate.
     fn fire(&mut self, dt: f32) {
-        let alive = self.s.soldiers().iter().filter(|q| q.state == S_OK).count();
-        if alive == 0 || self.s.phase == P_CLEAR {
+        if self.s.alive() == 0 || self.s.phase == P_CLEAR {
             return;
         }
         let g = &WEAPONS[self.s.weapon as usize];
@@ -727,17 +918,40 @@ impl Combat {
                 if self.s.nbul as usize >= MAXB {
                     break;
                 }
-                let mut vx = if g.pellets > 1 { (p as f32 / (g.pellets - 1) as f32 - 0.5) * g.spread } else { self.s.frand(-g.spread, g.spread) * 0.5 };
+                let mut vx = if g.pellets > 1 {
+                    (p as f32 / (g.pellets - 1) as f32 - 0.5) * g.spread
+                } else {
+                    self.s.frand(-g.spread, g.spread) * 0.5
+                };
                 if self.s.boss.state == 2 {
                     // everyone fires at the boss
                     let boss = self.s.boss;
                     vx += (boss.x - q.x) * BULLET_SPEED / (boss.d - q.d).max(2.0);
                 }
-                let b = Bullet { x: q.x - 0.12, d: q.d + 0.35, y: DECK + 0.52, vx, vd: BULLET_SPEED, life: RANGE / BULLET_SPEED, dmg: g.dmg, pierce: g.pierce, side: 0 };
+                let b = Bullet {
+                    x: q.x - 0.12,
+                    d: q.d + 0.35,
+                    y: DECK + 0.52,
+                    vx,
+                    vd: BULLET_SPEED,
+                    life: RANGE / BULLET_SPEED,
+                    dmg: g.dmg,
+                    pierce: g.pierce,
+                    side: 0,
+                };
                 self.s.bul[self.s.nbul as usize] = b;
                 self.s.nbul += 1;
             }
-            self.fx(scene::FX_MUZZLE, q.x - 0.12, DECK + 0.52, q.d + 0.4, 0.0, -1.0, 0.7, 0);
+            self.fx(
+                scene::FX_MUZZLE,
+                q.x - 0.12,
+                DECK + 0.52,
+                q.d + 0.4,
+                0.0,
+                -1.0,
+                0.7,
+                0,
+            );
         }
         self.s.fire_acc = self.s.fire_acc.min(2.0);
     }
@@ -752,7 +966,11 @@ impl Combat {
             b.life -= dt;
             let mut spent = b.life <= 0.0;
             if !spent {
-                spent = if b.side == 0 { self.hit_enemy_side(&mut b, d0) } else { self.hit_squad(&b) };
+                spent = if b.side == 0 {
+                    self.hit_enemy_side(&mut b, d0)
+                } else {
+                    self.hit_squad(&b)
+                };
             }
             if spent {
                 self.s.nbul -= 1;
@@ -774,7 +992,11 @@ impl Combat {
                 continue;
             }
             let r = if e.kind == E_BRUTE { 0.6 } else { 0.38 };
-            if (e.x - b.x).abs() < r && e.d >= lo - r && e.d <= hi + r && best.map_or(true, |(_, bd)| e.d < bd) {
+            if (e.x - b.x).abs() < r
+                && e.d >= lo - r
+                && e.d <= hi + r
+                && best.map_or(true, |(_, bd)| e.d < bd)
+            {
                 best = Some((k, e.d));
             }
         }
@@ -782,8 +1004,12 @@ impl Combat {
         let mut thing: Option<(usize, f32)> = None;
         for (k, t) in self.s.things().iter().enumerate() {
             let hit = match t.kind {
-                K_GATE => t.state == 0 && (b.x - t.x).abs() < t.w * 0.5 && t.d >= lo && t.d <= hi + 0.2,
-                K_BARREL | K_TNT | K_CRATE => t.hp > 0 && (b.x - t.x).abs() < 0.55 && t.d >= lo - 0.5 && t.d <= hi + 0.5,
+                K_GATE => {
+                    t.state == 0 && (b.x - t.x).abs() < t.w * 0.5 && t.d >= lo && t.d <= hi + 0.2
+                }
+                K_BARREL | K_TNT | K_CRATE => {
+                    t.hp > 0 && (b.x - t.x).abs() < 0.55 && t.d >= lo - 0.5 && t.d <= hi + 0.5
+                }
                 _ => false,
             };
             if hit && thing.map_or(true, |(_, td)| t.d < td) {
@@ -815,8 +1041,18 @@ impl Combat {
         }
         // the boss
         let boss = self.s.boss;
-        if boss.state == 2 && (b.x - boss.x).abs() < 1.6 && boss.d >= lo - 1.0 && boss.d <= hi + 1.0 {
-            self.fx(scene::FX_HIT, b.x, DECK + 1.5, boss.d - 0.8, 0.0, 0.0, 0.0, 0xff_ffd070);
+        if boss.state == 2 && (b.x - boss.x).abs() < 1.6 && boss.d >= lo - 1.0 && boss.d <= hi + 1.0
+        {
+            self.fx(
+                scene::FX_HIT,
+                b.x,
+                DECK + 1.5,
+                boss.d - 0.8,
+                0.0,
+                0.0,
+                0.0,
+                0xff_ffd070,
+            );
             let hurt = b.dmg;
             let boss = &mut self.s.boss;
             boss.hp = (boss.hp - hurt).max(0);
@@ -875,7 +1111,20 @@ impl Combat {
                 if t.hp == 0 {
                     self.break_thing(k);
                 } else {
-                    self.fx(scene::FX_HIT, x, DECK + 0.7, d, 0.0, 0.0, 0.0, if kind == K_TNT { 0xff_3030e0 } else { 0xff_40a0e0 });
+                    self.fx(
+                        scene::FX_HIT,
+                        x,
+                        DECK + 0.7,
+                        d,
+                        0.0,
+                        0.0,
+                        0.0,
+                        if kind == K_TNT {
+                            0xff_3030e0
+                        } else {
+                            0xff_40a0e0
+                        },
+                    );
                 }
             }
             _ => {}
@@ -887,13 +1136,21 @@ impl Combat {
         let t = self.s.thing[k];
         self.s.thing[k].hp = 0;
         self.s.thing[k].state = 1;
-        self.s.thing[k].t = 0.0;
         match t.kind {
             K_BARREL => {
                 self.s.count = (self.s.count + t.value).min(MAX_COUNT);
                 self.fill_squad();
                 self.add_score(20);
-                self.fx(scene::FX_PICKUP, t.x, DECK, t.d, 0.0, 0.0, 0.0, scene::GREEN_LIGHT);
+                self.fx(
+                    scene::FX_PICKUP,
+                    t.x,
+                    DECK,
+                    t.d,
+                    0.0,
+                    0.0,
+                    0.0,
+                    scene::GREEN_LIGHT,
+                );
             }
             K_CRATE => {
                 if t.value > self.s.weapon {
@@ -939,7 +1196,6 @@ impl Combat {
 
     fn move_enemies(&mut self, dt: f32) {
         let (cx, sd) = (self.s.cx, self.s.d);
-        let alive_sol: Vec<usize> = (0..self.s.nsol as usize).filter(|&i| self.s.sol[i].state == S_OK).collect();
         let hard = self.s.hardness();
         let mut w = 0;
         for k in 0..self.s.nen as usize {
@@ -958,9 +1214,28 @@ impl Combat {
                                 let dx = cx - e.x;
                                 let speed = 18.0;
                                 let time = near / speed;
-                                self.s.bul[self.s.nbul as usize] = Bullet { x: e.x, d: e.d - 0.4, y: DECK + 0.52, vx: dx / time.max(0.3), vd: -speed, life: 2.0, dmg: 1, pierce: 0, side: 1 };
+                                self.s.bul[self.s.nbul as usize] = Bullet {
+                                    x: e.x,
+                                    d: e.d - 0.4,
+                                    y: DECK + 0.52,
+                                    vx: dx / time.max(0.3),
+                                    vd: -speed,
+                                    life: 2.0,
+                                    dmg: 1,
+                                    pierce: 0,
+                                    side: 1,
+                                };
                                 self.s.nbul += 1;
-                                self.fx(scene::FX_MUZZLE, e.x, DECK + 0.52, e.d - 0.5, 0.0, 1.0, 0.7, 0);
+                                self.fx(
+                                    scene::FX_MUZZLE,
+                                    e.x,
+                                    DECK + 0.52,
+                                    e.d - 0.5,
+                                    0.0,
+                                    1.0,
+                                    0.7,
+                                    0,
+                                );
                             }
                             if near < 6.0 {
                                 e.state = ES_CHARGE;
@@ -974,8 +1249,7 @@ impl Combat {
                 ES_CHARGE => {
                     // at the nearest soldier
                     let mut best = (f32::MAX, cx, sd);
-                    for &i in &alive_sol {
-                        let q = self.s.sol[i];
+                    for q in self.s.soldiers().iter().filter(|q| q.state == S_OK) {
                         let dd = (q.x - e.x).powi(2) + (q.d - e.d).powi(2);
                         if dd < best.0 {
                             best = (dd, q.x, q.d);
@@ -1013,7 +1287,7 @@ impl Combat {
             if (e.d - sd).abs() > 8.0 {
                 continue;
             }
-            for &i in &alive_sol {
+            for i in 0..self.s.nsol as usize {
                 let q = self.s.sol[i];
                 if q.state != S_OK || (q.x - e.x).abs() > REACH || (q.d - e.d).abs() > REACH {
                     continue;
@@ -1044,7 +1318,6 @@ impl Combat {
         for k in 0..self.s.nthing as usize {
             let t = self.s.thing[k];
             self.s.thing[k].flash = (t.flash - dt * 4.0).max(0.0);
-            self.s.thing[k].t += dt;
             match t.kind {
                 K_GATE if t.state == 0 && sd >= t.d => {
                     // the gate the squad's middle is in, or the nearer
@@ -1059,17 +1332,19 @@ impl Combat {
                     }
                     let before = self.s.count;
                     let t = self.s.thing[k];
-                    let after = match t.a {
-                        OP_ADD => before + t.value,
-                        OP_SUB => before - t.value,
-                        OP_MUL => before * t.value,
-                        _ => (before + t.value - 1) / t.value.max(1),
-                    }
-                    .clamp(0, MAX_COUNT);
+                    let after = gate_sum(t.a, t.value, before).clamp(0, MAX_COUNT);
                     self.s.count = after;
-                    self.s.gates += 1;
                     let good = after >= before;
-                    self.fx(scene::FX_GATE, t.x, DECK, t.d, t.w, good as i32 as f32, 0.0, if good { 0xff_60d0ff } else { 0xff_5050ff });
+                    self.fx(
+                        scene::FX_GATE,
+                        t.x,
+                        DECK,
+                        t.d,
+                        t.w,
+                        good as i32 as f32,
+                        0.0,
+                        if good { 0xff_60d0ff } else { 0xff_5050ff },
+                    );
                     // the ones lost go from the back
                     self.fill_squad();
                 }
@@ -1094,7 +1369,7 @@ impl Combat {
                         }
                     }
                 }
-                K_SHIP if t.state == 0 => {
+                K_SHIP => {
                     // fires a shell at where the squad will be
                     let near = t.d - sd;
                     if near < 26.0 && near > -8.0 {
@@ -1104,10 +1379,26 @@ impl Combat {
                             self.s.thing[k].cool = (2.6 - hard * 0.05).max(1.5);
                             let lead = self.s.speed * 1.4;
                             let x = (cx + self.s.frand(-1.5, 1.5)).clamp(-HALF + 0.8, HALF - 0.8);
-                            self.s.shell[self.s.nshell as usize] = Shell { x, d: sd + lead + self.s.frand(-1.0, 1.0), r: 1.6, t: 0.0, t_max: 1.4, kind: 0 };
+                            self.s.shell[self.s.nshell as usize] = Shell {
+                                x,
+                                d: sd + lead + self.s.frand(-1.0, 1.0),
+                                r: 1.6,
+                                t: 0.0,
+                                t_max: 1.4,
+                                kind: 0,
+                            };
                             self.s.nshell += 1;
                             let dir = if t.x < 0.0 { 1.0 } else { -1.0 };
-                            self.fx(scene::FX_CANNON, t.x + dir * 2.2, 2.2, t.d, dir, 0.0, 0.0, 0);
+                            self.fx(
+                                scene::FX_CANNON,
+                                t.x + dir * 2.2,
+                                2.2,
+                                t.d,
+                                dir,
+                                0.0,
+                                0.0,
+                                0,
+                            );
                         }
                     }
                 }
@@ -1157,7 +1448,16 @@ impl Combat {
             if (t * 4.0) as i32 != ((t - dt) * 4.0) as i32 && t < 1.6 {
                 let ox = self.s.frand(-1.5, 1.5);
                 let od = self.s.frand(-1.0, 1.0);
-                self.fx(scene::FX_BLAST, x + ox, DECK + 1.0, d + od, 0.8, 0.0, 0.0, 0);
+                self.fx(
+                    scene::FX_BLAST,
+                    x + ox,
+                    DECK + 1.0,
+                    d + od,
+                    0.8,
+                    0.0,
+                    0.0,
+                    0,
+                );
                 self.s.shake = self.s.shake.max(0.3);
             }
             if t >= 2.0 {
@@ -1176,7 +1476,16 @@ impl Combat {
         if enraged && (b.t * 5.0) as i32 != ((b.t - dt) * 5.0) as i32 {
             let (x, d) = (b.x, b.d);
             let ox = self.s.frand(-0.8, 0.8);
-            self.fx(scene::FX_SMOKE, x + ox, DECK + 4.5, d, 1.3, 0.0, 0.0, scene::rgba(0x4a4540, 255));
+            self.fx(
+                scene::FX_SMOKE,
+                x + ox,
+                DECK + 4.5,
+                d,
+                1.3,
+                0.0,
+                0.0,
+                scene::rgba(0x4a4540, 255),
+            );
         }
         let b = &mut self.s.boss;
         if b.atk != 0 {
@@ -1194,7 +1503,17 @@ impl Combat {
                         let tx = cx + self.s.frand(-1.4, 1.4);
                         let speed = 16.0;
                         let time = (d - sd) / speed;
-                        self.s.bul[self.s.nbul as usize] = Bullet { x, d: d - 1.2, y: DECK + 1.6, vx: (tx - x) / time.max(0.3), vd: -speed, life: 2.5, dmg: 1, pierce: 0, side: 1 };
+                        self.s.bul[self.s.nbul as usize] = Bullet {
+                            x,
+                            d: d - 1.2,
+                            y: DECK + 1.6,
+                            vx: (tx - x) / time.max(0.3),
+                            vd: -speed,
+                            life: 2.5,
+                            dmg: 1,
+                            pierce: 0,
+                            side: 1,
+                        };
                         self.s.nbul += 1;
                         self.fx(scene::FX_MUZZLE, x, DECK + 1.6, d - 1.3, 0.0, 1.0, 1.6, 0);
                     }
@@ -1228,9 +1547,20 @@ impl Combat {
                     if self.s.nshell as usize >= MAXSH {
                         break;
                     }
-                    let x = if k == 0 { cx } else { self.s.frand(-HALF + 1.0, HALF - 1.0) };
+                    let x = if k == 0 {
+                        cx
+                    } else {
+                        self.s.frand(-HALF + 1.0, HALF - 1.0)
+                    };
                     let d = sd + self.s.frand(-1.0, 2.0);
-                    self.s.shell[self.s.nshell as usize] = Shell { x, d, r: 1.3, t: -0.15 * k as f32, t_max: 1.5, kind: 0 };
+                    self.s.shell[self.s.nshell as usize] = Shell {
+                        x,
+                        d,
+                        r: 1.3,
+                        t: -0.15 * k as f32,
+                        t_max: 1.5,
+                        kind: 0,
+                    };
                     self.s.nshell += 1;
                 }
                 let (bx, bd) = (self.s.boss.x, self.s.boss.d);
@@ -1240,7 +1570,14 @@ impl Combat {
                 // a stamp under the squad
                 self.s.boss.atk = 2;
                 if (self.s.nshell as usize) < MAXSH {
-                    self.s.shell[self.s.nshell as usize] = Shell { x: cx, d: sd + 0.5, r: 2.0 + (hard * 0.02).min(0.5), t: 0.0, t_max: 1.7, kind: 1 };
+                    self.s.shell[self.s.nshell as usize] = Shell {
+                        x: cx,
+                        d: sd + 0.5,
+                        r: 2.0 + (hard * 0.02).min(0.5),
+                        t: 0.0,
+                        t_max: 1.7,
+                        kind: 1,
+                    };
                     self.s.nshell += 1;
                 }
             }
@@ -1251,8 +1588,18 @@ impl Combat {
                 let (bx, bd) = (self.s.boss.x, self.s.boss.d);
                 for k in 0..n {
                     let (ox, oz) = slot(k as usize);
-                    let kind = if hard >= 4.0 && k % 4 == 3 { E_RUNNER } else { E_GRUNT };
-                    self.spawn_enemy(kind, (bx + ox * 1.6).clamp(-HALF + 0.4, HALF - 0.4), bd - 2.0 + oz, -1, ES_CHARGE);
+                    let kind = if hard >= 4.0 && k % 4 == 3 {
+                        E_RUNNER
+                    } else {
+                        E_GRUNT
+                    };
+                    self.spawn_enemy(
+                        kind,
+                        (bx + ox * 1.6).clamp(-HALF + 0.4, HALF - 0.4),
+                        bd - 2.0 + oz,
+                        -1,
+                        ES_CHARGE,
+                    );
                 }
             }
             _ => {
@@ -1274,7 +1621,18 @@ impl Combat {
             _ => 1,
         };
         let t = self.s.rng.float() * 2.0;
-        self.s.en[self.s.nen as usize] = Enemy { kind, state, x, d, hp, group, t, cool: self.s.rng.float() * 1.5, flash: 0.0, yaw: 0.0 };
+        self.s.en[self.s.nen as usize] = Enemy {
+            kind,
+            state,
+            x,
+            d,
+            hp,
+            group,
+            t,
+            cool: self.s.rng.float() * 1.5,
+            flash: 0.0,
+            yaw: 0.0,
+        };
         self.s.nen += 1;
     }
 
@@ -1345,19 +1703,33 @@ impl Combat {
                 continue;
             }
             let (d, x) = (self.s.thing[k].d, self.s.thing[k].x);
-            self.s.thing[k].b = (0..n).find(|&j| j != k && self.s.thing[j].kind == K_GATE && self.s.thing[j].d == d && self.s.thing[j].x != x).map_or(k as i32, |j| j as i32);
+            self.s.thing[k].b = (0..n)
+                .find(|&j| {
+                    j != k
+                        && self.s.thing[j].kind == K_GATE
+                        && self.s.thing[j].d == d
+                        && self.s.thing[j].x != x
+                })
+                .map_or(k as i32, |j| j as i32);
         }
     }
 }
 
 impl Game for Combat {
     type Save = Save;
-    const PLAN: (f32, f32) = (400.0, 500.0);
     const CHOICES: &'static [i32] = &[2, LEVELS];
 
     fn new() -> Self {
         wg::add_glyphs(&glyphs::GLYPHS);
-        Combat { s: Save::new(), fx: Vec::new(), scene: scene::Scene::default(), cam: [0.0; 6], cam_set: false, clock: 0.0, aspect: 1.0 }
+        Combat {
+            s: Save::new(),
+            fx: Vec::new(),
+            scene: scene::Scene::new(),
+            cam: [0.0; 6],
+            cam_set: false,
+            clock: 0.0,
+            aspect: 1.0,
+        }
     }
     fn save(&mut self) -> &mut Save {
         &mut self.s
@@ -1370,8 +1742,16 @@ impl Game for Combat {
         (400.0, 400.0 * h.max(1) as f32 / w.max(1) as f32)
     }
     fn start(&mut self, seed: u32) {
-        self.s = Save { rng: Rng::new(seed), opt: self.s.opt, ..Save::new() };
-        self.s.level = if self.s.endless() { 0 } else { self.s.opt[O_LEVEL] };
+        self.s = Save {
+            rng: Rng::new(seed),
+            opt: self.s.opt,
+            ..Save::new()
+        };
+        self.s.level = if self.s.endless() {
+            0
+        } else {
+            self.s.opt[O_LEVEL]
+        };
         self.fx.clear();
         self.begin_level();
     }
@@ -1383,8 +1763,7 @@ impl Game for Combat {
             left -= step;
             ev |= self.step(input, step as f32 / 1000.0);
         }
-        let aspect = self.aspect;
-        self.follow(input.dt as f32 / 1000.0, aspect);
+        self.follow(input.dt as f32 / 1000.0);
         ev
     }
     fn pointer(&mut self, p: &Pointer) -> u32 {
@@ -1403,9 +1782,6 @@ impl Game for Combat {
     }
     fn picture(&mut self) -> u32 {
         hud::picture(self)
-    }
-    fn moving(&self) -> bool {
-        hud::moving(self)
     }
     fn draw(&mut self, s: &mut Screen) {
         hud::draw(self, s);
@@ -1441,7 +1817,6 @@ impl Game for Combat {
     fn loaded(&mut self) -> bool {
         let s = &self.s;
         let ok = s.version == VERSION
-            && (0..LEVELS).contains(&s.level.min(LEVELS - 1))
             && s.level >= 0
             && (P_RUN..=P_WON).contains(&s.phase)
             && (0..=MAXV as i32).contains(&s.nsol)
@@ -1451,7 +1826,9 @@ impl Game for Combat {
             && (0..=MAXSH as i32).contains(&s.nshell)
             && (0..=4).contains(&s.weapon)
             && (0..=MAX_COUNT).contains(&s.count)
-            && s.things().iter().all(|t| t.kind != K_GATE || (0..s.nthing).contains(&t.b))
+            && s.things()
+                .iter()
+                .all(|t| t.kind != K_GATE || (0..s.nthing).contains(&t.b))
             && (0..4).contains(&s.boss.kind)
             && s.d.is_finite()
             && s.cx.is_finite();

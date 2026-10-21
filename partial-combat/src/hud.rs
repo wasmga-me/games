@@ -1,7 +1,8 @@
 //! The game's own picture over the 3D scene: the level and how far to its
 //! boss (or the distance, endless), the score, and a word in the middle as
 //! things happen. Drawn on a clear screen in overlay mode, so the page lays
-//! it over the scene; only redrawn when what it shows changes.
+//! it over the scene; only redrawn when what it shows changes, and then only
+//! the band at the top it draws in, which the page alone uploads.
 use crate::*;
 
 /// how long a banner shows, ms
@@ -25,9 +26,36 @@ fn banner_text(p: &Combat) -> String {
     let s = &p.s;
     match s.banner {
         B_LEVEL => level_text(s.banner_v),
-        B_BOSS => wg::tr(&["Boss", "首领", "ボス", "보스", "Jefe", "Chefe", "Boss", "Boss", "Босс", "首領"]).into(),
-        B_CLEAR if s.endless() => wg::tr(&["Boss defeated", "击败首领", "ボス撃破", "보스 격파", "Jefe derrotado", "Chefe derrotado", "Boss vaincu", "Boss besiegt", "Босс побеждён", "擊敗首領"]).into(),
-        B_CLEAR => wg::tr(&["Level cleared", "过关", "レベルクリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau terminé", "Level geschafft", "Уровень пройден", "過關"]).into(),
+        B_BOSS => wg::tr(&[
+            "Boss", "首领", "ボス", "보스", "Jefe", "Chefe", "Boss", "Boss", "Босс", "首領",
+        ])
+        .into(),
+        B_CLEAR if s.endless() => wg::tr(&[
+            "Boss defeated",
+            "击败首领",
+            "ボス撃破",
+            "보스 격파",
+            "Jefe derrotado",
+            "Chefe derrotado",
+            "Boss vaincu",
+            "Boss besiegt",
+            "Босс побеждён",
+            "擊敗首領",
+        ])
+        .into(),
+        B_CLEAR => wg::tr(&[
+            "Level cleared",
+            "过关",
+            "レベルクリア",
+            "레벨 클리어",
+            "Nivel superado",
+            "Nível concluído",
+            "Niveau terminé",
+            "Level geschafft",
+            "Уровень пройден",
+            "過關",
+        ])
+        .into(),
         B_GUN => wg::tr(&WEAPONS[s.banner_v.clamp(0, 4) as usize].names).into(),
         _ => String::new(),
     }
@@ -39,8 +67,12 @@ fn progress(s: &Save) -> f32 {
         return 1.0;
     }
     // before the arena is laid, the pier laid so far is most of the way
-    let end = if s.arena_d > 0.0 { s.arena_d } else { s.next_d + 40.0 };
-    ((s.d - s.start_d) / (end - s.start_d).max(1.0)).clamp(0.0, 1.0)
+    let end = if s.arena_d > 0.0 {
+        s.arena_d
+    } else {
+        s.next_d + 40.0
+    };
+    (s.d / end.max(1.0)).clamp(0.0, 1.0)
 }
 
 /// The boss's health left, 0 to 1, while it is fought.
@@ -61,7 +93,11 @@ pub fn picture(p: &Combat) -> u32 {
     let shown = [
         s.level,
         s.score,
-        if s.endless() { s.d as i32 } else { (progress(s) * 160.0) as i32 },
+        if s.endless() {
+            s.d as i32
+        } else {
+            (progress(s) * 160.0) as i32
+        },
         s.banner,
         s.banner_v,
         (banner_alpha(s) * 40.0) as i32,
@@ -71,15 +107,14 @@ pub fn picture(p: &Combat) -> u32 {
     wg::hash(0, wg::bytes_of(&shown))
 }
 
-pub fn moving(_p: &Combat) -> bool {
-    false
-}
-
 /// Text with a soft shadow under it, so it reads over the sea and the sky.
 fn text(s: &mut Screen, t: &str, x: f32, y: f32, size: f32, align: i32, alpha: f32) {
     let ink = wg::hex(0xffffff);
     let dark = wg::hex(0x10141c);
-    for (dx, dy, c, a) in [(0.0, size * 0.08, dark, 0.45 * alpha), (0.0, 0.0, ink, alpha)] {
+    for (dx, dy, c, a) in [
+        (0.0, size * 0.08, dark, 0.45 * alpha),
+        (0.0, 0.0, ink, alpha),
+    ] {
         match align {
             0 => {
                 s.text(t, x + dx, y + dy, size, c, a);
@@ -91,13 +126,21 @@ fn text(s: &mut Screen, t: &str, x: f32, y: f32, size: f32, align: i32, alpha: f
 }
 
 pub fn draw(p: &mut Combat, s: &mut Screen) {
-    s.overlay(true);
-    s.clear(0);
-    let st = &p.s;
     let (x0, y0, x1, y1) = s.visible();
     let w = x1 - x0;
+    // the band drawn in: the top line, and the banner below it
+    let band = (y1 - y0) * 0.3 + 30.0;
+    p.scene.hud_rows = (s.px(0.0, y0 + band).1.ceil() as i32).clamp(1, s.size_px().1) as u32;
+    s.overlay(true);
+    s.set_clip(x0, y0, w, band);
+    s.clear(0);
+    let st = &p.s;
     let top = y0 + 26.0;
-    let left = if st.endless() { format!("{} m", st.d.max(0.0) as i32) } else { level_text(st.level + 1) };
+    let left = if st.endless() {
+        format!("{} m", st.d.max(0.0) as i32)
+    } else {
+        level_text(st.level + 1)
+    };
     text(s, &left, x0 + 16.0, top, 17.0, 0, 1.0);
     text(s, &st.score.to_string(), x1 - 16.0, top, 21.0, 2, 1.0);
     // how far to the boss, then how much the boss has left
@@ -125,4 +168,5 @@ pub fn draw(p: &mut Combat, s: &mut Screen) {
         let size = s.fit_size(&t, 36.0, w - 40.0);
         text(s, &t, x0 + w / 2.0, y0 + (y1 - y0) * 0.3, size, 1, a);
     }
+    s.no_clip();
 }

@@ -1,7 +1,7 @@
 // Builds the models and effect pictures Partial Combat loads
-// (public/games/partial-combat/*.glb and fx.png, or the folder given) from the
-// CC0 packs they come from:
-//   npm install && node pack.mjs [folder]
+// (public/games/partial-combat/*.glb and fx.png, or $COMBAT_OUT) from the CC0
+// packs they come from, only the models, clips and pictures the game uses:
+//   npm install && node pack.mjs [figures mechs guns pier boats effects]
 // The packs are downloaded once into $COMBAT_CACHE (a temp folder by
 // default). Quaternius' packs come as FBX, turned into glTF by FBX2glTF.
 // Every model keeps its pack's own name, under a prefix (fig., mech., gun.,
@@ -18,7 +18,7 @@ import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from "meshoptimizer
 import sharp from "sharp";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const OUT = process.argv[2] ?? join(here, "../../../public/games/partial-combat");
+const OUT = process.env.COMBAT_OUT || join(here, "../../../public/games/partial-combat");
 const CACHE = process.env.COMBAT_CACHE || join(tmpdir(), "partial-combat-assets");
 const FBX2GLTF = join(here, "node_modules/fbx2gltf/bin", process.platform === "darwin" ? "Darwin" : "Linux", "FBX2glTF");
 
@@ -140,7 +140,7 @@ async function finish(doc, file, { simplifyTo } = {}) {
 // ---------- toy figures: Quaternius' Ultimate Animated Character Pack ----------
 // Every figure there shares one rig, so the file holds one skeleton and its
 // animations, and each figure's mesh is skinned to it.
-const FIGURES = { Soldier_Male: "soldier", Soldier_Female: "soldier_f", BlueSoldier_Male: "beret", Knight_Male: "knight", Ninja_Male: "ninja", Zombie_Male: "zombie", Viking_Male: "viking" };
+const FIGURES = { Soldier_Male: "soldier", BlueSoldier_Male: "beret", Ninja_Male: "ninja", Viking_Male: "viking" };
 const FIGURE_CLIPS = ["idle", "walk", "shoot_onehanded", "recievehit", "defeat", "victory", "punch"];
 
 async function figures() {
@@ -183,7 +183,7 @@ async function figures() {
 
 // ---------- bosses: Quaternius' Animated Mech Pack ----------
 const MECHS = { George: "george", Leela: "leela", Mike: "mike", Stan: "stan" };
-const MECH_CLIPS = ["idle", "walk", "shoot", "punch", "hitrecieve_1", "death"];
+const MECH_CLIPS = ["idle", "walk", "shoot", "punch", "death"];
 const TEXTURE = 512;
 
 /** Moves every root node and animation of `from` into `doc`. */
@@ -241,13 +241,12 @@ async function guns() {
 
 // ---------- pier and shore: Kenney's Pirate Kit, boats: Kenney's Watercraft Kit ----------
 const PIRATE = [
-  "structure-platform", "structure-platform-dock", "structure-platform-small", "platform-planks", "structure-fence", "structure-fence-sides",
-  "barrel", "crate", "crate-bottles", "chest", "cannon-mobile", "cannon-ball", "flag-high", "flag-pirate-high",
-  "palm-detailed-bend", "palm-detailed-straight", "palm-bend", "rocks-a", "rocks-b", "rocks-c", "rocks-sand-a", "rocks-sand-b",
-  "patch-sand-foliage", "patch-sand", "patch-grass-foliage", "grass-plant", "ship-pirate-large", "ship-pirate-medium", "ship-medium",
-  "ship-wreck", "boat-row-small", "tower-watch", "tower-complete-large", "castle-gate", "castle-wall",
+  "structure-platform", "structure-platform-dock", "barrel", "crate", "cannon-ball", "flag-pirate-high",
+  "palm-detailed-bend", "palm-detailed-straight", "rocks-a", "rocks-b", "rocks-c", "rocks-sand-a",
+  "patch-sand-foliage", "patch-grass-foliage", "ship-pirate-large", "ship-pirate-medium", "ship-wreck",
+  "tower-watch", "tower-complete-large", "castle-wall",
 ];
-const WATERCRAFT = ["gate", "gate-finish", "buoy", "buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "cargo-container-a", "cargo-container-b", "cargo-pile-a", "ship-cargo-a"];
+const WATERCRAFT = ["gate", "gate-finish", "buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "ship-cargo-a"];
 
 async function kit(packName, names, prefix, file) {
   const dir = join(pack(packName), "Models", "GLB format");
@@ -267,9 +266,8 @@ async function kit(packName, names, prefix, file) {
 // ---------- effects: Kenney's Particle Pack, as one picture ----------
 /** Sprites in the order the game names them (fx.ts), 128 px each, 8 to a row. */
 const FX = [
-  "smoke_01", "smoke_04", "smoke_07", "smoke_10", "flame_02", "flame_04", "fire_01", "flare_01",
-  "spark_02", "spark_05", "muzzle_01", "muzzle_03", "star_04", "star_07", "circle_02", "circle_05",
-  "light_01", "trace_02", "magic_03", "scorch_02", "dirt_02", "twirl_02", "circle_01", "light_03",
+  "smoke_01", "smoke_04", "smoke_07", "smoke_10", "flare_01", "star_04", "circle_02", "circle_05",
+  "light_01", "scorch_02", "dirt_02", "circle_01", "light_03",
 ];
 const CELL = 128;
 
