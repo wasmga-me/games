@@ -32,11 +32,11 @@ static const i32 CHOICES[NOPT] = {4, 2, 3, THEMES, 2};
 enum { EASY, NORMAL, HARD, FRIEND };
 
 /* the computer's name per level, in each language (en zh ja ko es pt fr de ru) */
-static const char *const FOES[4][9] = {
-  {"Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий"},
-  {"Normal", "普通", "ふつう", "보통", "Normal", "Normal", "Normal", "Normal", "Обычный"},
-  {"Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный"},
-  {"A friend", "朋友", "友だち", "친구", "Un amigo", "Um amigo", "Un ami", "Ein Freund", "Друг"},
+static const char *const FOES[4][10] = {
+  {"Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий", "簡單"},
+  {"Normal", "普通", "ふつう", "보통", "Normal", "Normal", "Normal", "Normal", "Обычный", "普通"},
+  {"Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный", "困難"},
+  {"A friend", "朋友", "友だち", "친구", "Un amigo", "Um amigo", "Un ami", "Ein Freund", "Друг", "朋友"},
 };
 static const i32 SIZES[3] = {6, 8, 10};
 static const i32 MULT[3] = {1, 2, 4};
@@ -465,7 +465,7 @@ static float fit(const char *s, float size, float w) {
 static const char *name_of(i32 who) {
   if (net_side) return who == net_side ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : tr("Friend", "朋友", "友だち", "친구", "Amigo", "Amigo", "Ami", "Freund", "Друг");
   if (S.opt[O_FOE] == FRIEND) return who == DARK ? tr("Dark", "黑棋", "黒", "흑", "Negras", "Pretas", "Noirs", "Schwarz", "Чёрные") : tr("Light", "白棋", "白", "백", "Blancas", "Brancas", "Blancs", "Weiß", "Белые");
-  return human(who) ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : wg_tr(FOES[S.opt[O_FOE]], 9);
+  return human(who) ? tr("You", "你", "あなた", "나", "Tú", "Você", "Vous", "Du", "Вы") : wg_tr(FOES[S.opt[O_FOE]], 10);
 }
 
 static i32 thinking(void) { return S.phase == PLAY && !human(S.turn) && !S.pass_ms; }
@@ -490,8 +490,8 @@ static void draw_side(void) {
   }
   float mid = SIDE_X + SIDE_W / 2.0f;
   if (S.phase == OVER) {
-    const char *msg = S.result == 3 ? tr("Draw", "平局", "引き分け", "무승부", "Empate", "Empate", "Égalité", "Remis", "Ничья") : S.opt[O_FOE] == FRIEND && !net_side ? (S.result == DARK ? tr("Dark wins", "黑棋胜", "黒の勝ち", "흑 승리", "Ganan negras", "Pretas vencem", "Les noirs gagnent", "Schwarz gewinnt", "Победа чёрных") : tr("Light wins", "白棋胜", "白の勝ち", "백 승리", "Ganan blancas", "Brancas vencem", "Les blancs gagnent", "Weiß gewinnt", "Победа белых"))
-                    : human(S.result) ? tr("You win", "你赢了", "あなたの勝ち", "이겼습니다", "Ganaste", "Você venceu", "Vous gagnez", "Gewonnen", "Победа") : tr("You lose", "你输了", "あなたの負け", "졌습니다", "Perdiste", "Você perdeu", "Vous perdez", "Verloren", "Поражение");
+    const char *msg = S.result == 3 ? tr("Draw", "平局", "引き分け", "무승부", "Empate", "Empate", "Égalité", "Remis", "Ничья") : S.opt[O_FOE] == FRIEND && !net_side ? (S.result == DARK ? tr("Dark wins", "黑棋胜", "黒の勝ち", "흑 승리", "Ganan negras", "Pretas vencem", "Les noirs gagnent", "Schwarz gewinnt", "Победа чёрных", "黑棋勝") : tr("Light wins", "白棋胜", "白の勝ち", "백 승리", "Ganan blancas", "Brancas vencem", "Les blancs gagnent", "Weiß gewinnt", "Победа белых", "白棋勝"))
+                    : human(S.result) ? tr("You win", "你赢了", "あなたの勝ち", "이겼습니다", "Ganaste", "Você venceu", "Vous gagnez", "Gewonnen", "Победа", "你贏了") : tr("You lose", "你输了", "あなたの負け", "졌습니다", "Perdiste", "Você perdeu", "Vous perdez", "Verloren", "Поражение", "你輸了");
     v_text_c(msg, mid, 160, fit(msg, 15, SIDE_W + 8), T.accent, 1);
     return;
   }
@@ -506,7 +506,7 @@ static void draw_side(void) {
   i32 hot = !S.keyboard && side_button_at(S.mx, S.my) == 0 && S.hist_n;
   float a = S.hist_n ? 1 : 0.4f;
   v_box(SIDE_X, BTN1_Y, SIDE_W, BTN_H, 9, hot ? T.accent : T.panel, a);
-  const char *undo = tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена");
+  const char *undo = tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена", "復原");
   v_text_c(undo, mid, BTN1_Y + BTN_H / 2.0f, fit(undo, 14, SIDE_W - 8), hot ? T.bg : T.text, a);
 }
 
@@ -515,9 +515,9 @@ static void draw(void) {
   draw_board();
   draw_side();
   if (S.pass_ms) {
-    const char *who = net_side && !human(S.pass_who) ? tr("No move for your friend", "朋友无处可下", "友だちは打つ手がありません", "친구는 둘 곳이 없습니다", "Tu amigo no puede mover", "Seu amigo não tem jogada", "Votre ami ne peut pas jouer", "Dein Freund kann nicht ziehen", "Другу некуда ходить")
-                    : !net_side && S.opt[O_FOE] == FRIEND ? (S.pass_who == DARK ? tr("No move for dark", "黑棋无处可下", "黒は打つ手がありません", "흑은 둘 곳이 없습니다", "Las negras no pueden mover", "As pretas não têm jogada", "Les noirs ne peuvent pas jouer", "Schwarz kann nicht ziehen", "Чёрным некуда ходить") : tr("No move for light", "白棋无处可下", "白は打つ手がありません", "백은 둘 곳이 없습니다", "Las blancas no pueden mover", "As brancas não têm jogada", "Les blancs ne peuvent pas jouer", "Weiß kann nicht ziehen", "Белым некуда ходить"))
-                    : human(S.pass_who) ? tr("No move for you", "你无处可下", "打つ手がありません", "둘 곳이 없습니다", "No puedes mover", "Você não tem jogada", "Vous ne pouvez pas jouer", "Du kannst nicht ziehen", "Вам некуда ходить") : tr("No move for the computer", "电脑无处可下", "コンピューターは打つ手がありません", "컴퓨터는 둘 곳이 없습니다", "La computadora no puede mover", "O computador não tem jogada", "L'ordinateur ne peut pas jouer", "Der Computer kann nicht ziehen", "Компьютеру некуда ходить");
+    const char *who = net_side && !human(S.pass_who) ? tr("No move for your friend", "朋友无处可下", "友だちは打つ手がありません", "친구는 둘 곳이 없습니다", "Tu amigo no puede mover", "Seu amigo não tem jogada", "Votre ami ne peut pas jouer", "Dein Freund kann nicht ziehen", "Другу некуда ходить", "朋友無處可下")
+                    : !net_side && S.opt[O_FOE] == FRIEND ? (S.pass_who == DARK ? tr("No move for dark", "黑棋无处可下", "黒は打つ手がありません", "흑은 둘 곳이 없습니다", "Las negras no pueden mover", "As pretas não têm jogada", "Les noirs ne peuvent pas jouer", "Schwarz kann nicht ziehen", "Чёрным некуда ходить", "黑棋無處可下") : tr("No move for light", "白棋无处可下", "白は打つ手がありません", "백은 둘 곳이 없습니다", "Las blancas no pueden mover", "As brancas não têm jogada", "Les blancs ne peuvent pas jouer", "Weiß kann nicht ziehen", "Белым некуда ходить", "白棋無處可下"))
+                    : human(S.pass_who) ? tr("No move for you", "你无处可下", "打つ手がありません", "둘 곳이 없습니다", "No puedes mover", "Você não tem jogada", "Vous ne pouvez pas jouer", "Du kannst nicht ziehen", "Вам некуда ходить", "你無處可下") : tr("No move for the computer", "电脑无处可下", "コンピューターは打つ手がありません", "컴퓨터는 둘 곳이 없습니다", "La computadora no puede mover", "O computador não tem jogada", "L'ordinateur ne peut pas jouer", "Der Computer kann nicht ziehen", "Компьютеру некуда ходить", "電腦無處可下");
     float w = v_text_w(who, 13) + 28, size = (float)(S.cell * S.n);
     float x = S.bx + (size - w) / 2, y = S.by + size / 2 - 15;
     v_shadow(x, y + 3, w, 30, 10, 8, RGB(0, 0, 0), 0.4f);

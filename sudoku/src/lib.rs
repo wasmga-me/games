@@ -211,14 +211,14 @@ const THEME: [Theme; THEMES] = [
 ];
 
 /// Each level's name, in wg::LANGS order.
-const LEVEL_NAMES: [[&str; 9]; 4] = [
-    ["Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий"],
-    ["Medium", "中等", "ふつう", "보통", "Medio", "Médio", "Moyen", "Mittel", "Средний"],
-    ["Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный"],
-    ["Expert", "专家", "エキスパート", "전문가", "Experto", "Especialista", "Expert", "Experte", "Эксперт"],
+const LEVEL_NAMES: [[&str; 10]; 4] = [
+    ["Easy", "简单", "かんたん", "쉬움", "Fácil", "Fácil", "Facile", "Leicht", "Лёгкий", "簡單"],
+    ["Medium", "中等", "ふつう", "보통", "Medio", "Médio", "Moyen", "Mittel", "Средний", "中等"],
+    ["Hard", "困难", "むずかしい", "어려움", "Difícil", "Difícil", "Difficile", "Schwer", "Сложный", "困難"],
+    ["Expert", "专家", "エキスパート", "전문가", "Experto", "Especialista", "Expert", "Experte", "Эксперт", "專家"],
 ];
 /// "Last place for {} in this row", then column and box, in wg::LANGS order.
-const LAST_PLACE: [[&str; 9]; 3] = [
+const LAST_PLACE: [[&str; 10]; 3] = [
     [
         "Last place for {} in this row",
         "这一行里 {} 只剩这个位置",
@@ -229,6 +229,7 @@ const LAST_PLACE: [[&str; 9]; 3] = [
         "Dernière case du {} sur cette ligne",
         "Letztes Feld für die {} in dieser Zeile",
         "Последнее место для {} в этой строке",
+        "這一行裡 {} 只剩這個位置",
     ],
     [
         "Last place for {} in this column",
@@ -240,6 +241,7 @@ const LAST_PLACE: [[&str; 9]; 3] = [
         "Dernière case du {} dans cette colonne",
         "Letztes Feld für die {} in dieser Spalte",
         "Последнее место для {} в этом столбце",
+        "這一列裡 {} 只剩這個位置",
     ],
     [
         "Last place for {} in this box",
@@ -251,6 +253,7 @@ const LAST_PLACE: [[&str; 9]; 3] = [
         "Dernière case du {} dans ce bloc",
         "Letztes Feld für die {} in diesem Block",
         "Последнее место для {} в этом блоке",
+        "這一宮裡 {} 只剩這個位置",
     ],
 ];
 
@@ -611,6 +614,7 @@ impl Sudoku {
                     "Seul le {} va ici",
                     "Hier passt nur die {}",
                     "Сюда подходит только {}",
+                    "這裡只能填 {}",
                 ])
                 .replace("{}", &d.to_string()),
             ),
@@ -626,6 +630,7 @@ impl Sudoku {
                     "Ce {} était faux",
                     "Die {} war falsch",
                     "Цифра {} была неверной",
+                    "這個 {} 填錯了",
                 ])
                 .replace("{}", &d.to_string()),
             ),
@@ -688,9 +693,9 @@ impl Sudoku {
                 }
             } else {
                 let name = match i as u8 {
-                    T_UNDO => wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена"]),
+                    T_UNDO => wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена", "復原"]),
                     T_ERASE => wg::tr(&["Erase", "擦除", "消す", "지우기", "Borrar", "Apagar", "Effacer", "Löschen", "Стереть"]),
-                    T_NOTES => wg::tr(&["Notes", "笔记", "メモ", "메모", "Notas", "Notas", "Notes", "Notizen", "Заметки"]),
+                    T_NOTES => wg::tr(&["Notes", "笔记", "メモ", "메모", "Notas", "Notas", "Notes", "Notizen", "Заметки", "筆記"]),
                     _ => wg::tr(&["Hint", "提示", "ヒント", "힌트", "Pista", "Dica", "Indice", "Tipp", "Подсказка"]),
                 };
                 let icon = (r.h * 0.5).min(r.w * 0.5).min(20.0);

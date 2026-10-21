@@ -288,9 +288,9 @@ impl Facets {
         let score = group(b.score);
         // what the bar shows, and its label and number
         let (label, value, frac) = match b.mode {
-            MODE_TIMED => (wg::tr(&["Time", "时间", "タイム", "시간", "Tiempo", "Tempo", "Temps", "Zeit", "Время"]), wg::clock(b.time_left), b.time_left as f32 / TIMED_MS as f32),
-            MODE_MOVES => (wg::tr(&["Moves", "步数", "手数", "이동", "Movimientos", "Movimentos", "Coups", "Züge", "Ходы"]), b.moves_left.to_string(), b.moves_left as f32 / MOVES as f32),
-            _ => (wg::tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень"]), b.level.to_string(), b.progress as f32 / level_need(b.level) as f32),
+            MODE_TIMED => (wg::tr(&["Time", "时间", "タイム", "시간", "Tiempo", "Tempo", "Temps", "Zeit", "Время", "時間"]), wg::clock(b.time_left), b.time_left as f32 / TIMED_MS as f32),
+            MODE_MOVES => (wg::tr(&["Moves", "步数", "手数", "이동", "Movimientos", "Movimentos", "Coups", "Züge", "Ходы", "步數"]), b.moves_left.to_string(), b.moves_left as f32 / MOVES as f32),
+            _ => (wg::tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]), b.level.to_string(), b.progress as f32 / level_need(b.level) as f32),
         };
         let low = (b.mode == MODE_TIMED && b.time_left < 10_000) || (b.mode == MODE_MOVES && b.moves_left <= 3);
         let vc = if low { hex(0xff5a5a) } else { ink };
@@ -490,13 +490,13 @@ impl Facets {
         let b = &self.s.b;
         let text: Option<(String, f32)> = if b.over() && b.end_ms > 0 {
             let msg = match b.end {
-                END_STUCK => wg::tr(&["No moves left", "无路可走", "手詰まり", "이동할 수 없습니다", "Sin jugadas posibles", "Sem jogadas possíveis", "Aucun coup possible", "Kein Zug möglich", "Ходов нет"]),
-                END_TIME => wg::tr(&["Time is up", "时间到", "タイムアップ", "시간 종료", "Tiempo agotado", "Tempo esgotado", "Temps écoulé", "Zeit abgelaufen", "Время вышло"]),
-                _ => wg::tr(&["Out of moves", "步数用完", "手数切れ", "남은 이동이 없습니다", "Sin movimientos", "Sem movimentos", "Plus de coups", "Keine Züge mehr", "Ходы закончились"]),
+                END_STUCK => wg::tr(&["No moves left", "无路可走", "手詰まり", "이동할 수 없습니다", "Sin jugadas posibles", "Sem jogadas possíveis", "Aucun coup possible", "Kein Zug möglich", "Ходов нет", "無路可走"]),
+                END_TIME => wg::tr(&["Time is up", "时间到", "タイムアップ", "시간 종료", "Tiempo agotado", "Tempo esgotado", "Temps écoulé", "Zeit abgelaufen", "Время вышло", "時間到"]),
+                _ => wg::tr(&["Out of moves", "步数用完", "手数切れ", "남은 이동이 없습니다", "Sin movimientos", "Sem movimentos", "Plus de coups", "Keine Züge mehr", "Ходы закончились", "步數用完"]),
             };
             Some((msg.to_string(), (b.end_ms as f32 / 250.0).min(1.0)))
         } else if self.banner > 0.0 {
-            Some((wg::tr(&["Level {}", "第 {} 关", "レベル {}", "레벨 {}", "Nivel {}", "Nível {}", "Niveau {}", "Level {}", "Уровень {}"]).replace("{}", &self.banner_level.to_string()), self.banner.min(1.0)))
+            Some((wg::tr(&["Level {}", "第 {} 关", "レベル {}", "레벨 {}", "Nivel {}", "Nível {}", "Niveau {}", "Level {}", "Уровень {}", "第 {} 關"]).replace("{}", &self.banner_level.to_string()), self.banner.min(1.0)))
         } else if b.phase() == Phase::Shuffle {
             Some((wg::tr(&["Shuffle", "洗牌", "シャッフル", "셔플", "Mezclando", "Embaralhando", "Mélange", "Mischen", "Перемешивание"]).to_string(), 1.0))
         } else {

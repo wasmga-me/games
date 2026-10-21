@@ -12,4 +12,4 @@ dependencies = [
 [[package]]
 name = "wg"
 version = "0.1.0"
-source = "git+https://github.com/wasmga-me/wasmgame-wg#786659aea8ada04ddd2272d8a4371cd8df20482b"
+source = "git+https://github.com/wasmga-me/wasmgame-wg#a0f6811ce28ebf2d8d562bcb069592ef06666de5"

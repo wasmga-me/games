@@ -502,9 +502,9 @@ impl Slider {
             }
         }
         let rows: [(&str, String); 3] = [
-            (wg::tr(&["Moves", "步数", "手数", "이동", "Movimientos", "Movimentos", "Coups", "Züge", "Ходы"]), format!("{}", self.s.moves)),
-            (wg::tr(&["Time", "时间", "タイム", "시간", "Tiempo", "Tempo", "Temps", "Zeit", "Время"]), wg::clock(self.s.time_ms)),
-            (wg::tr(&["In place", "已归位", "正しい位置", "제자리", "En su sitio", "No lugar", "En place", "Richtig", "На месте"]), format!("{} / {}", self.s.board.in_place(), n * n - 1)),
+            (wg::tr(&["Moves", "步数", "手数", "이동", "Movimientos", "Movimentos", "Coups", "Züge", "Ходы", "步數"]), format!("{}", self.s.moves)),
+            (wg::tr(&["Time", "时间", "タイム", "시간", "Tiempo", "Tempo", "Temps", "Zeit", "Время", "時間"]), wg::clock(self.s.time_ms)),
+            (wg::tr(&["In place", "已归位", "正しい位置", "제자리", "En su sitio", "No lugar", "En place", "Richtig", "На месте", "已歸位"]), format!("{} / {}", self.s.board.in_place(), n * n - 1)),
         ];
         for (i, (label, value)) in rows.iter().enumerate() {
             let (x, y) = if tall {

@@ -639,7 +639,7 @@ static void draw(void) {
   }
   if (S.undo_on) {
     float a = S.hist_n ? 1 : 0.45f;
-    button(L.ux, L.uy, L.uw, L.uh, tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена"), S.hist_n ? ACT_UNDO : ACT_NONE, 0, a);
+    button(L.ux, L.uy, L.uw, L.uh, tr("Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Rückgängig", "Отмена", "復原"), S.hist_n ? ACT_UNDO : ACT_NONE, 0, a);
   }
 
 
@@ -677,8 +677,8 @@ static void draw(void) {
       float cx = L.bx + L.bs / 2, cy = L.by + L.bs * 0.4f, bh = L.bs * 0.12f, bw = L.bs * 0.34f;
       float by = L.by + L.bs * 0.56f;
       text_fit("2048!", cx, cy, L.bs * 0.2f, L.bs * 0.9f, title_colour(), a);
-      button(cx - bw - L.bs * 0.02f, by, bw, bh, tr("Keep going", "继续", "続ける", "계속하기", "Seguir", "Continuar", "Continuer", "Weiter", "Дальше"), ACT_KEEP, S.sel == 0, a);
-      button(cx + L.bs * 0.02f, by, bw, bh, tr("Finish", "结束", "終了", "끝내기", "Terminar", "Encerrar", "Terminer", "Beenden", "Закончить"), ACT_FINISH, S.sel == 1, a);
+      button(cx - bw - L.bs * 0.02f, by, bw, bh, tr("Keep going", "继续", "続ける", "계속하기", "Seguir", "Continuar", "Continuer", "Weiter", "Дальше", "繼續"), ACT_KEEP, S.sel == 0, a);
+      button(cx + L.bs * 0.02f, by, bw, bh, tr("Finish", "结束", "終了", "끝내기", "Terminar", "Encerrar", "Terminer", "Beenden", "Закончить", "結束"), ACT_FINISH, S.sel == 1, a);
     }
   }
 }

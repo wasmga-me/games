@@ -570,7 +570,7 @@ static void draw_hud(void) {
   char buf[48], num[12];
   float mid = HUD / 2.0f;
   if (S.phase == WON) {
-    v_text(join(buf, tr("Cleared in ", "完成用时 ", "クリアタイム ", "완료 시간 ", "Completado en ", "Concluído em ", "Terminé en ", "Geschafft in ", "Пройдено за "), tenths(S.time_ms / 100, num)), 10, mid, 17, T.accent, 1);
+    v_text(join(buf, tr("Cleared in ", "完成用时 ", "クリアタイム ", "완료 시간 ", "Completado en ", "Concluído em ", "Terminé en ", "Geschafft in ", "Пройдено за ", "完成用時 "), tenths(S.time_ms / 100, num)), 10, mid, 17, T.accent, 1);
     return;
   }
   if (S.phase == LOST) {

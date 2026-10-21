@@ -144,6 +144,7 @@ fn level_of(n: usize, of: usize) -> String {
         wg::FR => format!("Niveau {n} sur {of}"),
         wg::DE => format!("Level {n} von {of}"),
         wg::RU => format!("Уровень {n} из {of}"),
+        wg::ZT => format!("第 {n} 關，共 {of} 關"),
         _ => format!("Level {n} of {of}"),
     }
 }
@@ -159,6 +160,7 @@ fn t_goal() -> &'static str {
         "Objectif",
         "Ziel",
         "Цель",
+        "目標",
     ])
 }
 
@@ -1271,6 +1273,7 @@ impl Branchwise {
                 "Niveau réussi",
                 "Level geschafft",
                 "Уровень пройден",
+                "關卡完成",
             ])
         };
         s.text_c(
@@ -1292,6 +1295,7 @@ impl Branchwise {
             "Commandes",
             "Befehle",
             "Команды",
+            "指令",
         ]);
         let line = format!(
             "{score_l} +{}    {cmd_l} {} / {}",
@@ -1311,6 +1315,7 @@ impl Branchwise {
                 "Niveau suivant",
                 "Nächstes Level",
                 "Следующий уровень",
+                "下一關",
             ]);
             self.button(
                 s,
@@ -1402,6 +1407,7 @@ impl Branchwise {
                     "Lancer",
                     "Starten",
                     "Начать",
+                    "開始",
                 ])
                 .into(),
                 Hit::Btn(Btn::Start),
@@ -1434,6 +1440,7 @@ impl Branchwise {
                         "Annuler",
                         "Rückgängig",
                         "Отменить",
+                        "復原",
                     ])
                     .into(),
                     Hit::Btn(Btn::Undo),
@@ -1500,6 +1507,7 @@ impl Branchwise {
             "Exécuter",
             "Ausführen",
             "Выполнить",
+            "執行",
         ]);
         let rw = (s.text_width(run, 15.0) + 28.0).max(70.0);
         let bw = 46.0;
@@ -1601,6 +1609,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
                 "Tapez une commande git",
                 "Git-Befehl eingeben",
                 "Введите команду git",
+                "輸入 git 指令",
             ]);
             s.text(ph, tx, iy + ih / 2.0, ifs, hex(t.muted), 0.55);
         }
@@ -1786,6 +1795,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
             "Annuler",
             "Rückgängig",
             "Отменить",
+            "復原",
         ]);
         let bw = (lw - 20.0 - 10.0) / 2.0;
         self.button(s, t, 20.0, by, bw, 42.0, hint, Hit::Btn(Btn::Hint), false);
@@ -1904,6 +1914,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
                     "Voir le vôtre",
                     "Deins zeigen",
                     "Показать свой",
+                    "檢視你的",
                 ])
             } else {
                 tr(&[
@@ -1916,6 +1927,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
                     "Voir l'objectif",
                     "Ziel zeigen",
                     "Показать цель",
+                    "檢視目標",
                 ])
             };
             let bw = s.text_width(label, 14.0) + 28.0;

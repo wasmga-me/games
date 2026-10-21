@@ -623,6 +623,7 @@ impl Tilestack {
                     "Tuiles",
                     "Steine",
                     "Фишки",
+                    "剩餘",
                 ]),
                 format!("{}", self.left()),
             ),
@@ -637,6 +638,7 @@ impl Tilestack {
                     "Paires libres",
                     "Freie Paare",
                     "Свободные пары",
+                    "可配對",
                 ]),
                 format!("{}", self.open),
             ),
@@ -651,6 +653,7 @@ impl Tilestack {
                     "Temps",
                     "Zeit",
                     "Время",
+                    "時間",
                 ]),
                 wg::clock(self.s.time_ms),
             ),
@@ -666,6 +669,7 @@ impl Tilestack {
                 "Plus de paires",
                 "Keine Paare mehr",
                 "Пар больше нет",
+                "沒有可配對的牌了",
             ]))
         } else {
             None
@@ -714,6 +718,7 @@ impl Tilestack {
                 "Annuler",
                 "Zurück",
                 "Отмена",
+                "復原",
             ]),
             wg::tr(&[
                 "Shuffle",

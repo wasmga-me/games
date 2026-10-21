@@ -1002,12 +1002,12 @@ impl Pantry {
         if self.msg_ms > 0 {
             let m = match self.msg {
                 MSG_FILL => wg::tr(&["Fill every column first", "先把每一列都放上牌", "先に空いた列を埋めてください", "빈 열을 먼저 채우세요", "Primero llena todas las columnas", "Preencha todas as colunas primeiro", "Remplissez d'abord chaque colonne", "Erst jede Spalte füllen", "Сначала заполните все столбцы"]),
-                _ => wg::tr(&["No useful moves left", "没有有用的走法了", "有効な手がありません", "쓸 만한 수가 없습니다", "No quedan movimientos útiles", "Não há mais jogadas úteis", "Plus aucun coup utile", "Keine sinnvollen Züge mehr", "Полезных ходов не осталось"]),
+                _ => wg::tr(&["No useful moves left", "没有有用的走法了", "有効な手がありません", "쓸 만한 수가 없습니다", "No quedan movimientos útiles", "Não há mais jogadas úteis", "Plus aucun coup utile", "Keine sinnvollen Züge mehr", "Полезных ходов не осталось", "沒有有用的走法了"]),
             };
             let size = s.fit_size(m, f, room);
             s.text(m, x, mid, size, th.accent, 1.0);
         } else {
-            let label = wg::tr(&["Moves ", "步数 ", "手数 ", "이동 ", "Movimientos ", "Movimentos ", "Coups ", "Züge ", "Ходы "]);
+            let label = wg::tr(&["Moves ", "步数 ", "手数 ", "이동 ", "Movimientos ", "Movimentos ", "Coups ", "Züge ", "Ходы ", "步數 "]);
             let text = format!("{}{}", label, self.s.moves);
             let size = s.fit_size(&text, f, room);
             s.text(&text, x, mid, size, th.dim, 1.0);
@@ -1021,7 +1021,7 @@ impl Pantry {
             let name = if b == 1 {
                 wg::tr(&["Hint", "提示", "ヒント", "힌트", "Pista", "Dica", "Indice", "Tipp", "Подсказка"])
             } else {
-                wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена"])
+                wg::tr(&["Undo", "撤销", "元に戻す", "되돌리기", "Deshacer", "Desfazer", "Annuler", "Zurück", "Отмена", "復原"])
             };
             let size = s.fit_size(name, f, bw - 8.0);
             s.text_c(name, bx + bw / 2.0, by + bh / 2.0, size, if hot { th.panel } else { th.text }, a);

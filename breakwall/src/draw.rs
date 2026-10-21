@@ -69,17 +69,17 @@ pub static THEMES: [Theme; 4] = [
 
 pub const BOOST_LETTER: [&str; NBOOST] = ["W", "N", "M", "S", "L", "C", "F", "+", "B", "R"];
 /// Each boost's name, in wg::LANGS order.
-const BOOST_NAME: [[&str; 9]; NBOOST] = [
-    ["Wide", "加宽", "ワイド", "넓게", "Ancha", "Larga", "Large", "Breit", "Широкая"],
-    ["Narrow", "变窄", "ナロー", "좁게", "Estrecha", "Estreita", "Étroite", "Schmal", "Узкая"],
-    ["Multi", "多球", "マルチ", "멀티볼", "Multibola", "Multibola", "Multi", "Multi", "Мульти"],
-    ["Slow", "减速", "スロー", "감속", "Lenta", "Lenta", "Lente", "Langsam", "Медленно"],
-    ["Laser", "激光", "レーザー", "레이저", "Láser", "Laser", "Laser", "Laser", "Лазер"],
-    ["Catch", "接球", "キャッチ", "캐치", "Atrapar", "Pegar", "Colle", "Fangen", "Захват"],
-    ["Fire", "火球", "ファイア", "불덩이", "Fuego", "Fogo", "Feu", "Feuer", "Огонь"],
-    ["Life", "生命", "ライフ", "생명", "Vida", "Vida", "Vie", "Leben", "Жизнь"],
-    ["Barrier", "屏障", "バリア", "방벽", "Barrera", "Barreira", "Barrière", "Barriere", "Барьер"],
-    ["Rush", "加速", "ラッシュ", "가속", "Rápida", "Rápida", "Rapide", "Schnell", "Быстро"],
+const BOOST_NAME: [[&str; 10]; NBOOST] = [
+    ["Wide", "加宽", "ワイド", "넓게", "Ancha", "Larga", "Large", "Breit", "Широкая", "加寬"],
+    ["Narrow", "变窄", "ナロー", "좁게", "Estrecha", "Estreita", "Étroite", "Schmal", "Узкая", "變窄"],
+    ["Multi", "多球", "マルチ", "멀티볼", "Multibola", "Multibola", "Multi", "Multi", "Мульти", "多球"],
+    ["Slow", "减速", "スロー", "감속", "Lenta", "Lenta", "Lente", "Langsam", "Медленно", "減速"],
+    ["Laser", "激光", "レーザー", "레이저", "Láser", "Laser", "Laser", "Laser", "Лазер", "雷射"],
+    ["Catch", "接球", "キャッチ", "캐치", "Atrapar", "Pegar", "Colle", "Fangen", "Захват", "接球"],
+    ["Fire", "火球", "ファイア", "불덩이", "Fuego", "Fogo", "Feu", "Feuer", "Огонь", "火球"],
+    ["Life", "生命", "ライフ", "생명", "Vida", "Vida", "Vie", "Leben", "Жизнь", "生命"],
+    ["Barrier", "屏障", "バリア", "방벽", "Barrera", "Barreira", "Barrière", "Barriere", "Барьер", "屏障"],
+    ["Rush", "加速", "ラッシュ", "가속", "Rápida", "Rápida", "Rapide", "Schnell", "Быстро", "加速"],
 ];
 const BOOST_COLOUR: [u32; NBOOST] = [
     rgb(60, 190, 110), rgb(120, 110, 130), rgb(70, 140, 255), rgb(240, 180, 40), rgb(240, 70, 70),
@@ -389,7 +389,7 @@ fn paddle(g: &mut Screen, t: &Theme, s: &State, a: &Anim, x: f32, w: f32) {
 
 /// The words around a level's number: "Level 3", "第 3 关".
 fn level_words() -> (&'static str, &'static str) {
-    (wg::tr(&["Level ", "第 ", "レベル ", "레벨 ", "Nivel ", "Nível ", "Niveau ", "Level ", "Уровень "]), wg::tr(&["", " 关"]))
+    (wg::tr(&["Level ", "第 ", "レベル ", "레벨 ", "Nivel ", "Nível ", "Niveau ", "Level ", "Уровень "]), wg::tr(&["", " 关", "", "", "", "", "", "", "", " 關"]))
 }
 
 fn hud(g: &mut Screen, t: &Theme, s: &State) {
@@ -528,7 +528,7 @@ pub fn draw(g: &mut Screen, s: &State, a: &mut Anim) {
     }
     if s.phase == CLEAR {
         let al = clampf(s.phase_ms as f32 / 200.0, 0.0, 1.0);
-        let word = if s.won != 0 { wg::tr(&["Every level cleared", "全部过关", "全レベルクリア", "모든 레벨 클리어", "Todos los niveles superados", "Todos os níveis concluídos", "Tous les niveaux terminés", "Alle Level geschafft", "Все уровни пройдены"]) } else { wg::tr(&["Cleared", "过关", "クリア", "클리어", "Nivel superado", "Nível concluído", "Niveau terminé", "Geschafft", "Уровень пройден"]) };
+        let word = if s.won != 0 { wg::tr(&["Every level cleared", "全部过关", "全レベルクリア", "모든 레벨 클리어", "Todos los niveles superados", "Todos os níveis concluídos", "Tous les niveaux terminés", "Alle Level geschafft", "Все уровни пройдены", "全部過關"]) } else { wg::tr(&["Cleared", "过关", "クリア", "클리어", "Nivel superado", "Nível concluído", "Niveau terminé", "Geschafft", "Уровень пройден", "過關"]) };
         let size = g.fit_size(word, 30.0, FIELD_R - FIELD_L - 24.0);
         g.text_c(word, PW / 2.0, mid, size, t.text, al);
     }
