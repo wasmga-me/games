@@ -1,0 +1,14 @@
+{
+  "name": "partial-combat-assets",
+  "private": true,
+  "type": "module",
+  "description": "Builds Partial Combat's models and effects (public/games/partial-combat) from the CC0 packs they come from: node pack.mjs",
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "fbx2gltf": "0.9.7-p1",
+    "meshoptimizer": "0.22.0",
+    "sharp": "0.34.5"
+  }
+}
