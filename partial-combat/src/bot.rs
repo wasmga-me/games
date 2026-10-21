@@ -232,6 +232,13 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
                 "other"
             };
         }
+        // what the page would draw, and the save it would keep, hold up
+        if t % 500 == 0 {
+            p.build(1280, 720);
+            let mut kept = Combat::new();
+            kept.s = p.s;
+            assert!(kept.loaded(), "a save made in play fails loaded()");
+        }
         run.peak = run.peak.max(p.s.count);
         if p.s.phase == P_BOSS {
             if boss_t == 0 {

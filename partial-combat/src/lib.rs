@@ -1681,17 +1681,26 @@ impl Combat {
     fn drop_behind(&mut self) {
         let sd = self.s.d;
         let mut w = 0;
+        // where each thing kept went, for the enemies' groups
+        let mut moved = [-1; MAXO];
         for k in 0..self.s.nthing as usize {
             let t = self.s.thing[k];
             let end = t.d + t.len.max(0.0) + if t.kind == K_SHIP { 12.0 } else { 0.0 };
-            if end > sd - 16.0 || t.kind == K_ARENA {
+            if end > sd - 16.0 {
                 self.s.thing[w] = t;
+                moved[k] = w as i32;
                 w += 1;
             }
         }
         if w != self.s.nthing as usize {
             self.s.nthing = w as i32;
             self.relink_gates();
+            for k in 0..self.s.nen as usize {
+                let g = &mut self.s.en[k].group;
+                if *g >= 0 {
+                    *g = moved.get(*g as usize).copied().unwrap_or(-1);
+                }
+            }
         }
     }
 
@@ -1826,9 +1835,13 @@ impl Game for Combat {
             && (0..=MAXSH as i32).contains(&s.nshell)
             && (0..=4).contains(&s.weapon)
             && (0..=MAX_COUNT).contains(&s.count)
-            && s.things()
-                .iter()
-                .all(|t| t.kind != K_GATE || (0..s.nthing).contains(&t.b))
+            && s.things().iter().all(|t| {
+                (t.kind != K_GATE || (0..s.nthing).contains(&t.b))
+                    && (t.kind != K_CRATE || (0..=4).contains(&t.value))
+            })
+            && s.enemies().iter().all(|e| {
+                (E_GRUNT..=E_BRUTE).contains(&e.kind) && (-1..s.nthing).contains(&e.group)
+            })
             && (0..4).contains(&s.boss.kind)
             && s.d.is_finite()
             && s.cx.is_finite();

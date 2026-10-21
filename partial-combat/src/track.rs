@@ -37,14 +37,15 @@ impl Combat {
         self.s.track_rng.float() < p
     }
 
-    fn add_thing(&mut self, t: Thing) -> usize {
+    /// Puts a thing on the pier; returns where it is in the list, or None when the list is full.
+    fn add_thing(&mut self, t: Thing) -> Option<usize> {
         let n = self.s.nthing as usize;
         if n >= MAXO {
-            return MAXO;
+            return None;
         }
         self.s.thing[n] = t;
         self.s.nthing += 1;
-        n
+        Some(n)
     }
 
     fn lay_chunk(&mut self) {
@@ -172,7 +173,7 @@ impl Combat {
             value: right.1,
             ..NO_THING
         });
-        if a < MAXO && b < MAXO {
+        if let (Some(a), Some(b)) = (a, b) {
             self.s.thing[a].b = b as i32;
             self.s.thing[b].b = a as i32;
         }
@@ -200,13 +201,15 @@ impl Combat {
         let n = ((e * share).round() as i32 + 2).clamp(3, most);
         let x = self.rand(-1.8, 1.8);
         let d = d0 + 14.0;
-        let group = self.add_thing(Thing {
-            kind: K_GROUP,
-            x,
-            d,
-            value: n,
-            ..NO_THING
-        });
+        let group = self
+            .add_thing(Thing {
+                kind: K_GROUP,
+                x,
+                d,
+                value: n,
+                ..NO_THING
+            })
+            .map_or(-1, |g| g as i32);
         let runners = if hard >= 2.0 { 0.2 } else { 0.0 };
         let rifles = if hard >= 4.0 { 0.15 } else { 0.0 };
         let brutes = if hard >= 5.0 {
@@ -230,7 +233,7 @@ impl Combat {
                 kind,
                 (x + ox * 1.5).clamp(-HALF + 0.4, HALF - 0.4),
                 d + oz * 1.4,
-                group as i32,
+                group,
                 ES_WAIT,
             );
         }

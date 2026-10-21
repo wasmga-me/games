@@ -461,11 +461,9 @@ impl Combat {
         let s = &self.s;
         let first = ((s.d - 16.0) / TILE).floor().max(-6.0) as i32;
         let mut last = ((s.d + 80.0) / TILE).ceil() as i32;
-        let arena = s.things().iter().find(|t| t.kind == K_ARENA).copied();
-        if let Some(a) = arena {
-            if !s.endless() {
-                last = last.min(((a.d + a.len) / TILE).ceil() as i32);
-            }
+        let arenas = || s.things().iter().filter(|t| t.kind == K_ARENA);
+        if let (false, Some(a)) = (s.endless(), arenas().next()) {
+            last = last.min(((a.d + a.len) / TILE).ceil() as i32);
         }
         for row in first..last {
             let d = (row as f32 + 0.5) * TILE;
@@ -480,7 +478,7 @@ impl Combat {
                 sc.put(model, 0, 0.0, x, 0.0, d, yaw, 1.0, PLANKS);
             }
         }
-        if let Some(a) = arena {
+        for a in arenas() {
             // flags at the arena's corners, the finish arch behind the boss
             for side in [-1.0, 1.0] {
                 sc.put(
@@ -657,7 +655,7 @@ impl Combat {
     fn put_things(&self, sc: &mut Scene) {
         let s = &self.s;
         let t = self.clock;
-        for th in s.things() {
+        for (k, th) in s.things().iter().enumerate() {
             if th.d > s.d + 85.0 {
                 continue;
             }
@@ -835,8 +833,7 @@ impl Combat {
                 K_GROUP => {
                     let (mut n, mut x, mut d) = (0, 0.0, 0.0);
                     for e in s.enemies() {
-                        if e.group >= 0 && s.thing[e.group as usize].d == th.d && e.state != ES_DOWN
-                        {
+                        if e.group == k as i32 && e.state != ES_DOWN {
                             n += 1;
                             x += e.x;
                             d += e.d;
