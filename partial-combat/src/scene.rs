@@ -17,6 +17,10 @@ pub const FX_SMOKE: u32 = 8;
 pub const FX_STOMP: u32 = 9;
 pub const FX_CONFETTI: u32 = 10;
 pub const FX_CANNON: u32 = 11;
+pub const FX_SHOT: u32 = 12;
+pub const FX_INCOMING: u32 = 13;
+pub const FX_STEP: u32 = 14;
+pub const FX_CLANG: u32 = 15;
 
 // sprites and labels
 const SPRITE_BILLBOARD: u8 = 0;
@@ -29,8 +33,10 @@ const PIC_FLARE: u8 = 4;
 const PIC_RING: u8 = 6;
 const PIC_GLOW: u8 = 7;
 const PIC_LIGHT: u8 = 8;
+const PIC_CIRCLE: u8 = 11;
 const LABEL_PILL: u8 = 0;
 const LABEL_GATE: u8 = 1;
+const LABEL_PLAIN: u8 = 2;
 const LABEL_BAR: u8 = 3;
 const INST_LOOP: u8 = 1;
 const INST_NO_SHADOW: u8 = 2;
@@ -57,8 +63,6 @@ const BOSS_TINTS: [u32; 4] = [
     rgba(0x66421b, 225),
     rgba(0x34210e, 225),
 ];
-/// a mech's size as a boss (about 3.5 m tall at 1)
-const BOSS_SCALE: f32 = 1.7;
 /// the pier's planks, toned down from the kit's orange
 const PLANKS: u32 = rgba(0x472e17, 150);
 
@@ -133,7 +137,7 @@ const M_BUOY: u16 = 35;
 const M_BOAT: u16 = 36;
 const M_CARGO: u16 = 40;
 
-pub const CLIPS: [&str; 9] = [
+pub const CLIPS: [&str; 12] = [
     "idle",
     "walk",
     "shoot_onehanded",
@@ -143,6 +147,9 @@ pub const CLIPS: [&str; 9] = [
     "punch",
     "shoot",
     "death",
+    "jump",
+    "hello",
+    "hitrecieve_1",
 ];
 const C_IDLE: u16 = 0;
 const C_WALK: u16 = 1;
@@ -153,9 +160,15 @@ const C_CHEER: u16 = 5;
 const C_PUNCH: u16 = 6;
 const C_SHOOT: u16 = 7;
 const C_DEATH: u16 = 8;
+const C_JUMP: u16 = 9;
+const C_WAVE: u16 = 10;
+const C_REEL: u16 = 11;
 
 /// soldiers' size: the models are about 1.9 m tall
 const FIG: f32 = 0.55;
+/// barrels' and crates' sizes
+const BARREL: f32 = 1.0;
+const CRATE: f32 = 1.5;
 /// how fast the walk plays, for a squad that runs
 const STRIDE: f32 = 2.3;
 const PI: f32 = core::f32::consts::PI;
@@ -368,31 +381,39 @@ impl Combat {
         (1.0 - self.aspect).clamp(0.0, 0.6)
     }
 
-    /// Moves the camera on after the squad (called each update, dt seconds).
+    /// Moves the camera on after the squad (called each update, dt seconds):
+    /// high over the pier and far enough back to see across it.
     pub fn follow(&mut self, dt: f32) {
         let s = &self.s;
         let tall = self.tall();
         let (cx, sd) = (s.cx, s.d);
         let boss = s.phase == P_BOSS || (s.phase == P_CLEAR && s.arena_d > 0.0);
-        let want = if boss {
-            [
-                cx * 0.4,
-                DECK + 11.0 + tall * 5.0,
-                -(sd - 12.5 - tall * 5.0),
-                s.boss.x * 0.3,
-                DECK + 2.6,
-                -(sd + 10.0),
-            ]
+        // as far back as shows `half` either side, tall screens a little less
+        let half = HALF + 1.0 - tall * 5.0;
+        let fov = self.fov().to_radians();
+        let far = (half / ((fov * 0.5).tan() * self.aspect.max(0.3))).clamp(15.0, 34.0);
+        let (pitch, ahead, look_y, far, lx) = if boss {
+            // back and up while the squad walks up to the arena, so its army and the boss fit
+            let gap = (s.arena_d - sd).max(0.0);
+            (
+                0.58f32,
+                8.0 + gap * 0.5,
+                DECK + 3.2,
+                far * 1.25 + gap * 0.6,
+                s.boss.x * 0.3 + cx * 0.2,
+            )
         } else {
-            [
-                cx * 0.55,
-                DECK + 9.0 + tall * 4.0,
-                -(sd - 11.0 - tall * 4.0),
-                cx * 0.65,
-                DECK + 0.3,
-                -(sd + 9.0),
-            ]
+            (0.84, far * 0.3, DECK, far, cx * 0.55)
         };
+        let (sp, cp) = pitch.sin_cos();
+        let want = [
+            cx * 0.45,
+            look_y + far * sp,
+            -(sd + ahead - far * cp),
+            lx,
+            look_y,
+            -(sd + ahead),
+        ];
         let k = if self.cam_set {
             1.0 - (-4.0 * dt).exp()
         } else {
@@ -405,6 +426,11 @@ impl Combat {
         }
         self.cam_set = true;
         self.clock += dt;
+    }
+
+    /// The camera's field of view, degrees up and down: wider on tall screens.
+    fn fov(&self) -> f32 {
+        52.0 + self.tall() * 22.0
     }
 
     /// The scene as it stands; returns the header's address.
@@ -426,7 +452,7 @@ impl Combat {
         self.put_enemies(&mut sc);
         self.put_boss(&mut sc);
         self.put_shots(&mut sc);
-        let fov = 52.0 + self.tall() * 22.0;
+        let fov = self.fov();
         let theme = [0, 2, 1, 3][(self.s.level.max(0) % 4) as usize];
         let f = |v: f32| v.to_bits();
         let c = self.cam;
@@ -493,22 +519,32 @@ impl Combat {
                     0,
                 );
             }
-            sc.put(M_FINISH, 0, 0.0, 0.0, DECK, a.d + a.len - 2.0, 0.0, 1.62, 0);
+            sc.put(
+                M_FINISH,
+                0,
+                0.0,
+                0.0,
+                DECK,
+                a.d + a.len - 2.0,
+                0.0,
+                HALF * 0.28,
+                0,
+            );
             if !s.endless() {
                 // a fort where the pier ends
                 let end = a.d + a.len + 4.0;
                 for side in [-1.0f32, 1.0] {
-                    sc.put(M_TOWER, 0, 0.0, side * 7.5, 0.0, end, 0.0, 1.1, 0);
+                    sc.put(M_TOWER, 0, 0.0, side * (HALF + 2.5), 0.0, end, 0.0, 1.3, 0);
                     for k in 0..3 {
                         sc.put(
                             M_WALL,
                             0,
                             0.0,
-                            side * (10.5 + k as f32 * 2.2),
+                            side * (HALF + 6.0 + k as f32 * 2.6),
                             0.0,
                             end + 0.5,
                             PI / 2.0,
-                            1.1,
+                            1.3,
                             0,
                         );
                     }
@@ -524,6 +560,8 @@ impl Combat {
         let first = ((s.d - 20.0) / 12.0).floor() as i32;
         let last = ((s.d + 130.0) / 12.0).ceil() as i32;
         let t = self.clock;
+        // the sea starts this much further out than on a pier 5 m to a side
+        let out = HALF - 5.0;
         for seg in first..last {
             for side in [-1.0f32, 1.0] {
                 let h = hash2(seg * 2 + (side > 0.0) as i32, seed);
@@ -535,7 +573,7 @@ impl Combat {
                         M_BUOY,
                         0,
                         0.0,
-                        side * 7.2,
+                        side * (7.2 + out),
                         bob - 0.15,
                         seg as f32 * 12.0,
                         0.0,
@@ -549,7 +587,7 @@ impl Combat {
                 let bob = (t * 1.1 + seg as f32 * 0.7).sin();
                 match pick {
                     0..=17 => {
-                        let x = side * (11.0 + far * 7.0);
+                        let x = side * (11.0 + out + far * 7.0);
                         sc.put(
                             M_ROCKS + (h % 4) as u16,
                             0,
@@ -564,7 +602,7 @@ impl Combat {
                     }
                     18..=31 => {
                         // an island with a palm or two
-                        let x = side * (16.0 + far * 8.0);
+                        let x = side * (16.0 + out + far * 8.0);
                         sc.put(
                             if h & 1 == 0 { M_SAND } else { M_GRASS },
                             0,
@@ -602,7 +640,7 @@ impl Combat {
                         }
                     }
                     32..=43 => {
-                        let x = side * (10.0 + far * 9.0);
+                        let x = side * (10.0 + out + far * 9.0);
                         sc.put(
                             M_BOAT + (h >> 6 & 3) as u16,
                             0,
@@ -617,7 +655,7 @@ impl Combat {
                         sc.last().roll = bob * 0.05;
                     }
                     44..=51 => {
-                        let x = side * (26.0 + far * 14.0);
+                        let x = side * (26.0 + out + far * 14.0);
                         let ship =
                             [M_SHIP, M_SHIP_MEDIUM, M_CARGO, M_SHIP + 2][(h >> 6 & 3) as usize];
                         sc.put(
@@ -638,7 +676,7 @@ impl Combat {
                             M_WATCH,
                             0,
                             0.0,
-                            side * (13.0 + far * 4.0),
+                            side * (13.0 + out + far * 4.0),
                             -0.2,
                             d,
                             unit(h) * 6.3,
@@ -675,19 +713,25 @@ impl Combat {
                         _ => false,
                     } && !(th.a == OP_ADD && th.value == 0);
                     let col = if good { GOOD } else { BAD };
-                    sc.put(
-                        M_ARCH,
-                        0,
-                        0.0,
-                        th.x,
-                        DECK,
-                        th.d,
-                        0.0,
-                        th.w / 6.2,
-                        col & 0x00ff_ffff | 0xd800_0000,
-                    );
-                    sc.last().fade = fade;
-                    sc.last().flash = (th.flash * 120.0) as u8;
+                    // arches side by side across the gate (the model is 6.2 m wide), one glass panel through them
+                    let arches = (th.w / 4.7).round().max(1.0);
+                    let size = th.w / arches / 6.2;
+                    for k in 0..arches as i32 {
+                        let x = th.x + (k as f32 + 0.5 - arches * 0.5) * th.w / arches;
+                        sc.put(
+                            M_ARCH,
+                            0,
+                            0.0,
+                            x,
+                            DECK,
+                            th.d,
+                            0.0,
+                            size,
+                            col & 0x00ff_ffff | 0xd800_0000,
+                        );
+                        sc.last().fade = fade;
+                        sc.last().flash = (th.flash * 120.0) as u8;
+                    }
                     let panel = if good {
                         rgba(0x3a9bff, 95)
                     } else {
@@ -700,8 +744,8 @@ impl Combat {
                         th.x,
                         DECK,
                         th.d + 0.05,
-                        th.w - 0.7,
-                        3.0,
+                        th.w - 0.9 * size,
+                        3.95 * size,
                         0.0,
                         0.0,
                         panel & 0x00ff_ffff | (((panel >> 24) as f32 * fade) as u32) << 24,
@@ -711,9 +755,9 @@ impl Combat {
                         LABEL_GATE,
                         sign_of(th.a),
                         th.x,
-                        DECK + 1.75,
+                        DECK + 2.3 * size,
                         th.d,
-                        1.25 * pulse,
+                        1.6 * pulse,
                         th.value,
                         col,
                         fade,
@@ -731,7 +775,7 @@ impl Combat {
                                 DECK,
                                 th.d,
                                 th.d * 0.7,
-                                0.85,
+                                BARREL,
                                 BARREL_BLUE,
                             );
                             sc.last().flash = flash;
@@ -739,16 +783,16 @@ impl Combat {
                                 LABEL_PILL,
                                 b'+',
                                 th.x,
-                                DECK + 1.75,
+                                DECK + 2.0,
                                 th.d,
-                                0.62,
+                                0.8,
                                 th.value,
                                 rgba(0x2f7fe0, 255),
                                 1.0,
                             );
                         }
                         K_TNT => {
-                            sc.put(M_BARREL, 0, 0.0, th.x, DECK, th.d, th.d, 0.85, TNT_RED);
+                            sc.put(M_BARREL, 0, 0.0, th.x, DECK, th.d, th.d, BARREL, TNT_RED);
                             sc.last().flash = flash;
                             // its fuse
                             let blink = 0.6 + 0.4 * (t * 14.0 + th.d).sin();
@@ -757,29 +801,30 @@ impl Combat {
                                 PIC_FLARE,
                                 true,
                                 th.x,
-                                DECK + 1.18,
+                                DECK + 1.39,
                                 th.d,
-                                0.9 * blink,
-                                0.9 * blink,
+                                1.05 * blink,
+                                1.05 * blink,
                                 t * 3.0,
                                 0.0,
                                 rgba(0xffa040, 255),
                             );
                         }
                         _ => {
-                            sc.put(M_CRATE, 0, 0.0, th.x, DECK, th.d, 0.0, 1.15, 0);
+                            sc.put(M_CRATE, 0, 0.0, th.x, DECK, th.d, 0.0, CRATE, 0);
                             sc.last().flash = flash;
                             // the gun inside, turning over it
                             let gun = th.value.clamp(0, 4);
+                            let y = DECK + 1.95 + (t * 2.0).sin() * 0.1;
                             sc.put(
                                 M_GUN + gun as u16,
                                 0,
                                 0.0,
                                 th.x,
-                                DECK + 1.5 + (t * 2.0).sin() * 0.1,
+                                y,
                                 th.d,
                                 t * 1.6,
-                                WEAPONS[gun as usize].scale * 1.6,
+                                WEAPONS[gun as usize].scale * 2.0,
                                 0,
                             );
                             sc.sprite(
@@ -787,30 +832,39 @@ impl Combat {
                                 PIC_GLOW,
                                 true,
                                 th.x,
-                                DECK + 1.5,
+                                y,
                                 th.d,
-                                1.6,
-                                1.6,
+                                2.0,
+                                2.0,
                                 0.0,
                                 0.0,
                                 rgba(0x60c0ff, 150),
                             );
+                            // what it takes to shoot open, on its front
+                            let pulse = 1.0 + th.flash * 0.15;
+                            sc.label(
+                                LABEL_PLAIN,
+                                0,
+                                th.x,
+                                DECK + 0.62,
+                                th.d - 1.0,
+                                0.95 * pulse,
+                                th.hp,
+                                rgba(0xffffff, 255),
+                                1.0,
+                            );
                         }
                     }
-                    if th.kind != K_TNT || th.hp < th.hp_max {
+                    if th.kind == K_BARREL || (th.kind == K_TNT && th.hp < th.hp_max) {
                         sc.label(
                             LABEL_BAR,
                             5,
                             th.x,
-                            DECK + 1.12,
+                            DECK + 1.35,
                             th.d,
-                            0.16,
+                            0.2,
                             th.hp * 1000 / th.hp_max.max(1),
-                            if th.kind == K_CRATE {
-                                rgba(0x40d0ff, 255)
-                            } else {
-                                rgba(0x5ad05a, 255)
-                            },
+                            rgba(0x5ad05a, 255),
                             1.0,
                         );
                     }
@@ -825,7 +879,7 @@ impl Combat {
                         bob * 0.12 - 0.1,
                         th.d,
                         if th.x < 0.0 { PI / 2.0 } else { -PI / 2.0 },
-                        1.1,
+                        1.3,
                         0,
                     );
                     sc.last().roll = bob * 0.03;
@@ -846,7 +900,7 @@ impl Combat {
                             x / n as f32,
                             DECK + 2.3,
                             d / n as f32 + 0.6,
-                            0.85,
+                            1.05,
                             n,
                             rgba(0xc0392b, 255),
                             1.0,
@@ -864,7 +918,8 @@ impl Combat {
         for q in s.soldiers() {
             let (clip, t, fade, y) = match q.state {
                 S_OK if cheer => (C_CHEER, q.t, 1.0, DECK),
-                S_OK if s.phase == P_BOSS => (C_AIM, q.t * 1.3, 1.0, DECK),
+                // halted at the arena, they stand and fire
+                S_OK if s.phase == P_BOSS && s.d >= s.arena_d => (C_AIM, q.t * 1.3, 1.0, DECK),
                 S_OK => (C_WALK, q.t * STRIDE, 1.0, DECK),
                 S_FALL => (C_FALL, q.t, 1.0, q.y),
                 _ => (C_DOWN, q.t * 1.6, (1.6 - q.t).clamp(0.0, 1.0), DECK),
@@ -893,7 +948,7 @@ impl Combat {
                 x / n,
                 DECK + 2.0 + radius(s.count) * 0.2,
                 d / n - 0.4,
-                0.95,
+                1.15,
                 s.count,
                 rgba(0x3f8f2a, 255),
                 1.0,
@@ -953,12 +1008,20 @@ impl Combat {
         if b.state == 0 || b.d > self.s.d + 85.0 {
             return;
         }
-        let (clip, t, flags) = match (b.state, b.atk) {
-            (3, _) => (C_DEATH, b.atk_t, 0),
-            (1, _) => (C_IDLE, b.t, INST_LOOP),
-            (_, 1) | (_, 3) => (C_SHOOT, b.atk_t * 1.4, INST_LOOP),
-            (_, 2) | (_, 4) => (C_PUNCH, b.atk_t, 0),
-            _ => (C_WALK, b.t * 1.2, INST_LOOP),
+        let (clip, t, flags) = if b.state == 3 {
+            (C_DEATH, b.atk_t, 0)
+        } else if b.hurt > 0.0 {
+            (C_REEL, 0.55 - b.hurt, 0)
+        } else if self.boss_walked {
+            (C_WALK, b.walk, INST_LOOP)
+        } else {
+            match (b.atk, b.stage) {
+                (A_VOLLEY, 1) => (C_SHOOT, b.atk_t * 1.2, INST_LOOP),
+                (A_SHELLS, 1) => (C_SHOOT, b.atk_t, 0),
+                (A_TROOPS, _) => (C_WAVE, b.atk_t, 0),
+                (A_JUMP, 2) => (C_JUMP, b.atk_t, 0),
+                _ => (C_IDLE, b.t, INST_LOOP),
+            }
         };
         let fade = if self.s.phase == P_CLEAR || self.s.phase == P_WON {
             (1.0 - self.s.phase_ms as f32 / 1500.0).clamp(0.0, 1.0)
@@ -972,23 +1035,40 @@ impl Combat {
             b.x,
             DECK,
             b.d,
-            0.0,
+            b.yaw,
             BOSS_SCALE,
             BOSS_TINTS[b.kind.clamp(0, 3) as usize],
         );
         let i = sc.last();
         i.flags = flags;
-        i.flash = (b.flash * 70.0) as u8;
+        // the shader whitens in linear light, so a little reads as a lot on a big dark mech
+        i.flash = (b.flash.max(0.0) * 25.0) as u8;
         i.fade = fade;
+        if b.jumping() && self.s.phase == P_BOSS {
+            // where it will land: a ring that fills as it comes down
+            let u = if b.stage == 2 {
+                let m = &MECHS[b.kind as usize];
+                (b.atk_t / m.land).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let blink = 0.75 + 0.25 * (self.clock * 9.0).sin();
+            warning(sc, b.tx, b.td, JUMP_R, u, blink);
+        }
     }
 
     fn put_shots(&self, sc: &mut Scene) {
         let s = &self.s;
         for b in &s.bul[..s.nbul as usize] {
-            let col = if b.side == 0 {
-                rgba(0xffd25a, 255)
-            } else {
-                rgba(0xff5a3a, 255)
+            // width, length, colour, and a glow round the head
+            let (w, len, col, glow) = match b.gun {
+                0 => (0.2, 1.4, rgba(0xffd25a, 255), 0.0),
+                1 => (0.15, 1.0, rgba(0xff9a3a, 255), 0.0),
+                2 => (0.22, 2.8, rgba(0xfff2c0, 255), 0.0),
+                3 => (0.3, 0.6, rgba(0xffc070, 255), 0.65),
+                4 => (0.34, 8.0, rgba(0x9ff0ff, 255), 0.9),
+                G_BOSS => (0.45, 2.4, rgba(0xff4020, 255), 1.3),
+                _ => (0.2, 1.5, rgba(0xff5a3a, 255), 0.0),
             };
             sc.sprite(
                 SPRITE_STREAK,
@@ -997,59 +1077,112 @@ impl Combat {
                 b.x,
                 b.y,
                 b.d,
-                0.16,
-                1.1,
+                w,
+                len,
                 b.vx,
                 -b.vd,
                 col,
             );
-        }
-        for sh in &s.shell[..s.nshell as usize] {
-            let u = (sh.t / sh.t_max).clamp(0.0, 1.0);
-            if u <= 0.0 {
-                continue;
-            }
-            let red = rgba(0xff3020, (120.0 + 120.0 * u) as u8);
-            sc.sprite(
-                SPRITE_GROUND,
-                PIC_RING,
-                false,
-                sh.x,
-                DECK + 0.05,
-                sh.d,
-                sh.r * 2.2,
-                sh.r * 2.2,
-                0.0,
-                0.0,
-                red,
-            );
-            sc.sprite(
-                SPRITE_GROUND,
-                PIC_GLOW,
-                true,
-                sh.x,
-                DECK + 0.06,
-                sh.d,
-                sh.r * 2.4 * u,
-                sh.r * 2.4 * u,
-                0.0,
-                0.0,
-                rgba(0xff5030, 200),
-            );
-            if sh.kind == 0 {
-                sc.put(
-                    M_BALL,
-                    0,
+            if glow > 0.0 {
+                sc.sprite(
+                    SPRITE_BILLBOARD,
+                    PIC_GLOW,
+                    true,
+                    b.x,
+                    b.y,
+                    b.d,
+                    glow,
+                    glow,
                     0.0,
-                    sh.x,
-                    DECK + (1.0 - u) * 14.0,
-                    sh.d,
                     0.0,
-                    1.6,
-                    0,
+                    col & 0x00ff_ffff | 0xb000_0000,
                 );
             }
         }
+        for sh in &s.shell[..s.nshell as usize] {
+            let u = (sh.t / sh.t_max).clamp(0.0, 1.0);
+            // where it lands, from the moment it is fired
+            let blink = 0.7 + 0.3 * (self.clock * (8.0 + 10.0 * u)).sin();
+            warning(sc, sh.x, sh.d, sh.r, u, blink);
+            let (x, y, d) = sh.at();
+            if sh.kind == 0 {
+                sc.put(M_BALL, 0, 0.0, x, y, d, 0.0, 1.8, 0);
+                sc.last().flags |= INST_NO_SHADOW;
+            } else {
+                sc.sprite(
+                    SPRITE_BILLBOARD,
+                    PIC_GLOW,
+                    true,
+                    x,
+                    y,
+                    d,
+                    1.3,
+                    1.3,
+                    0.0,
+                    0.0,
+                    rgba(0xff7030, 230),
+                );
+                sc.sprite(
+                    SPRITE_BILLBOARD,
+                    PIC_FLARE,
+                    true,
+                    x,
+                    y,
+                    d,
+                    0.9,
+                    0.9,
+                    self.clock * 6.0,
+                    0.0,
+                    rgba(0xffd080, 255),
+                );
+            }
+        }
+    }
+}
+
+/// A red mark on the deck where something will come down, r round, `u` of
+/// the way there: its ring blinks and the middle fills as it nears.
+fn warning(sc: &mut Scene, x: f32, d: f32, r: f32, u: f32, blink: f32) {
+    sc.sprite(
+        SPRITE_GROUND,
+        PIC_RING,
+        true,
+        x,
+        DECK + 0.05,
+        d,
+        r * 2.2,
+        r * 2.2,
+        0.0,
+        0.0,
+        rgba(0xff2a18, (255.0 * blink) as u8),
+    );
+    sc.sprite(
+        SPRITE_GROUND,
+        PIC_CIRCLE,
+        false,
+        x,
+        DECK + 0.04,
+        d,
+        r * 2.0,
+        r * 2.0,
+        0.0,
+        0.0,
+        rgba(0xff2010, (40.0 + 60.0 * u) as u8),
+    );
+    if u > 0.0 {
+        sc.sprite(
+            SPRITE_GROUND,
+            PIC_GLOW,
+            true,
+            x,
+            DECK + 0.06,
+            d,
+            r * 2.3 * u,
+            r * 2.3 * u,
+            0.0,
+            0.0,
+            rgba(0xff5030, 220),
+        );
     }
 }
 

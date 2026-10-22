@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-wg = { git = "https://github.com/wasmga-me/wasmgame-wg", branch = "claude/project-thread-x2myc2" }
+wg = { git = "https://github.com/wasmga-me/wasmgame-wg" }
 
 [profile.release]
 panic = "abort"

@@ -11,6 +11,13 @@ use crate::*;
 const AHEAD: f32 = 95.0;
 /// seconds a squad of the size expected takes to beat a boss
 const BOSS_SECONDS: f32 = 13.0;
+/// a gate pair: each gate half the pier wide
+const GATE_X: f32 = HALF * 0.5;
+const GATE_W: f32 = HALF - 0.6;
+/// where crates and things on one side stand
+const SIDE_X: f32 = HALF * 0.5;
+/// the most soldiers in a row of a boss's army
+const ARMY_ROW: i32 = 12;
 
 const C_GATES: i32 = 0;
 const C_ENEMY: i32 = 1;
@@ -106,7 +113,12 @@ impl Combat {
                 (3.0 + hard * 1.2 + e * p.rand(0.25, 0.6)).round().min(90.0) as i32,
             )
         };
+        // far down the endless pier a big squad no longer doubles
+        let doubles = !self.s.endless() || e < 200.0 - hard * 3.0;
         let mul = |p: &mut Self| {
+            if !doubles {
+                return add(p);
+            }
             (
                 OP_MUL,
                 if hard >= 4.0 && e < 40.0 && p.chance(0.4) {
@@ -157,18 +169,18 @@ impl Combat {
         let d = d0 + 6.0;
         let a = self.add_thing(Thing {
             kind: K_GATE,
-            x: -2.5,
+            x: -GATE_X,
             d,
-            w: 4.7,
+            w: GATE_W,
             a: left.0,
             value: left.1,
             ..NO_THING
         });
         let b = self.add_thing(Thing {
             kind: K_GATE,
-            x: 2.5,
+            x: GATE_X,
             d,
-            w: 4.7,
+            w: GATE_W,
             a: right.0,
             value: right.1,
             ..NO_THING
@@ -194,22 +206,14 @@ impl Combat {
         let share = (0.42 + hard * 0.03).min(0.85);
         // the endless pier's groups keep growing past what any squad holds off
         let most = if self.s.endless() {
-            (60.0 + hard * 1.5).min(100.0) as i32
+            (70.0 + hard * 1.5).min(110.0) as i32
         } else {
-            60
+            70
         };
         let n = ((e * share).round() as i32 + 2).clamp(3, most);
-        let x = self.rand(-1.8, 1.8);
+        let x = self.rand(-HALF * 0.4, HALF * 0.4);
         let d = d0 + 14.0;
-        let group = self
-            .add_thing(Thing {
-                kind: K_GROUP,
-                x,
-                d,
-                value: n,
-                ..NO_THING
-            })
-            .map_or(-1, |g| g as i32);
+        let group = self.lay_group(x, d, n);
         let runners = if hard >= 2.0 { 0.2 } else { 0.0 };
         let rifles = if hard >= 4.0 { 0.15 } else { 0.0 };
         let brutes = if hard >= 5.0 {
@@ -231,14 +235,14 @@ impl Combat {
             };
             self.spawn_enemy(
                 kind,
-                (x + ox * 1.5).clamp(-HALF + 0.4, HALF - 0.4),
+                (x + ox * 1.6).clamp(-HALF + 0.4, HALF - 0.4),
                 d + oz * 1.4,
                 group,
                 ES_WAIT,
             );
         }
         if hard >= 1.0 && self.chance(0.5) {
-            let tx = (x + self.rand(-1.0, 1.0)).clamp(-3.5, 3.5);
+            let tx = (x + self.rand(-1.5, 1.5)).clamp(-HALF + 1.5, HALF - 1.5);
             self.add_thing(Thing {
                 kind: K_TNT,
                 x: tx,
@@ -248,23 +252,45 @@ impl Combat {
                 ..NO_THING
             });
         }
-        // the squad loses about those that reach it: the rest fall to its fire first
-        self.s.expect = (e - n as f32 * 0.45).max(e * 0.45).max(1.0);
+        self.s.expect = after_group(e, n).max(1.0);
         26.0
     }
 
-    /// Damage a second the squad expected puts into something lined up in front of it:
-    /// only the soldiers in line with it hit it.
-    fn dps_in_line(&self) -> f32 {
+    /// The counter over a group of n enemies at x, d; its index, or -1.
+    fn lay_group(&mut self, x: f32, d: f32, n: i32) -> i32 {
+        self.add_thing(Thing {
+            kind: K_GROUP,
+            x,
+            d,
+            value: n,
+            ..NO_THING
+        })
+        .map_or(-1, |g| g as i32)
+    }
+
+    /// Damage a second the squad expected puts into a barrel or crate lined up
+    /// in front of it: only the soldiers in line with it hit it.
+    fn dps_in_line(&self, kind: i32) -> f32 {
         let e = self.s.expect.max(1.0);
-        e.min(MAX_SHOOTERS) * gun_dps(self.s.expect_gun) * (0.76 / radius(e as i32)).min(1.0)
+        let in_line =
+            (4.0 * half_width(kind) / (core::f32::consts::PI * radius(e as i32))).min(1.0);
+        e.min(MAX_SHOOTERS) * gun_dps(self.s.expect_gun) * in_line
+    }
+
+    /// Seconds of fire a squad running at a thing gets into it: from lining
+    /// up a little inside its guns' range to stepping round it, less the
+    /// bullets' flight.
+    fn in_range(&self) -> f32 {
+        ((WEAPONS[self.s.expect_gun as usize].range - 6.0) / self.s.speed - 0.4).max(1.0)
     }
 
     /// A gun crate, shot open for a better gun, sometimes with a barrel beside it.
     fn lay_crate(&mut self, d0: f32, hard: f32) -> f32 {
         let gun = (self.s.expect_gun + 1).min(4);
-        let hp = (4.0 + self.dps_in_line() * (1.8 + hard * 0.05)).round() as i32;
-        let x = if self.chance(0.5) { -2.5 } else { 2.5 };
+        // a share of that time, more on later levels
+        let share = (0.4 + hard * 0.01).min(0.6);
+        let hp = (4.0 + self.dps_in_line(K_CRATE) * self.in_range() * share).round() as i32;
+        let x = if self.chance(0.5) { -SIDE_X } else { SIDE_X };
         self.add_thing(Thing {
             kind: K_CRATE,
             x,
@@ -282,10 +308,10 @@ impl Combat {
     }
 
     fn lay_barrels(&mut self, d0: f32, hard: f32) -> f32 {
-        let x = self.rand(-2.8, 2.8);
+        let x = self.rand(-HALF + 2.0, HALF - 2.0);
         self.lay_barrel(x, d0 + 6.0, hard);
         if self.chance(0.5) {
-            let x2 = if x < 0.0 { x + 3.6 } else { x - 3.6 };
+            let x2 = if x < 0.0 { x + 6.0 } else { x - 6.0 };
             if self.chance(0.4) && hard >= 2.0 {
                 self.add_thing(Thing {
                     kind: K_TNT,
@@ -305,7 +331,8 @@ impl Combat {
     fn lay_barrel(&mut self, x: f32, d: f32, hard: f32) {
         let e = self.s.expect;
         let value = (3.0 + e * 0.25 + hard).round().min(60.0) as i32;
-        let hp = (3.0 + self.dps_in_line() * (1.2 + hard * 0.04)).round() as i32;
+        let share = (0.35 + hard * 0.012).min(0.6);
+        let hp = (3.0 + self.dps_in_line(K_BARREL) * self.in_range() * share).round() as i32;
         self.add_thing(Thing {
             kind: K_BARREL,
             x,
@@ -341,47 +368,44 @@ impl Combat {
         let len = match roll {
             0 => {
                 // holes to steer round: one side, then the other
-                let first = self.s.track_rng.below(3) as i32;
-                hole(self, first, 2, row0, 2.0);
-                let second = if first == 0 {
-                    2
-                } else if first == 2 {
-                    0
-                } else if self.chance(0.5) {
-                    0
-                } else {
-                    2
+                let first = self.s.track_rng.below(3) as i32 * 2;
+                hole(self, first, 4, row0, 2.0);
+                let second = match first {
+                    0 => 4,
+                    4 => 0,
+                    _ if self.chance(0.5) => 0,
+                    _ => 4,
                 };
-                hole(self, second, 2, row0 + TILE * 5.0, 2.0);
+                hole(self, second, 4, row0 + TILE * 5.0, 2.0);
                 if hard >= 4.0 && self.chance(0.5) {
-                    hole(self, first, 2, row0 + TILE * 10.0, 2.0);
+                    hole(self, first, 4, row0 + TILE * 10.0, 2.0);
                     TILE * 17.0
                 } else {
                     TILE * 12.0
                 }
             }
             1 => {
-                // a narrow stretch: two lanes, that may step aside half way
+                // a narrow stretch, that may step aside half way
                 let rows = 4.0 + (hard / 3.0).min(3.0).floor();
-                let lane = self.s.track_rng.below(3) as i32;
+                let open = if hard >= 7.0 { 2 } else { 3 };
+                let lane = self.s.track_rng.below((LANES - open + 1) as u32) as i32;
                 let side = |p: &mut Self, lane: i32, row: f32, rows: f32| {
                     if lane > 0 {
                         hole(p, 0, lane, row, rows);
                     }
-                    if lane + 2 < LANES {
-                        hole(p, lane + 2, LANES - lane - 2, row, rows);
+                    if lane + open < LANES {
+                        hole(p, lane + open, LANES - lane - open, row, rows);
                     }
                 };
                 side(self, lane, row0, rows);
                 if hard >= 5.0 && self.chance(0.6) {
-                    let next = if lane == 1 {
-                        if self.chance(0.5) {
-                            0
-                        } else {
-                            2
-                        }
+                    // by less than its width, so the two stretches meet
+                    let shift = 1 + self.s.track_rng.below(open as u32 - 1) as i32;
+                    let next = if lane + shift > LANES - open || (lane >= shift && self.chance(0.5))
+                    {
+                        lane - shift
                     } else {
-                        1
+                        lane + shift
                     };
                     side(self, next, row0 + rows * TILE, rows);
                     (rows * 2.0 + 5.0) * TILE
@@ -391,7 +415,11 @@ impl Combat {
             }
             _ => {
                 // a ship off the pier, firing shells at the squad as it passes
-                let x = if self.chance(0.5) { -13.0 } else { 13.0 };
+                let x = if self.chance(0.5) {
+                    -HALF - 8.0
+                } else {
+                    HALF + 8.0
+                };
                 self.add_thing(Thing {
                     kind: K_SHIP,
                     x,
@@ -400,7 +428,7 @@ impl Combat {
                     ..NO_THING
                 });
                 if self.chance(0.5) {
-                    let bx = -x.signum() * 2.5;
+                    let bx = -x.signum() * SIDE_X;
                     self.lay_barrel(bx, d0 + 12.0, hard);
                 }
                 30.0
@@ -410,7 +438,8 @@ impl Combat {
         len
     }
 
-    /// The end of a level: the squad stops at arena_d and fights the boss.
+    /// The end of a level: the squad stops at arena_d and fights the boss,
+    /// and the boss's army stands in a wedge beside it, waiting.
     fn lay_arena(&mut self) {
         let d0 = self.s.next_d;
         let arena = d0 + 6.0;
@@ -418,33 +447,71 @@ impl Combat {
         self.add_thing(Thing {
             kind: K_ARENA,
             d: arena,
-            len: 26.0,
+            len: 30.0,
             ..NO_THING
         });
-        let e = self.s.expect.max(3.0);
-        let dps = e.min(MAX_SHOOTERS) * gun_dps(self.s.expect_gun);
         let hard = self.hard_at();
+        let side = if self.chance(0.5) { -1.0 } else { 1.0 };
+        let e = self.s.expect.max(3.0);
+        // the army beside the boss: rows from its point towards the squad, one more each row up to ARMY_ROW
+        let n = ((e * (0.6 + hard * 0.015).min(0.9)).round() as i32 + 6).clamp(10, 160);
+        // what is left of the groups before it still stands, and the boss waves more on
+        let n = n.min(MAXE as i32 - self.s.nen - 24).max(0);
+        let ax = -side * 3.0;
+        let group = self.lay_group(ax, arena + 9.0, n);
+        let (mut row, mut k) = (0, 0);
+        while k < n {
+            let wide = (row + 1).min(ARMY_ROW);
+            for i in 0..wide {
+                if k >= n {
+                    break;
+                }
+                let x = ax + (i as f32 - (wide - 1) as f32 * 0.5) * 0.85;
+                let kind = if row >= 3 && hard >= 3.0 && i % 5 == 2 {
+                    E_RIFLE
+                } else if hard >= 5.0 && row >= 5 && i == 0 {
+                    E_BRUTE
+                } else {
+                    E_GRUNT
+                };
+                self.spawn_enemy(
+                    kind,
+                    x.clamp(-HALF + 0.4, HALF - 0.4),
+                    arena + 6.0 + row as f32 * 0.75,
+                    group,
+                    ES_WAIT,
+                );
+                k += 1;
+            }
+            row += 1;
+        }
+        let e = after_group(e, n).max(3.0);
+        // the endless pier goes on past the boss for the squad left
+        self.s.expect = e;
+        let dps = e.min(MAX_SHOOTERS) * gun_dps(self.s.expect_gun);
         let toughness = if self.s.endless() {
             0.6 + hard * 0.035
         } else {
             (0.55 + hard * 0.025).min(1.1)
         };
         let hp = (BOSS_SECONDS * toughness * dps).round().max(30.0) as i32;
-        let kind = self.s.level % 4;
+        let home = arena + BOSS_HOME;
         self.s.boss = Boss {
             state: 1,
-            kind,
-            x: 0.0,
-            d: arena + 17.0,
+            kind: self.s.level % 4,
+            x: side * 4.5,
+            d: home,
             hp,
             hp_max: hp,
-            t: 0.0,
-            cool: 2.0,
-            atk: 0,
-            atk_t: 0.0,
-            flash: 0.0,
-            sway: 0.0,
+            flinch_at: hp * 3 / 4,
+            ..NO_BOSS
         };
-        self.s.next_d = arena + 28.0;
+        self.s.next_d = arena + 32.0;
     }
+}
+
+/// The squad expected of e after a group of n comes at it: it loses about
+/// those that reach it, as the rest fall to its fire first.
+fn after_group(e: f32, n: i32) -> f32 {
+    (e - n as f32 * 0.45).max(e * 0.45)
 }
