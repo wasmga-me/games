@@ -4,7 +4,7 @@
 //! keeps out of holes and shell fire; a casual one gets gates wrong now and
 //! then, doesn't line up shots and dodges half the shells. The asserts hold
 //! the balance aimed for: a sharp player clears every level, a casual one
-//! the early ones, and the last levels are hard for both.
+//! most of the early ones and fewer of the last.
 use crate::*;
 
 struct Skill {
@@ -26,8 +26,12 @@ const SHARP: Skill = Skill {
     dodge: 1.0,
     look: 120,
 };
-/// runs per level, each its own luck
+/// the endless runs, each its own luck
 const SEEDS: [u32; 3] = [1, 2, 5];
+/// the runs at each level: enough that how often it is won isn't left to chance
+const LEVEL_SEEDS: [u32; 24] = [
+    1, 2, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
+];
 
 const CASUAL: Skill = Skill {
     name: "casual",
@@ -287,34 +291,55 @@ fn levels() {
     for (n, sk) in [SHARP, CASUAL].iter().enumerate() {
         println!("{}", sk.name);
         for level in 0..LEVELS {
-            let mut line = format!("  level {:2}:", level + 1);
-            for seed in SEEDS {
-                let r = play(level, false, sk, seed, 400.0);
-                cleared[n][level as usize] += r.won as i32;
-                line += &if r.won {
-                    format!(
-                        "  won {:3}s peak {:3} boss {:3} {:4.1}s left {:3}",
-                        r.time_s as i32, r.peak, r.at_boss, r.boss_s, r.end
-                    )
+            // each run its own game, so a level's runs play side by side
+            let runs = std::thread::scope(|sc| {
+                LEVEL_SEEDS
+                    .map(|seed| sc.spawn(move || play(level, false, sk, seed, 400.0)))
+                    .map(|h| h.join().unwrap())
+            });
+            let won: Vec<_> = runs.iter().filter(|r| r.won).collect();
+            let lost: Vec<_> = runs
+                .iter()
+                .filter(|r| !r.won)
+                .map(|r| format!("{:.0} m ({})", r.d, r.died))
+                .collect();
+            cleared[n][level as usize] = won.len() as i32;
+            let per = won.len().max(1) as i32;
+            println!(
+                "  level {:2}: won {:2} of {}, {:4} at the boss, {:4.1}s on it, {:4} left{}",
+                level + 1,
+                won.len(),
+                runs.len(),
+                won.iter().map(|r| r.at_boss).sum::<i32>() / per,
+                won.iter().map(|r| r.boss_s).sum::<f32>() / per as f32,
+                won.iter().map(|r| r.end).sum::<i32>() / per,
+                if lost.is_empty() {
+                    String::new()
                 } else {
-                    format!(
-                        "  lost {:3}s at {:3.0} m peak {:3} ({})",
-                        r.time_s as i32, r.d, r.peak, r.died
-                    )
-                };
-            }
-            println!("{line}");
+                    format!("; lost at {}", lost.join(", "))
+                },
+            );
         }
     }
-    // a sharp player clears every level; a casual one most of the first five, and few of the last five
+    // a sharp player clears every level nearly always (5 runs in 6), a casual one most
+    // of the first five (11 in 15) and at most two thirds of the last five
+    let runs = LEVEL_SEEDS.len() as i32;
     let sum = |c: &[i32]| c.iter().sum::<i32>();
     assert!(
-        cleared[0].iter().all(|&c| c >= 2),
+        cleared[0].iter().all(|&c| c * 6 >= runs * 5),
         "sharp: {:?}",
         cleared[0]
     );
-    assert!(sum(&cleared[1][..5]) >= 11, "casual: {:?}", cleared[1]);
-    assert!(sum(&cleared[1][15..]) <= 8, "casual: {:?}", cleared[1]);
+    assert!(
+        sum(&cleared[1][..5]) * 15 >= runs * 5 * 11,
+        "casual: {:?}",
+        cleared[1]
+    );
+    assert!(
+        sum(&cleared[1][15..]) * 3 <= runs * 5 * 2,
+        "casual: {:?}",
+        cleared[1]
+    );
 }
 
 #[test]

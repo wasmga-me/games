@@ -2,7 +2,7 @@
 //! A squad of green plastic soldiers runs down a pier over the sea, firing
 //! ahead on its own. Steer it through the gate that grows it most, shoot
 //! barrels for more soldiers and crates for better guns, keep out of holes
-//! and shell fire, outnumber the tan army, and beat the mech at the end.
+//! and shell fire, outnumber the tan army, and beat the boss at the end.
 //! Twenty levels, or one endless pier.
 //!
 //! Runs on the wg engine, drawn in 3D: every frame the page reads the scene
@@ -370,38 +370,138 @@ fn jump_x(cx: f32) -> f32 {
     cx.clamp(-HALF + JUMP_R * 0.6, HALF - JUMP_R * 0.6)
 }
 
-/// The mechs (scene.rs MODELS) as their clips have them: the walk's loop
-/// (s), how far a foot goes back a second at the clip's pace (m at scale 1),
-/// and when in the jump the feet leave the deck and come down (s).
-pub struct Mech {
+/// A boss's body: its model (scene.rs MODELS) and tint; as its clips have
+/// it, the walk's loop (s), how far a foot goes back a second at the clip's
+/// pace (m at scale 1), the pace it walks at as a boss, when in the jump the
+/// feet leave the deck and come down (s), and how long its wave lasts (s);
+/// then the size it is drawn at, and at scale 1 how tall it stands, how far
+/// its sides and each foot are from its middle and where its gun fires from
+/// (x to its left, up, ahead). Last, the gun it holds (scene.rs WEAPONS; -1,
+/// its own built in) and whether it is armoured: rounds ping off a mech and
+/// it goes down in blasts, where a giant chips like its troops and tips over
+/// stiff as a toy.
+pub struct Body {
+    pub model: u16,
+    pub tint: u32,
     pub walk: f32,
     pub stride: f32,
+    pub pace: f32,
     pub lift: f32,
     pub land: f32,
     pub hello: f32,
+    pub scale: f32,
+    pub height: f32,
+    pub width: f32,
+    pub foot: f32,
+    pub muzzle: [f32; 3],
+    pub gun: i32,
+    pub armoured: bool,
 }
-pub const MECHS: [Mech; 4] = {
-    const GEORGE: Mech = Mech {
+/// how big a mech boss is drawn
+pub const BOSS_SCALE: f32 = 1.9;
+/// the first kinds are mechs, the rest giants: people from the soldiers' pack (pack.mjs makes their jump and fall)
+const MECHS: i32 = 4;
+/// the bosses are tan plastic like the army they lead, each a shade of its own
+const fn tint(rgb: u32) -> u32 {
+    scene::rgba(rgb, 225)
+}
+pub const BODIES: [Body; 8] = {
+    use scene::model;
+    // slow, heavy steps
+    const GEORGE: Body = Body {
+        model: model("mech.george"),
+        tint: tint(0x543213),
         walk: 0.833,
         stride: 8.6,
+        pace: 0.34,
         lift: 0.23,
         land: 0.5,
         hello: 1.5,
+        scale: BOSS_SCALE,
+        height: 6.0,
+        width: 2.0,
+        foot: 1.0,
+        muzzle: [-1.0, 4.7, 2.0],
+        gun: -1,
+        armoured: true,
     };
     // Leela, Mike and Stan share their clips
-    const OTHER: Mech = Mech {
+    const MECH: Body = Body {
         walk: 1.033,
         stride: 6.9,
         lift: 0.3,
         land: 0.63,
         hello: 1.87,
+        height: 5.5,
+        width: 2.7,
+        ..GEORGE
     };
-    [GEORGE, OTHER, OTHER, OTHER]
+    const PERSON: Body = Body {
+        model: model("giant.pirate"),
+        tint: tint(0x4a2c12),
+        walk: 1.25,
+        stride: 1.85,
+        pace: 0.71,
+        lift: 0.3,
+        land: 0.63,
+        hello: 1.88,
+        scale: 3.4,
+        height: 3.1,
+        width: 0.7,
+        foot: 0.26,
+        muzzle: [-0.34, 1.9, 1.5],
+        gun: 0,
+        armoured: false,
+    };
+    [
+        GEORGE,
+        Body {
+            model: model("mech.leela"),
+            tint: tint(0x3e2311),
+            ..MECH
+        },
+        Body {
+            model: model("mech.mike"),
+            tint: tint(0x66421b),
+            ..MECH
+        },
+        Body {
+            model: model("mech.stan"),
+            tint: tint(0x34210e),
+            ..MECH
+        },
+        Body {
+            model: model("giant.knight"),
+            tint: tint(0x6b4520),
+            gun: 1,
+            ..PERSON
+        },
+        PERSON,
+        Body {
+            model: model("giant.goblin"),
+            tint: tint(0x5c3a17),
+            gun: 3,
+            ..PERSON
+        },
+        Body {
+            model: model("giant.zombie"),
+            tint: tint(0x3a2510),
+            gun: 2,
+            ..PERSON
+        },
+    ]
 };
-/// a mech's size as a boss
-pub const BOSS_SCALE: f32 = 1.9;
-/// the pace its walk plays at: slow, heavy steps
-const BOSS_PACE: f32 = 0.34;
+/// A level's boss: a mech and a giant by turns.
+pub fn boss_kind(level: i32) -> i32 {
+    let giants = BODIES.len() as i32 - MECHS;
+    if level % 2 == 0 {
+        level / 2 % MECHS
+    } else {
+        MECHS + level / 2 % giants
+    }
+}
+/// when a giant going down starts to tip over, and when it hits the deck (s)
+pub const TOPPLE: [f32; 2] = [0.25, 1.15];
 /// How far short of the arena the boss fight starts.
 pub const BOSS_LEAD: f32 = 12.0;
 /// where the boss stands between attacks, past the arena's start
@@ -419,7 +519,7 @@ const BLINK_GAP: f32 = -3.0;
 pub struct Boss {
     /// 0 none, 1 waiting, 2 fighting, 3 going down
     pub state: i32,
-    /// which mech (MECHS)
+    /// which body (BODIES)
     pub kind: i32,
     pub x: f32,
     pub d: f32,
@@ -451,19 +551,39 @@ impl Boss {
     pub fn landing(&self) -> Option<(f32, f32)> {
         (self.state == 2 && self.atk == A_JUMP && self.stage >= 1).then_some((self.tx, self.td))
     }
+    pub fn body(&self) -> &'static Body {
+        &BODIES[self.kind as usize]
+    }
+    /// how tall it stands (m)
+    pub fn tall(&self) -> f32 {
+        let m = self.body();
+        m.height * m.scale
+    }
     /// how fast it walks, m/s
     pub fn speed(&self) -> f32 {
-        MECHS[self.kind as usize].stride * BOSS_SCALE * BOSS_PACE
+        let m = self.body();
+        m.stride * m.scale * m.pace
     }
-    /// where its gun hand is, x y d
+    /// where its gun fires from, x y d
     pub fn muzzle(&self) -> (f32, f32, f32) {
-        let (ox, oz) = (-1.0 * BOSS_SCALE, 2.0 * BOSS_SCALE);
+        let m = self.body();
+        let [ox, oy, oz] = m.muzzle.map(|v| v * m.scale);
         let (s, c) = self.yaw.sin_cos();
         (
             self.x + ox * c + oz * s,
-            DECK + 4.7 * BOSS_SCALE,
+            DECK + oy,
             self.d - (-ox * s + oz * c),
         )
+    }
+    /// which way a giant tips over, to its left (1) or right (-1):
+    /// the side nearer the pier's middle, and a little away from the camera
+    pub fn fall_side(&self) -> f32 {
+        let (s, c) = self.yaw.sin_cos();
+        if c * -self.x.signum() + s * 0.5 >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        }
     }
 }
 
@@ -1232,7 +1352,7 @@ impl Combat {
             self.hit_thing(k, b.dmg);
             return true;
         }
-        // the boss, its legs and body
+        // the boss, its legs and body: the same box whichever it is, so each is as easy to hit
         let boss = self.s.boss;
         let (wide, deep) = (0.85 * BOSS_SCALE, 0.7 * BOSS_SCALE);
         if boss.state == 2
@@ -1240,17 +1360,30 @@ impl Combat {
             && boss.d >= lo - deep
             && boss.d <= hi + deep
         {
-            let y = DECK + self.s.frand(1.0, 3.5) * BOSS_SCALE;
-            self.fx(
-                scene::FX_CLANG,
-                b.x,
-                y,
-                boss.d - deep,
-                b.dmg as f32,
-                0.0,
-                0.0,
-                CLANG,
-            );
+            let y = DECK + self.s.frand(0.18, 0.6) * boss.tall();
+            if boss.body().armoured {
+                self.fx(
+                    scene::FX_CLANG,
+                    b.x,
+                    y,
+                    boss.d - deep,
+                    b.dmg as f32,
+                    0.0,
+                    0.0,
+                    CLANG,
+                );
+            } else {
+                self.fx(
+                    scene::FX_HIT,
+                    b.x,
+                    y,
+                    boss.d - deep,
+                    0.0,
+                    0.0,
+                    0.0,
+                    scene::TAN,
+                );
+            }
             let hurt = b.dmg;
             let boss = &mut self.s.boss;
             boss.hp = (boss.hp - hurt).max(0);
@@ -1698,14 +1831,32 @@ impl Combat {
         b.t += dt;
         b.flash = (b.flash - dt * 10.0).max(BLINK_GAP);
         if b.state == 3 {
-            // going down: blasts, then the level is won
+            // going down, tipping over or in blasts; then the level is won
             b.atk_t += dt;
             let t = b.atk_t;
-            let (x, d) = (b.x, b.d);
-            if ticks(t, dt, 4.0) && t < 1.6 {
+            let (x, d, tall) = (b.x, b.d, b.tall());
+            let m = b.body();
+            if !m.armoured {
+                if crossed(t, dt, TOPPLE[1]) {
+                    // tipped over its side, its middle hits the deck half its height further out
+                    let (s, c) = b.yaw.sin_cos();
+                    let out = b.fall_side() * (m.width * m.scale + tall * 0.5);
+                    self.fx(
+                        scene::FX_STOMP,
+                        x + out * c,
+                        DECK,
+                        d + out * s,
+                        JUMP_R,
+                        0.0,
+                        0.0,
+                        0,
+                    );
+                    self.s.shake = self.s.shake.max(0.8);
+                }
+            } else if ticks(t, dt, 4.0) && t < 1.6 {
                 let ox = self.s.frand(-1.5, 1.5);
                 let od = self.s.frand(-1.0, 1.0);
-                let oy = self.s.frand(0.5, 3.0) * BOSS_SCALE;
+                let oy = self.s.frand(0.1, 0.55) * tall;
                 self.fx(scene::FX_BLAST, x + ox, DECK + oy, d + od, 0.8, 0.0, 0.0, 0);
                 self.s.shake = self.s.shake.max(0.3);
             }
@@ -1719,12 +1870,12 @@ impl Combat {
         }
         let enraged = b.hp * 2 < b.hp_max;
         if enraged && ticks(b.t, dt, 5.0) {
-            let (x, d) = (b.x, b.d);
+            let (x, d, tall) = (b.x, b.d, b.tall());
             let ox = self.s.frand(-0.8, 0.8);
             self.fx(
                 scene::FX_SMOKE,
                 x + ox,
-                DECK + 4.5 * BOSS_SCALE,
+                DECK + 0.8 * tall,
                 d + 0.5,
                 1.3,
                 0.0,
@@ -1739,27 +1890,20 @@ impl Combat {
                 b.flinch_at -= (b.hp_max / 4).max(1);
             }
             b.hurt = 0.55;
-            let (x, d) = (b.x, b.d);
-            self.fx(
-                scene::FX_CLANG,
-                x,
-                DECK + 3.6 * BOSS_SCALE,
-                d - 0.6,
-                12.0,
-                0.0,
-                0.0,
-                CLANG,
-            );
-            self.fx(
-                scene::FX_BLAST,
-                x,
-                DECK + 3.4 * BOSS_SCALE,
-                d,
-                0.5,
-                0.0,
-                0.0,
-                0,
-            );
+            let (x, d, tall) = (b.x, b.d, b.tall());
+            if b.body().armoured {
+                self.fx(
+                    scene::FX_CLANG,
+                    x,
+                    DECK + 0.65 * tall,
+                    d - 0.6,
+                    12.0,
+                    0.0,
+                    0.0,
+                    CLANG,
+                );
+            }
+            self.fx(scene::FX_BLAST, x, DECK + 0.6 * tall, d, 0.5, 0.0, 0.0, 0);
             self.s.shake = self.s.shake.max(0.2);
         }
         let b = &mut self.s.boss;
@@ -1865,7 +2009,7 @@ impl Combat {
                         );
                     }
                 }
-                if t > MECHS[self.s.boss.kind as usize].hello {
+                if t > self.s.boss.body().hello {
                     self.boss_rest(hard, enraged);
                 }
             }
@@ -1886,7 +2030,7 @@ impl Combat {
     fn boss_jump(&mut self, dt: f32, hard: f32, enraged: bool) -> u32 {
         let b = &mut self.s.boss;
         let (stage, t) = (b.stage, b.atk_t);
-        let m = &MECHS[b.kind as usize];
+        let m = b.body();
         let (tx, td) = (b.tx, b.td);
         match stage {
             0 => {
@@ -2017,9 +2161,9 @@ impl Combat {
         let step = (b.speed() * dt).min(far);
         b.x += dx / far * step;
         b.d += dd / far * step;
-        let m = &MECHS[b.kind as usize];
+        let m = b.body();
         let before = b.walk;
-        let clip = step / (m.stride * BOSS_SCALE);
+        let clip = step / (m.stride * m.scale);
         b.walk = (b.walk + if back { -clip } else { clip }).rem_euclid(m.walk);
         // a footfall each half of the walk's loop
         let half = m.walk * 0.5;
@@ -2027,8 +2171,9 @@ impl Combat {
         if k0 != k1 {
             let side = if k1 as i32 % 2 == 0 { 1.0 } else { -1.0 };
             let (s, c) = b.yaw.sin_cos();
-            let (x, d) = (b.x + side * c * BOSS_SCALE, b.d + side * s * BOSS_SCALE);
-            self.fx(scene::FX_STEP, x, DECK, d, BOSS_SCALE, 0.0, 0.0, 0);
+            let foot = side * m.foot * m.scale;
+            let (x, d) = (b.x + foot * c, b.d + foot * s);
+            self.fx(scene::FX_STEP, x, DECK, d, m.foot * m.scale, 0.0, 0.0, 0);
             self.s.shake = self.s.shake.max(0.12);
         }
         self.boss_walked = true;
@@ -2303,7 +2448,7 @@ impl Game for Combat {
             && s.enemies().iter().all(|e| {
                 (E_GRUNT..=E_BRUTE).contains(&e.kind) && (-1..s.nthing).contains(&e.group)
             })
-            && (0..4).contains(&s.boss.kind)
+            && (0..BODIES.len() as i32).contains(&s.boss.kind)
             && s.d.is_finite()
             && s.cx.is_finite();
         self.fx.clear();

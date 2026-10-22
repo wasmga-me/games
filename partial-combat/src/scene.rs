@@ -60,18 +60,11 @@ const BARREL_BLUE: u32 = rgba(0x3b7fd5, 190);
 const TNT_RED: u32 = rgba(0xd13a28, 210);
 const GOOD: u32 = rgba(0x0647ff, 255);
 const BAD: u32 = rgba(0xff0a0a, 255);
-/// the bosses are tan plastic like the army they lead, each a shade of its own
-const BOSS_TINTS: [u32; 4] = [
-    rgba(0x543213, 225),
-    rgba(0x3e2311, 225),
-    rgba(0x66421b, 225),
-    rgba(0x34210e, 225),
-];
 /// the pier's planks, toned down from the kit's orange
 const PLANKS: u32 = rgba(0x472e17, 150);
 
 /// The models the game names, by index, as the page finds them in its files.
-pub const MODELS: [&str; 41] = [
+pub const MODELS: [&str; 45] = [
     "fig.soldier",
     "fig.beret",
     "fig.viking",
@@ -85,6 +78,10 @@ pub const MODELS: [&str; 41] = [
     "mech.leela",
     "mech.mike",
     "mech.stan",
+    "giant.knight",
+    "giant.pirate",
+    "giant.goblin",
+    "giant.zombie",
     "pier.structure-platform",
     "pier.structure-platform-dock",
     "pier.barrel",
@@ -114,32 +111,48 @@ pub const MODELS: [&str; 41] = [
     "boat.boat-tug-a",
     "boat.ship-cargo-a",
 ];
-const M_SOLDIER: u16 = 0;
-const M_BERET: u16 = 1;
-const M_VIKING: u16 = 2;
-const M_NINJA: u16 = 3;
-const M_GUN: u16 = 4;
-const M_MECH: u16 = 9;
-const M_DECK: u16 = 13;
-const M_DOCK: u16 = 14;
-const M_BARREL: u16 = 15;
-const M_CRATE: u16 = 16;
-const M_BALL: u16 = 17;
-const M_FLAG: u16 = 18;
-const M_PALM: u16 = 19;
-const M_ROCKS: u16 = 21;
-const M_SAND: u16 = 25;
-const M_GRASS: u16 = 26;
-const M_SHIP: u16 = 27;
-const M_SHIP_MEDIUM: u16 = 28;
-const M_TOWER: u16 = 30;
-const M_WALL: u16 = 31;
-const M_WATCH: u16 = 32;
-const M_ARCH: u16 = 33;
-const M_FINISH: u16 = 34;
-const M_BUOY: u16 = 35;
-const M_BOAT: u16 = 36;
-const M_CARGO: u16 = 40;
+/// A model's place in MODELS, looked up as the game is built.
+pub const fn model(name: &str) -> u16 {
+    let want = name.as_bytes();
+    let mut i = 0;
+    while i < MODELS.len() {
+        let have = MODELS[i].as_bytes();
+        let mut k = 0;
+        while k < have.len() && k < want.len() && have[k] == want[k] {
+            k += 1;
+        }
+        if k == have.len() && k == want.len() {
+            return i as u16;
+        }
+        i += 1;
+    }
+    panic!("not in MODELS");
+}
+const M_SOLDIER: u16 = model("fig.soldier");
+const M_BERET: u16 = model("fig.beret");
+const M_VIKING: u16 = model("fig.viking");
+const M_NINJA: u16 = model("fig.ninja");
+const M_GUN: u16 = model("gun.pistol");
+const M_DECK: u16 = model("pier.structure-platform");
+const M_DOCK: u16 = model("pier.structure-platform-dock");
+const M_BARREL: u16 = model("pier.barrel");
+const M_CRATE: u16 = model("pier.crate");
+const M_BALL: u16 = model("pier.cannon-ball");
+const M_FLAG: u16 = model("pier.flag-pirate-high");
+const M_PALM: u16 = model("pier.palm-detailed-bend");
+const M_ROCKS: u16 = model("pier.rocks-a");
+const M_SAND: u16 = model("pier.patch-sand-foliage");
+const M_GRASS: u16 = model("pier.patch-grass-foliage");
+const M_SHIP: u16 = model("pier.ship-pirate-large");
+const M_SHIP_MEDIUM: u16 = model("pier.ship-pirate-medium");
+const M_TOWER: u16 = model("pier.tower-complete-large");
+const M_WALL: u16 = model("pier.castle-wall");
+const M_WATCH: u16 = model("pier.tower-watch");
+const M_ARCH: u16 = model("boat.gate");
+const M_FINISH: u16 = model("boat.gate-finish");
+const M_BUOY: u16 = model("boat.buoy-flag");
+const M_BOAT: u16 = model("boat.boat-speed-a");
+const M_CARGO: u16 = model("boat.ship-cargo-a");
 
 pub const CLIPS: [&str; 12] = [
     "idle",
@@ -1027,6 +1040,7 @@ impl Combat {
         if b.state == 0 || b.d > self.s.d + 85.0 {
             return;
         }
+        let m = b.body();
         let (clip, t, flags) = if b.state == 3 {
             (C_DEATH, b.atk_t, 0)
         } else if b.hurt > 0.0 {
@@ -1047,23 +1061,28 @@ impl Combat {
         } else {
             1.0
         };
-        sc.put(
-            M_MECH + b.kind as u16,
-            clip,
-            t,
-            b.x,
-            DECK,
-            b.d,
-            b.yaw,
-            BOSS_SCALE,
-            BOSS_TINTS[b.kind.clamp(0, 3) as usize],
-        );
+        // a giant going down tips over its side, stiff as a toy, falling faster as it goes
+        let (mut x, mut y, mut d, mut roll) = (b.x, DECK, b.d, 0.0);
+        if !m.armoured && b.state == 3 {
+            let u = ((b.atk_t - TOPPLE[0]) / (TOPPLE[1] - TOPPLE[0])).clamp(0.0, 1.0);
+            let a = PI / 2.0 * u * u;
+            let side = b.fall_side();
+            let (s, c) = b.yaw.sin_cos();
+            let w = m.width * m.scale;
+            // turned about the edge it falls over, so it lies on the deck rather than through it
+            let out = side * w * (1.0 - a.cos());
+            (x, y, d, roll) = (x + out * c, y + w * a.sin(), d + out * s, -side * a);
+        }
+        let at = sc.put(m.model, clip, t, x, y, d, b.yaw, m.scale, m.tint);
         let i = sc.last();
+        i.roll = roll;
         i.flags = flags;
         // the shader whitens in linear light, so a little reads as a lot on a big dark mech
         i.flash = (b.flash.max(0.0) * 25.0) as u8;
         i.fade = fade;
-        let m = &MECHS[b.kind as usize];
+        if m.gun >= 0 {
+            sc.gun(m.gun, at, fade);
+        }
         let down = b.stage == 2 && b.atk_t >= m.land;
         if let (P_BOSS, Some((x, d)), false) = (self.s.phase, b.landing(), down) {
             // where it will land: a ring that fills as it comes down, gone once it is down

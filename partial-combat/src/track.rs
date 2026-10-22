@@ -495,7 +495,7 @@ impl Combat {
         let home = arena + BOSS_HOME;
         self.s.boss = Boss {
             state: 1,
-            kind: self.s.level % 4,
+            kind: boss_kind(self.s.level),
             x: side * 4.5,
             d: home,
             hp,
