@@ -49,6 +49,6 @@ for dir in */Cargo.toml; do
   fi
   (cd "$g" && cargo build --quiet --release --target wasm32-unknown-unknown)
   mkdir -p "$OUT/$g"
-  python3 tools/wasm-names.py "$g/target/wasm32-unknown-unknown/release/$g.wasm" "$OUT/$g/$g.wasm"
+  python3 tools/wasm-names.py "$g/target/wasm32-unknown-unknown/release/$(echo "$g" | tr - _).wasm" "$OUT/$g/$g.wasm"
   echo "built $OUT/$g/$g.wasm ($(wc -c < "$OUT/$g/$g.wasm") bytes)"
 done

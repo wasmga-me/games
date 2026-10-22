@@ -12,6 +12,7 @@ setup, pause and game over screens around it.
 | Facets | [wasmga.me/games/facets](https://wasmga.me/games/facets) | [facets/](facets) | Rust |
 | Flipside | [wasmga.me/games/flipside](https://wasmga.me/games/flipside) | [flipside.c](flipside.c) | C |
 | Pantry Solitaire | [wasmga.me/games/pantry](https://wasmga.me/games/pantry) | [pantry/](pantry) | Rust |
+| Partial Combat: Clickbait Tactics | [wasmga.me/games/partial-combat](https://wasmga.me/games/partial-combat) | [partial-combat/](partial-combat) | Rust |
 | Sapper | [wasmga.me/games/sapper](https://wasmga.me/games/sapper) | [sapper.c](sapper.c) | C |
 | Slider | [wasmga.me/games/slider](https://wasmga.me/games/slider) | [slider/](slider) | Rust |
 | Snake | [wasmga.me/games/snake](https://wasmga.me/games/snake) | [snake.c](snake.c) | C |
@@ -25,6 +26,15 @@ with a linking exception), built for WebAssembly by `branchwise/libgit2/build.sh
 which fetches wasi-sdk and libgit2 and applies `wasi.diff`; each lesson runs real
 git on an in-memory file system. `node branchwise/tools/check.mjs` plays every
 lesson's solution.
+
+`partial-combat/` is drawn in 3D: the module describes its scene each frame
+(`src/scene.rs`) and the play page draws it with WebGL2, with the module's
+framebuffer as the HUD over it. Its models and effect pictures come from CC0
+packs by [Quaternius](https://quaternius.com) and [Kenney](https://kenney.nl);
+`COMBAT_OUT=out node partial-combat/assets/pack.mjs` (after `npm install`
+there) downloads the packs and builds the `.glb` files and `fx.png` the game
+loads into `out/`. `cargo test --release -- --nocapture` in `partial-combat/` has bots play
+every level and the endless pier.
 
 `tilestack/art/riichi/` holds the tile pictures of FluffyStuff's
 [riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles)
