@@ -1,7 +1,7 @@
 //! Laying the pier ahead of the squad, a chunk at a time: gate pairs, enemy
-//! groups, barrels, gun crates, holes, narrow stretches, ships firing from
-//! the sea, and the boss arena that ends a level. A level is laid from its
-//! own seed, so it is the same every time; the endless pier from the run's.
+//! groups, barrels, gun crates, ships firing from the sea, and the boss in
+//! its crowd that ends a level. A level is laid from its own seed, so it is
+//! the same every time; the endless pier from the run's.
 //!
 //! As it lays the pier it keeps `expect`, the squad a player who picks well
 //! would have by then, and sizes enemies, barrels and the boss by it.
@@ -22,18 +22,23 @@ const GATE_X: f32 = HALF * 0.5;
 const GATE_W: f32 = HALF - 0.6;
 /// where crates and things on one side stand
 const SIDE_X: f32 = HALF * 0.5;
-/// the most soldiers in a row of a boss's army
-const ARMY_ROW: i32 = 12;
+/// how far out a ship sails, in water scene.rs put_decor() leaves clear
+const SHIP_X: f32 = HALF + 5.0;
+/// how far apart the boss's crowd stands, across and along the pier, and
+/// the least room it leaves round the boss
+const CROWD_X: f32 = 0.95;
+const CROWD_D: f32 = 0.9;
+const CROWD_GAP: f32 = 2.6;
 
 const C_GATES: i32 = 0;
 const C_ENEMY: i32 = 1;
 const C_CRATE: i32 = 2;
 const C_BARREL: i32 = 3;
-const C_HAZARD: i32 = 4;
+const C_SHIP: i32 = 4;
 
 impl Combat {
     pub fn lay_track(&mut self) {
-        while self.s.arena_d == 0.0 && self.s.next_d < self.s.d + AHEAD {
+        while self.s.stop_d == 0.0 && self.s.next_d < self.s.d + AHEAD {
             self.lay_chunk();
         }
     }
@@ -85,7 +90,7 @@ impl Combat {
         };
         let k = if self.s.endless() { c % (total + 1) } else { c };
         if k >= total {
-            self.lay_arena();
+            self.lay_boss();
             self.s.plan_at[c as usize % PLANS] = [self.s.next_d, self.s.expect];
             return;
         }
@@ -98,8 +103,10 @@ impl Combat {
                 1 | 5 | 8 | 11 => C_ENEMY,
                 2 => C_CRATE,
                 4 | 9 => {
-                    if hard >= 1.0 {
-                        C_HAZARD
+                    if hard >= 3.0 && self.chance((0.3 + hard * 0.03).min(0.8)) {
+                        C_SHIP
+                    } else if hard >= 1.0 {
+                        C_ENEMY
                     } else {
                         C_BARREL
                     }
@@ -120,7 +127,7 @@ impl Combat {
             C_ENEMY => self.lay_enemies(d0, hard),
             C_CRATE => self.lay_crate(d0, hard),
             C_BARREL => self.lay_barrels(d0, hard),
-            _ => self.lay_hazard(d0, hard),
+            _ => self.lay_ship(d0, hard),
         };
         self.s.next_d = d0 + len;
         self.s.plan_at[c as usize % PLANS] = [self.s.next_d, self.s.expect];
@@ -397,143 +404,77 @@ impl Combat {
         self.s.expect = (e + value as f32 * 0.8).min(MAX_COUNT as f32);
     }
 
-    /// Holes in the deck, a narrow stretch, or a ship firing shells.
-    fn lay_hazard(&mut self, d0: f32, hard: f32) -> f32 {
-        let row0 = (d0 / TILE).ceil() * TILE + TILE;
-        let roll = self.s.track_rng.below(if hard >= 5.0 {
-            3
-        } else if hard >= 3.0 {
-            2
-        } else {
-            1
-        });
-        let hole = |p: &mut Self, lane: i32, lanes: i32, row: f32, rows: f32| {
-            p.add_thing(Thing {
-                kind: K_HOLE,
-                x: -HALF + lane as f32 * TILE,
-                w: lanes as f32 * TILE,
-                d: row,
-                len: rows * TILE,
-                ..NO_THING
-            });
-        };
-        // what comes next starts 7.5 m past the last hole
-        let past = |end: f32| end - d0 + 7.5;
-        let len = match roll {
-            0 => {
-                // holes to steer round, half the pier wide: one side, then the other
-                let first = self.s.track_rng.below(3) as i32;
-                hole(self, first, 2, row0, 1.0);
-                let second = match first {
-                    0 => 2,
-                    2 => 0,
-                    _ if self.chance(0.5) => 0,
-                    _ => 2,
-                };
-                hole(self, second, 2, row0 + TILE * 3.0, 1.0);
-                if hard >= 4.0 && self.chance(0.5) {
-                    hole(self, first, 2, row0 + TILE * 6.0, 1.0);
-                    past(row0 + TILE * 7.0)
-                } else {
-                    past(row0 + TILE * 4.0)
-                }
-            }
-            1 => {
-                // a narrow stretch, that may step aside half way
-                let rows = if hard >= 5.0 { 3.0 } else { 2.0 };
-                let open = if hard >= 7.0 { 1 } else { 2 };
-                let lane = self.s.track_rng.below((LANES - open + 1) as u32) as i32;
-                let side = |p: &mut Self, lane: i32, row: f32, rows: f32| {
-                    if lane > 0 {
-                        hole(p, 0, lane, row, rows);
-                    }
-                    if lane + open < LANES {
-                        hole(p, lane + open, LANES - lane - open, row, rows);
-                    }
-                };
-                side(self, lane, row0, rows);
-                if open > 1 && hard >= 5.0 && self.chance(0.6) {
-                    // by less than its width, so the two stretches meet
-                    let shift = 1 + self.s.track_rng.below(open as u32 - 1) as i32;
-                    let next = if lane + shift > LANES - open || (lane >= shift && self.chance(0.5))
-                    {
-                        lane - shift
-                    } else {
-                        lane + shift
-                    };
-                    side(self, next, row0 + rows * TILE, rows);
-                    past(row0 + rows * 2.0 * TILE)
-                } else {
-                    past(row0 + rows * TILE)
-                }
-            }
-            _ => {
-                // a ship off the pier, firing shells at the squad as it passes
-                let x = if self.chance(0.5) {
-                    -HALF - 8.0
-                } else {
-                    HALF + 8.0
-                };
-                self.add_thing(Thing {
-                    kind: K_SHIP,
-                    x,
-                    d: d0 + 18.0,
-                    cool: 0.8,
-                    ..NO_THING
-                });
-                if self.chance(0.5) {
-                    let bx = -x.signum() * SIDE_X;
-                    self.lay_barrel(bx, d0 + 12.0, hard);
-                }
-                30.0
-            }
-        };
-        self.s.expect *= 0.9;
-        len
-    }
-
-    /// The end of a level: the squad stops at arena_d and fights the boss,
-    /// and the boss's army stands in a wedge beside it, waiting.
-    fn lay_arena(&mut self) {
-        let d0 = self.s.next_d;
-        let arena = d0 + 6.0;
-        self.s.arena_d = arena;
+    /// A ship off the pier, firing shells at the squad as it passes.
+    fn lay_ship(&mut self, d0: f32, hard: f32) -> f32 {
+        let x = if self.chance(0.5) { -SHIP_X } else { SHIP_X };
         self.add_thing(Thing {
-            kind: K_ARENA,
-            d: arena,
-            len: 30.0,
+            kind: K_SHIP,
+            x,
+            d: d0 + 18.0,
+            cool: 0.8,
             ..NO_THING
         });
+        if self.chance(0.5) {
+            let bx = -x.signum() * SIDE_X;
+            self.lay_barrel(bx, d0 + 12.0, hard);
+        }
+        self.s.expect *= 0.9;
+        30.0
+    }
+
+    /// The end of a level: the boss comes on in the middle of its crowd, and
+    /// the squad stops at stop_d to fight them.
+    fn lay_boss(&mut self) {
+        let stop = self.s.next_d + 6.0;
+        self.s.stop_d = stop;
         let hard = self.hard_at();
-        let side = if self.chance(0.5) { -1.0 } else { 1.0 };
         let e = self.s.expect.max(3.0);
-        // the army beside the boss: rows from its point towards the squad, one more each row up to ARMY_ROW
         let cost = e * (0.3 + hard * 0.012).min(0.55);
         let n = ((cost / share(e) * 2.0).round() as i32 + 6).clamp(10, 160);
         // what is left of the groups before it still stands, and the boss waves more on
         let n = n.min(MAXE as i32 - self.s.nen - 24).max(0);
-        let ax = -side * 3.0;
+        // in rows across a stretch of the pier the wider the more there are,
+        // as far in front of the boss as behind it, with room left round it
+        let home = stop + BOSS_HOME;
+        let wide = ((n as f32).sqrt() * 1.6).clamp(6.0, HALF * 2.0 - 1.0);
+        let bx = self.rand(-1.0, 1.0) * (HALF - 0.5 - wide * 0.5).min(3.0);
+        let half = (wide * 0.5 / CROWD_X) as i32;
+        // clear of its legs, which stand about half its width out
+        let m = &BODIES[boss_kind(self.s.level) as usize];
+        let clear = (m.width * m.scale * 0.5 + 1.0).max(CROWD_GAP);
+        let gap = (core::f32::consts::PI * clear * clear / (CROWD_X * CROWD_D)) as i32;
+        let rows = (n + gap) / (half * 2 + 1) + 1;
+        let front = (home - rows as f32 * CROWD_D * 0.5).max(stop + 6.0);
         let first = self.s.nen as usize;
         let (mut row, mut left) = (0, n);
         while left > 0 {
-            let wide = (row + 1).min(ARMY_ROW);
-            for i in 0..wide.min(left) {
-                let x = ax + (i as f32 - (wide - 1) as f32 * 0.5) * 0.85;
-                let kind = if row >= 3 && hard >= 3.0 && i % 5 == 2 {
+            let d = front + row as f32 * CROWD_D;
+            // from the middle out, so a row part filled stays round the boss
+            for j in 0..half * 2 + 1 {
+                if left == 0 {
+                    break;
+                }
+                let k = if j % 2 == 0 { j / 2 } else { -(j + 1) / 2 };
+                let x = bx + k as f32 * CROWD_X;
+                if (x - bx).hypot(d - home) < clear {
+                    continue;
+                }
+                let kind = if row >= 3 && hard >= 3.0 && k.rem_euclid(5) == 2 {
                     E_RIFLE
-                } else if row >= 4 && hard >= 7.0 && i % 6 == 4 {
+                } else if row >= 3 && hard >= 7.0 && k.rem_euclid(6) == 4 {
                     E_GRENADIER
-                } else if hard >= 5.0 && row >= 5 && i == 0 {
+                } else if hard >= 5.0 && row >= 2 && k.abs() == half {
                     E_BRUTE
-                } else if row >= 2 && hard >= 3.0 && i % 4 == 1 {
+                } else if row >= 1 && hard >= 3.0 && k.rem_euclid(4) == 1 {
                     E_HEAVY
                 } else {
                     E_GRUNT
                 };
-                let ex = x.clamp(-HALF + 0.4, HALF - 0.4);
-                self.spawn_enemy(kind, ex, arena + 6.0 + row as f32 * 0.75, ES_WAIT);
+                let ex = (x + self.rand(-0.2, 0.2)).clamp(-HALF + 0.4, HALF - 0.4);
+                let ed = d + self.rand(-0.25, 0.25);
+                self.spawn_enemy(kind, ex, ed, ES_WAIT);
+                left -= 1;
             }
-            left -= wide.min(left);
             row += 1;
         }
         let lost = self.send_army(first, cost);
@@ -542,14 +483,13 @@ impl Combat {
         let toughness = if self.s.endless() {
             0.6 + hard * 0.035
         } else {
-            (0.5 + hard * 0.04).min(1.3)
+            (0.52 + hard * 0.042).min(1.3)
         };
         let hp = (BOSS_SECONDS * toughness * self.dps()).round().max(30.0) as i32;
-        let home = arena + BOSS_HOME;
         self.s.boss = Boss {
             state: 1,
             kind: boss_kind(self.s.level),
-            x: side * 4.5,
+            x: bx,
             d: home,
             hp,
             hp_max: hp,
@@ -557,7 +497,8 @@ impl Combat {
             meant: self.dps(),
             ..NO_BOSS
         };
-        self.s.next_d = arena + 32.0;
+        // the endless pier's next stretch starts past the crowd
+        self.s.next_d = home + 20.0;
     }
 }
 

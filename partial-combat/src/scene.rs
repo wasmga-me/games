@@ -12,7 +12,6 @@ const SCENE_VERSION: u32 = 2;
 pub const FX_MUZZLE: u32 = 1;
 pub const FX_HIT: u32 = 2;
 pub const FX_BLAST: u32 = 3;
-pub const FX_SPLASH: u32 = 4;
 pub const FX_PUFF: u32 = 5;
 pub const FX_GATE: u32 = 6;
 pub const FX_PICKUP: u32 = 7;
@@ -50,6 +49,14 @@ const NO_HOLDER: u16 = 0xffff;
 pub const fn rgba(hex: u32, a: u8) -> u32 {
     wg::hex(hex) & 0x00ff_ffff | (a as u32) << 24
 }
+/// A colour u (0 to 1) of the way from a to b, its alpha too (wg::mix
+/// blends as paint over a screen does).
+fn blend(a: u32, b: u32, u: f32) -> u32 {
+    (0..4).fold(0, |c, k| {
+        let (x, y) = ((a >> (k * 8) & 255) as f32, (b >> (k * 8) & 255) as f32);
+        c | ((x + (y - x) * u).round() as u32) << (k * 8)
+    })
+}
 pub const GREEN: u32 = rgba(0x4f8a2b, 240);
 pub const GREEN_LIGHT: u32 = rgba(0x8fdc5a, 255);
 pub const TAN: u32 = rgba(0xb17732, 240);
@@ -64,7 +71,7 @@ const GOOD: u32 = rgba(0x0647ff, 255);
 const BAD: u32 = rgba(0xff0a0a, 255);
 
 /// The models the game names, by index, as the page finds them in its files.
-pub const MODELS: [&str; 71] = [
+pub const MODELS: [&str; 67] = [
     "man.soldier",
     "man.rifle",
     "man.runner",
@@ -86,7 +93,6 @@ pub const MODELS: [&str; 71] = [
     "pier.barrel",
     "pier.crate",
     "pier.cannon-ball",
-    "pier.flag-pirate-high",
     "pier.palm-detailed-bend",
     "pier.palm-detailed-straight",
     "pier.rocks-a",
@@ -98,11 +104,8 @@ pub const MODELS: [&str; 71] = [
     "pier.ship-pirate-large",
     "pier.ship-pirate-medium",
     "pier.ship-wreck",
-    "pier.tower-complete-large",
-    "pier.castle-wall",
     "pier.tower-watch",
     "boat.gate",
-    "boat.gate-finish",
     "boat.buoy-flag",
     "boat.boat-speed-a",
     "boat.boat-sail-a",
@@ -139,10 +142,13 @@ pub const MODELS: [&str; 71] = [
 ];
 /// A model's place in MODELS, looked up as the game is built.
 pub const fn model(name: &str) -> u16 {
+    find(&MODELS, name)
+}
+const fn find(list: &[&str], name: &str) -> u16 {
     let want = name.as_bytes();
     let mut i = 0;
-    while i < MODELS.len() {
-        let have = MODELS[i].as_bytes();
+    while i < list.len() {
+        let have = list[i].as_bytes();
         let mut k = 0;
         while k < have.len() && k < want.len() && have[k] == want[k] {
             k += 1;
@@ -152,7 +158,7 @@ pub const fn model(name: &str) -> u16 {
         }
         i += 1;
     }
-    panic!("not in MODELS");
+    panic!("not in the list");
 }
 const M_SOLDIER: u16 = model("man.soldier");
 const M_RIFLE: u16 = model("man.rifle");
@@ -163,12 +169,8 @@ const M_DOCK: u16 = model("pier.structure-platform-dock");
 const M_BARREL: u16 = model("pier.barrel");
 const M_CRATE: u16 = model("pier.crate");
 const M_BALL: u16 = model("pier.cannon-ball");
-const M_FLAG: u16 = model("pier.flag-pirate-high");
 const M_SHIP_MEDIUM: u16 = model("pier.ship-pirate-medium");
-const M_TOWER: u16 = model("pier.tower-complete-large");
-const M_WALL: u16 = model("pier.castle-wall");
 const M_ARCH: u16 = model("boat.gate");
-const M_FINISH: u16 = model("boat.gate-finish");
 const M_BUOY: u16 = model("boat.buoy-flag");
 
 /// Models to pick from, each with the size it is drawn at, and their tint.
@@ -200,8 +202,8 @@ struct Place {
     grounds: Set,
     trees: Set,
     boats: Set,
-    /// the big things further out, how far (m) their middles stand off a
-    /// 5 m pier's edge, and whether they float
+    /// the big things further out, how far (m) their middles stand off the
+    /// pier's edge, and whether they float
     far: Set,
     far_x: f32,
     afloat: bool,
@@ -240,7 +242,7 @@ const TROPICS: Place = Place {
         (model("boat.ship-cargo-a"), 1.6),
         (model("pier.ship-wreck"), 1.6),
     ]),
-    far_x: 26.0,
+    far_x: 21.0,
     afloat: true,
     sights: set(&[(model("pier.tower-watch"), 1.0)]),
     sight_ground: None,
@@ -276,7 +278,7 @@ const SNOW: Place = Place {
         ],
         rgba(0xe6f2fa, 210),
     ),
-    far_x: 32.0,
+    far_x: 27.0,
     afloat: false,
     sights: set(&[
         (model("snow.snowman-hat"), 3.2),
@@ -323,7 +325,7 @@ const DESERT: Place = Place {
         ],
         SANDSTONE,
     ),
-    far_x: 35.0,
+    far_x: 30.0,
     afloat: false,
     sights: tinted(
         &[
@@ -363,7 +365,7 @@ const AUTUMN: Place = Place {
         (model("nature.rock_largeA"), 12.0),
         (model("nature.rock_largeC"), 12.0),
     ]),
-    far_x: 32.0,
+    far_x: 27.0,
     afloat: false,
     sights: set(&[
         (model("nature.tent_detailedOpen"), 6.0),
@@ -380,11 +382,10 @@ fn shore(stage: i32) -> (&'static Place, u32) {
     (place, place.looks[k / n % place.looks.len()])
 }
 
-pub const CLIPS: [&str; 13] = [
+pub const CLIPS: [&str; 12] = [
     "idle",
     "walk",
     "shoot_onehanded",
-    "recievehit",
     "defeat",
     "victory",
     "punch",
@@ -395,19 +396,18 @@ pub const CLIPS: [&str; 13] = [
     "hitrecieve_1",
     "hold",
 ];
-const C_IDLE: u16 = 0;
-const C_WALK: u16 = 1;
-const C_AIM: u16 = 2;
-const C_FALL: u16 = 3;
-const C_DOWN: u16 = 4;
-const C_CHEER: u16 = 5;
-const C_PUNCH: u16 = 6;
-const C_SHOOT: u16 = 7;
-const C_DEATH: u16 = 8;
-const C_JUMP: u16 = 9;
-const C_WAVE: u16 = 10;
-const C_REEL: u16 = 11;
-const C_HOLD: u16 = 12;
+const C_IDLE: u16 = find(&CLIPS, "idle");
+const C_WALK: u16 = find(&CLIPS, "walk");
+const C_AIM: u16 = find(&CLIPS, "shoot_onehanded");
+const C_DOWN: u16 = find(&CLIPS, "defeat");
+const C_CHEER: u16 = find(&CLIPS, "victory");
+const C_PUNCH: u16 = find(&CLIPS, "punch");
+const C_SHOOT: u16 = find(&CLIPS, "shoot");
+const C_DEATH: u16 = find(&CLIPS, "death");
+const C_JUMP: u16 = find(&CLIPS, "jump");
+const C_WAVE: u16 = find(&CLIPS, "hello");
+const C_REEL: u16 = find(&CLIPS, "hitrecieve_1");
+const C_HOLD: u16 = find(&CLIPS, "hold");
 
 /// soldiers' size: the mannequin is about 1.83 m tall
 const FIG: f32 = 0.6;
@@ -416,8 +416,10 @@ const GATE_ARCH: f32 = 0.95;
 const ARCH_W: f32 = 6.2;
 /// the deck model is 2.5 m square and DECK high: scaled to a tile
 const DECK_SCALE: f32 = TILE / 2.5;
-/// how fast the walk plays, for a squad that runs
-const STRIDE: f32 = 1.25;
+/// how much of the walk plays for each metre a tan soldier of size 1 walks
+const STRIDE: f32 = 0.3;
+/// the ship's size as drawn
+pub const SHIP_SCALE: f32 = 1.1;
 const PI: f32 = core::f32::consts::PI;
 
 #[repr(C)]
@@ -485,6 +487,8 @@ pub struct Scene {
     sprites: Vec<Sprite>,
     labels: Vec<Label>,
     fx: Vec<Fx>,
+    /// where the squad is: what is put is drawn round it
+    origin: f32,
     names: Vec<u8>,
     clips: Vec<u8>,
 }
@@ -538,7 +542,7 @@ impl Scene {
             flash: 0,
             flags: INST_LOOP,
             t,
-            pos: [x, y, -d],
+            pos: [x, y, self.origin - d],
             yaw,
             roll: 0.0,
             scale,
@@ -589,7 +593,7 @@ impl Scene {
             picture,
             add: add as u8,
             flags: 0,
-            pos: [x, y, -d],
+            pos: [x, y, self.origin - d],
             w,
             h,
             a,
@@ -613,7 +617,7 @@ impl Scene {
             kind,
             sign,
             _pad: 0,
-            pos: [x, y, -d],
+            pos: [x, y, self.origin - d],
             size,
             value,
             rgba,
@@ -638,32 +642,38 @@ impl Combat {
         let s = &self.s;
         let tall = self.tall();
         let (cx, sd) = (s.cx, s.d);
-        let boss = s.phase == P_BOSS || (s.phase == P_CLEAR && s.arena_d > 0.0);
         // as far back as shows `half` either side, tall screens a little less
         let half = HALF + 1.0 - tall * 5.0;
         let fov = self.fov().to_radians();
         let far = (half / ((fov * 0.5).tan() * self.aspect.max(0.3))).clamp(15.0, 34.0);
-        let (pitch, ahead, look_y, far, lx) = if boss {
-            // back and up while the squad walks up to the arena, so its army and the boss fit
-            let gap = (s.arena_d - sd).max(0.0);
-            (
-                0.58f32,
-                8.0 + gap * 0.5,
-                DECK + 3.2,
-                far * 1.25 + gap * 0.6,
-                s.boss.x * 0.3 + cx * 0.2,
-            )
+        // back and up, bit by bit as the squad nears where it stops for the
+        // boss, so the boss and its crowd fit
+        let b = &s.boss;
+        let gap = if s.stop_d > 0.0 {
+            (s.stop_d - sd).clamp(0.0, 50.0)
         } else {
-            (0.84, far * 0.3, DECK, far, cx * 0.55)
+            50.0
         };
+        let u = ((50.0 - BOSS_HOME - gap) / 25.0).clamp(0.0, 1.0);
+        let u = u * u * (3.0 - 2.0 * u);
+        let mix = |a: f32, b: f32| a + (b - a) * u;
+        let (pitch, ahead, look_y) = (
+            mix(0.84, 0.58),
+            mix(far * 0.3, 8.0 + gap * 0.5),
+            mix(DECK, DECK + 3.2),
+        );
+        let (far, lx) = (
+            mix(far, far * 1.25 + gap * 0.6),
+            mix(cx * 0.55, b.x * 0.3 + cx * 0.2),
+        );
         let (sp, cp) = pitch.sin_cos();
         let want = [
             cx * 0.45,
             look_y + far * sp,
-            -(sd + ahead - far * cp),
+            far * cp - ahead,
             lx,
             look_y,
-            -(sd + ahead),
+            -ahead,
         ];
         let k = if self.cam_set {
             1.0 - (-4.0 * dt).exp()
@@ -671,9 +681,7 @@ impl Combat {
             1.0
         };
         for i in 0..6 {
-            // the camera keeps up with the run, and eases only the rest
-            let e = if i == 2 || i == 5 { k.max(0.25) } else { k };
-            self.cam[i] += (want[i] - self.cam[i]) * e;
+            self.cam[i] += (want[i] - self.cam[i]) * k;
         }
         self.cam_set = true;
         self.clock += dt;
@@ -696,16 +704,25 @@ impl Combat {
         if !self.cam_set {
             self.follow(0.0);
         }
-        self.put_pier(&mut sc);
-        self.put_decor(&mut sc);
+        // drawn round the squad, which holds its place while all on the pier
+        // comes on to it: the pier and the sea are laid round it as they are
+        let (stage, show) = self.stage_now();
+        let (place, theme) = shore(stage);
+        // the deck goes over to the next shore's planks as a level clears
+        let level = self.s.level.max(0);
+        let u = self.clearing();
+        let u = u * u * (3.0 - 2.0 * u);
+        let planks = blend(shore(level).0.planks, shore(level + 1).0.planks, u);
+        sc.origin = 0.0;
+        self.put_pier(&mut sc, planks);
+        self.put_decor(&mut sc, place, stage, show);
+        sc.origin = self.s.d;
         self.put_things(&mut sc);
         self.put_squad(&mut sc);
         self.put_enemies(&mut sc);
         self.put_boss(&mut sc);
         self.put_shots(&mut sc);
         let fov = self.fov();
-        // the light of the shore the squad is on
-        let (_, theme) = shore(self.stage_at(self.s.d));
         let f = |v: f32| v.to_bits();
         let c = self.cam;
         sc.header = [
@@ -734,22 +751,13 @@ impl Combat {
         self.scene.header.as_ptr()
     }
 
-    /// The pier's planks from behind the squad to as far as can be seen, with the holes left out.
-    fn put_pier(&self, sc: &mut Scene) {
-        let s = &self.s;
-        let first = ((s.d - 16.0) / TILE).floor().max(-15.0 / TILE) as i32;
-        let mut last = ((s.d + 80.0) / TILE).ceil() as i32;
-        if let (false, Some(a)) = (s.endless(), s.arenas().next()) {
-            last = last.min(((a.d + a.len) / TILE).ceil() as i32);
-        }
-        for row in first..last {
+    /// The pier's planks from behind the squad to as far as can be seen, the
+    /// same each frame round it.
+    fn put_pier(&self, sc: &mut Scene, planks: u32) {
+        for row in -3..17 {
             let d = (row as f32 + 0.5) * TILE;
-            let planks = self.place_at(d).planks;
             for lane in 0..LANES {
                 let x = -HALF + (lane as f32 + 0.5) * TILE;
-                if !s.deck(x, d) {
-                    continue;
-                }
                 let h = hash2(row, lane);
                 let model = if h % 11 == 0 { M_DOCK } else { M_DECK };
                 let yaw = if h & 16 != 0 { PI } else { 0.0 };
@@ -767,128 +775,51 @@ impl Combat {
                 );
             }
         }
-        for a in s.arenas() {
-            // flags at the arena's corners, the finish arch behind the boss
-            for side in [-1.0, 1.0] {
-                sc.put(
-                    M_FLAG,
-                    0,
-                    0.0,
-                    side * (HALF - 0.5),
-                    DECK,
-                    a.d + 1.0,
-                    if side < 0.0 { 0.0 } else { PI },
-                    0.8,
-                    0,
-                );
-            }
-            sc.put(
-                M_FINISH,
-                0,
-                0.0,
-                0.0,
-                DECK,
-                a.d + a.len - 2.0,
-                0.0,
-                HALF * 0.28,
-                0,
-            );
-            if !s.endless() {
-                // a fort where the pier ends
-                let end = a.d + a.len + 4.0;
-                for side in [-1.0f32, 1.0] {
-                    sc.put(M_TOWER, 0, 0.0, side * (HALF + 2.5), 0.0, end, 0.0, 1.3, 0);
-                    for k in 0..3 {
-                        sc.put(
-                            M_WALL,
-                            0,
-                            0.0,
-                            side * (HALF + 6.0 + k as f32 * 2.6),
-                            0.0,
-                            end + 0.5,
-                            PI / 2.0,
-                            1.3,
-                            0,
-                        );
-                    }
-                }
-            }
-        }
     }
 
-    /// Which stretch of the run d is in: the level, or on the endless pier
-    /// how many bosses are beaten before it (one stretch ends with each arena).
-    fn stage_at(&self, d: f32) -> i32 {
+    /// Which shore the squad is on (shore()), and how much of it shows: one
+    /// fades into the next as a level, or a boss's stretch of the endless
+    /// pier, clears.
+    fn stage_now(&self) -> (i32, f32) {
+        let u = self.clearing();
+        (
+            self.s.level.max(0) + (u > 0.5) as i32,
+            ((u - 0.5).abs() * 4.0).min(1.0),
+        )
+    }
+
+    /// How far through clearing a level the squad is, 0 to 1 (0 while it isn't).
+    fn clearing(&self) -> f32 {
         let s = &self.s;
-        let mut k = s.level.max(0);
-        if s.endless() {
-            // level already counts the beaten arenas (those arena_d no longer marks)
-            for a in s.arenas() {
-                k += (a.d + a.len <= d) as i32 - (a.d != s.arena_d) as i32;
-            }
+        if s.phase != P_CLEAR {
+            return 0.0;
         }
-        k.max(0)
+        (s.phase_ms as f32 / CLEAR_MS as f32).min(1.0)
     }
 
-    /// The shore along d.
-    fn place_at(&self, d: f32) -> &'static Place {
-        shore(self.stage_at(d)).0
-    }
-
-    /// The sea round the pier: buoys, and the shore's rocks, islands, boats and sights, the same each time past.
-    fn put_decor(&self, sc: &mut Scene) {
-        let s = &self.s;
-        let seed = if s.endless() { 7 } else { s.level * 31 + 3 };
-        let first = ((s.d - 20.0) / 12.0).floor() as i32;
-        // no farther than where an arena ends when it is laid (track.rs AHEAD
-        // + 36), so a shore never changes in view
-        let ahead = s.d + 125.0;
-        let last = (ahead / 12.0).ceil() as i32;
+    /// The sea round the pier: buoys, and the shore's rocks, islands, boats
+    /// and sights, the same each frame round the squad. They leave the water
+    /// off the pier's edges clear for ships.
+    fn put_decor(&self, sc: &mut Scene, place: &Place, stage: i32, show: f32) {
+        let seed = stage * 31 + 3;
         let t = self.clock;
-        // the sea starts this much further out than on a pier 5 m to a side
-        let out = HALF - 5.0;
-        // nothing stands in the water where a ship fires from
-        let clear = |side: f32, d: f32| {
-            !s.things()
-                .iter()
-                .any(|th| th.kind == K_SHIP && th.x * side > 0.0 && (th.d - d).abs() < 9.0)
-        };
-        for seg in first..last {
+        let from = sc.inst.len();
+        for seg in -2..10 {
             for side in [-1.0f32, 1.0] {
                 let h = hash2(seg * 2 + (side > 0.0) as i32, seed);
                 let d = seg as f32 * 12.0 + unit(h >> 3) * 10.0;
-                if seg % 2 == 0 && clear(side, seg as f32 * 12.0) {
-                    // buoys along the pier
-                    let bob = (t * 1.6 + seg as f32).sin() * 0.08;
-                    sc.put(
-                        M_BUOY,
-                        0,
-                        0.0,
-                        side * (7.2 + out),
-                        bob - 0.15,
-                        seg as f32 * 12.0,
-                        0.0,
-                        0.9,
-                        0,
-                    );
-                    sc.last().flags |= INST_NO_SHADOW;
-                }
-                if d > ahead || !clear(side, d) {
-                    continue;
-                }
-                let place = self.place_at(d);
                 let far = unit(hash2(seg, seed + 1 + (side > 0.0) as i32));
                 let bob = (t * 1.1 + seg as f32 * 0.7).sin();
                 match h % 100 {
                     0..=17 => {
-                        let x = side * (11.0 + out + far * 7.0);
+                        let x = side * (HALF + 12.0 + far * 6.0);
                         let (m, size) = place.rocks.pick(h);
                         let (yaw, size) = (unit(h) * 6.3, size * (1.0 + far * 0.6));
                         sc.put(m, 0, 0.0, x, -0.3, d, yaw, size, place.rocks.tint);
                     }
                     18..=31 => {
                         // an island with a tree or two
-                        let x = side * (16.0 + out + far * 8.0);
+                        let x = side * (HALF + 15.0 + far * 8.0);
                         let (ground, trees) = (&place.grounds, &place.trees);
                         let (m, size) = ground.pick(h);
                         sc.put(m, 0, 0.0, x, -0.12, d, unit(h) * 6.3, size, ground.tint);
@@ -903,24 +834,15 @@ impl Combat {
                         }
                     }
                     32..=43 => {
-                        let x = side * (10.0 + out + far * 9.0);
+                        let x = side * (HALF + 11.0 + far * 8.0);
                         let (m, size) = place.boats.pick(h >> 6);
                         let yaw = if side < 0.0 { 0.3 } else { PI - 0.3 };
-                        sc.put(
-                            m,
-                            0,
-                            0.0,
-                            x,
-                            bob * 0.1 - 0.05,
-                            d,
-                            yaw,
-                            size,
-                            place.boats.tint,
-                        );
+                        let (y, tint) = (bob * 0.1 - 0.05, place.boats.tint);
+                        sc.put(m, 0, 0.0, x, y, d, yaw, size, tint);
                         sc.last().roll = bob * 0.05;
                     }
                     44..=51 => {
-                        let x = side * (place.far_x + out + far * 14.0);
+                        let x = side * (HALF + place.far_x + far * 14.0);
                         let (m, size) = place.far.pick(h >> 6);
                         let tint = place.far.tint;
                         if place.afloat {
@@ -932,7 +854,7 @@ impl Combat {
                         }
                     }
                     52..=55 => {
-                        let x = side * (13.0 + out + far * 4.0);
+                        let x = side * (HALF + 12.0 + far * 4.0);
                         let yaw = unit(h) * 6.3;
                         let (m, size) = place.sights.pick(h >> 6);
                         let y = if let Some(size) = place.sight_ground {
@@ -946,6 +868,30 @@ impl Combat {
                     }
                     _ => {}
                 }
+            }
+        }
+        if show < 1.0 {
+            for i in &mut sc.inst[from..] {
+                i.fade = show;
+            }
+        }
+        // buoys along the pier, on every shore
+        for seg in -1..6 {
+            for side in [-1.0f32, 1.0] {
+                let bob = (t * 1.6 + seg as f32 * 2.0).sin() * 0.08;
+                let d = seg as f32 * 24.0;
+                sc.put(
+                    M_BUOY,
+                    0,
+                    0.0,
+                    side * (HALF + 1.4),
+                    bob - 0.15,
+                    d,
+                    0.0,
+                    0.9,
+                    0,
+                );
+                sc.last().flags |= INST_NO_SHADOW;
             }
         }
     }
@@ -1128,18 +1074,10 @@ impl Combat {
                     }
                 }
                 K_SHIP => {
+                    // sailing up the pier's side, bow on to the squad
                     let bob = (t * 1.2 + th.d).sin();
-                    sc.put(
-                        M_SHIP_MEDIUM,
-                        0,
-                        0.0,
-                        th.x,
-                        bob * 0.12 - 0.1,
-                        th.d,
-                        if th.x < 0.0 { PI / 2.0 } else { -PI / 2.0 },
-                        1.3,
-                        0,
-                    );
+                    let y = bob * 0.12 - 0.1;
+                    sc.put(M_SHIP_MEDIUM, 0, 0.0, th.x, y, th.d, 0.0, SHIP_SCALE, 0);
                     sc.last().roll = bob * 0.03;
                 }
                 _ => {}
@@ -1151,24 +1089,20 @@ impl Combat {
         let s = &self.s;
         let cheer = s.phase == P_CLEAR || s.phase == P_WON;
         for q in s.soldiers() {
-            let (clip, t, fade, y) = match q.state {
-                S_OK if cheer => (C_CHEER, q.t, 1.0, DECK),
-                // halted at the arena, they stand and fire
-                S_OK if s.phase == P_BOSS && s.d >= s.arena_d => (C_AIM, q.t * 1.3, 1.0, DECK),
-                S_OK => (C_WALK, q.t * STRIDE, 1.0, DECK),
-                S_FALL => (C_FALL, q.t, 1.0, q.y),
-                _ => (C_DOWN, q.t * 1.6, (1.6 - q.t).clamp(0.0, 1.0), DECK),
+            // they stand their ground and fire
+            let (clip, t, fade) = match q.state {
+                S_OK if cheer => (C_CHEER, q.t, 1.0),
+                S_OK => (C_AIM, q.t * 1.3, 1.0),
+                _ => (C_DOWN, q.t * 1.6, (1.6 - q.t).clamp(0.0, 1.0)),
             };
-            let at = sc.put(M_SOLDIER, clip, t, q.x, y, q.d, PI, FIG, GREEN);
+            let at = sc.put(M_SOLDIER, clip, t, q.x, DECK, q.d, PI, FIG, GREEN);
             let i = sc.last();
             i.fade = fade;
             i.flash = (q.flash * 200.0) as u8;
             if q.state != S_OK {
                 i.flags = 0;
             }
-            if q.state != S_FALL || q.y > 0.0 {
-                sc.gun(s.weapon, at, fade);
-            }
+            sc.gun(s.weapon, at, fade);
         }
         if s.count > 0 && s.phase != P_DEAD {
             let (n, x, d) = s
@@ -1193,6 +1127,7 @@ impl Combat {
 
     fn put_enemies(&self, sc: &mut Scene) {
         let s = &self.s;
+        let marching = s.marching();
         for e in s.enemies() {
             if e.d > s.d + 85.0 {
                 continue;
@@ -1206,22 +1141,20 @@ impl Combat {
                 _ => (M_SOLDIER, TAN, 0),
             };
             let scale = FIG * e.size;
+            let walk = e.walk * STRIDE / e.size;
             let (clip, t, fade, flags) = match e.state {
-                ES_WAIT if e.kind == E_RIFLE => (C_AIM, e.t, 1.0, INST_LOOP),
                 // a throw as each grenade goes (its clock starts again then)
                 ES_WAIT if e.kind == E_GRENADIER && e.t < 0.6 => (C_PUNCH, e.t * 1.5, 1.0, 0),
+                // coming on to the squad, riflemen firing as they come
+                ES_WAIT if marching => (C_WALK, walk, 1.0, INST_LOOP),
+                ES_WAIT if e.kind == E_RIFLE && e.d - s.d < STAND_RANGE => {
+                    (C_AIM, e.t, 1.0, INST_LOOP)
+                }
                 // the rest with a gun hold it ready; those without stand easy
                 ES_WAIT if gun >= 0 => (C_HOLD, e.t, 1.0, INST_LOOP),
                 ES_WAIT => (C_IDLE, e.t, 1.0, INST_LOOP),
-                ES_CHARGE => {
-                    let (clip, rate) = match e.kind {
-                        E_BRUTE => (C_PUNCH, 2.8),
-                        E_RUNNER => (C_WALK, 1.75),
-                        E_HEAVY => (C_WALK, 1.05),
-                        _ => (C_WALK, 1.3),
-                    };
-                    (clip, e.t * rate, 1.0, INST_LOOP)
-                }
+                ES_CHARGE if e.kind == E_BRUTE => (C_PUNCH, e.t * 2.8, 1.0, INST_LOOP),
+                ES_CHARGE => (C_WALK, walk, 1.0, INST_LOOP),
                 _ => (C_DOWN, e.t * 1.5, (1.8 - e.t).clamp(0.0, 1.0), 0),
             };
             let at = sc.put(model, clip, t, e.x, DECK, e.d, e.yaw, scale, tint);
@@ -1266,6 +1199,7 @@ impl Combat {
                 (A_SHELLS, 1) => (C_SHOOT, b.atk_t, 0),
                 (A_TROOPS, _) => (C_WAVE, b.atk_t, 0),
                 (A_JUMP, 2) => (C_JUMP, b.atk_t, 0),
+                _ if self.s.marching() => (C_WALK, b.walk, INST_LOOP),
                 _ => (C_IDLE, b.t, INST_LOOP),
             }
         };

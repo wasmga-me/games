@@ -166,7 +166,6 @@ const SOLDIER_CLIPS = {
   Pistol_Idle_Loop: "hold",
   Sprint_Loop: "walk",
   Pistol_Shoot: "shoot_onehanded",
-  Jump_Loop: "recievehit",
   Death01: "defeat",
   Dance_Loop: "victory",
   Punch_Jab: "punch",
@@ -545,12 +544,12 @@ async function guns() {
 
 // ---------- pier and shore: Kenney's Pirate Kit, boats: Kenney's Watercraft Kit ----------
 const PIRATE = [
-  "structure-platform", "structure-platform-dock", "barrel", "crate", "cannon-ball", "flag-pirate-high",
+  "structure-platform", "structure-platform-dock", "barrel", "crate", "cannon-ball",
   "palm-detailed-bend", "palm-detailed-straight", "rocks-a", "rocks-b", "rocks-c", "rocks-sand-a",
   "patch-sand-foliage", "patch-grass-foliage", "ship-pirate-large", "ship-pirate-medium", "ship-wreck",
-  "tower-watch", "tower-complete-large", "castle-wall",
+  "tower-watch",
 ];
-const WATERCRAFT = ["gate", "gate-finish", "buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "ship-cargo-a"];
+const WATERCRAFT = ["gate", "buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "ship-cargo-a"];
 // the other shores: snow from Kenney's Holiday Kit; desert and autumn lake from Kenney's Nature Kit
 const SNOW = ["tree-snow-a", "tree-snow-b", "tree-snow-c", "snowman-hat", "snow-flat-large", "rocks-large", "rocks-medium", "reindeer", "sled"];
 const NATURE = [
