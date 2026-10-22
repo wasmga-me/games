@@ -2,11 +2,13 @@
 //! boss (or the distance, endless), the score, and a word in the middle as
 //! things happen. Drawn on a clear screen in overlay mode, so the page lays
 //! it over the scene; only redrawn when what it shows changes, and then only
-//! the band at the top it draws in, which the page alone uploads.
+//! the band at the top it draws in, which is all the page uploads and shows.
 use crate::*;
 
 /// how long a banner shows, ms
 const BANNER_MS: i32 = 1900;
+/// how far down the top line reaches
+const TOP_BAND: f32 = 50.0;
 
 pub fn level_text(n: i32) -> String {
     match wg::lang() {
@@ -128,8 +130,13 @@ fn text(s: &mut Screen, t: &str, x: f32, y: f32, size: f32, align: i32, alpha: f
 pub fn draw(p: &mut Combat, s: &mut Screen) {
     let (x0, y0, x1, y1) = s.visible();
     let w = x1 - x0;
-    // the band drawn in: the top line, and the banner below it
-    let band = (y1 - y0) * 0.3 + 30.0;
+    let a = banner_alpha(&p.s);
+    // the band drawn in: the top line, and the banner below it while one shows
+    let band = if a > 0.0 {
+        (y1 - y0) * 0.3 + 30.0
+    } else {
+        TOP_BAND
+    };
     p.scene.hud_rows = (s.px(0.0, y0 + band).1.ceil() as i32).clamp(1, s.size_px().1) as u32;
     s.overlay(true);
     s.set_clip(x0, y0, w, band);
@@ -162,7 +169,6 @@ pub fn draw(p: &mut Combat, s: &mut Screen) {
         }
         s.disc(bx + bw + 9.0, by + 4.0, 6.0, wg::hex(0xe8402a), 0.95);
     }
-    let a = banner_alpha(st);
     if a > 0.0 {
         let t = banner_text(p);
         let size = s.fit_size(&t, 36.0, w - 40.0);

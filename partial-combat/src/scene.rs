@@ -5,6 +5,9 @@
 //! (wg3d_scene), so none of it is saved.
 use crate::*;
 
+/// the layout's version (abi.ts VERSION)
+const SCENE_VERSION: u32 = 2;
+
 // effects (abi.ts FX_*)
 pub const FX_MUZZLE: u32 = 1;
 pub const FX_HIT: u32 = 2;
@@ -166,9 +169,11 @@ const C_REEL: u16 = 11;
 
 /// soldiers' size: the models are about 1.9 m tall
 const FIG: f32 = 0.55;
-/// barrels' and crates' sizes
-const BARREL: f32 = 1.0;
-const CRATE: f32 = 1.5;
+/// a gate's arch's size, before it is widened to the gate, and the model's width
+const GATE_ARCH: f32 = 0.95;
+const ARCH_W: f32 = 6.2;
+/// the deck model is 2.5 m square and DECK high: scaled to a tile
+const DECK_SCALE: f32 = TILE / 2.5;
 /// how fast the walk plays, for a squad that runs
 const STRIDE: f32 = 2.3;
 const PI: f32 = core::f32::consts::PI;
@@ -188,6 +193,8 @@ pub struct Inst {
     scale: f32,
     tint: u32,
     fade: f32,
+    /// its own x scaled by this too, for a model stretched across
+    wide: f32,
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -295,6 +302,7 @@ impl Scene {
             scale,
             tint,
             fade: 1.0,
+            wide: 1.0,
         });
         (self.inst.len() - 1) as u16
     }
@@ -317,6 +325,7 @@ impl Scene {
             scale,
             tint: 0,
             fade,
+            wide: 1.0,
         });
     }
     fn sprite(
@@ -457,7 +466,7 @@ impl Combat {
         let f = |v: f32| v.to_bits();
         let c = self.cam;
         sc.header = [
-            1,
+            SCENE_VERSION,
             sc.inst.as_ptr() as u32,
             sc.inst.len() as u32,
             sc.sprites.as_ptr() as u32,
@@ -485,7 +494,7 @@ impl Combat {
     /// The pier's planks from behind the squad to as far as can be seen, with the holes left out.
     fn put_pier(&self, sc: &mut Scene) {
         let s = &self.s;
-        let first = ((s.d - 16.0) / TILE).floor().max(-6.0) as i32;
+        let first = ((s.d - 16.0) / TILE).floor().max(-15.0 / TILE) as i32;
         let mut last = ((s.d + 80.0) / TILE).ceil() as i32;
         let arenas = || s.things().iter().filter(|t| t.kind == K_ARENA);
         if let (false, Some(a)) = (s.endless(), arenas().next()) {
@@ -501,7 +510,18 @@ impl Combat {
                 let h = hash2(row, lane);
                 let model = if h % 11 == 0 { M_DOCK } else { M_DECK };
                 let yaw = if h & 16 != 0 { PI } else { 0.0 };
-                sc.put(model, 0, 0.0, x, 0.0, d, yaw, 1.0, PLANKS);
+                // sunk to keep its top at DECK
+                sc.put(
+                    model,
+                    0,
+                    0.0,
+                    x,
+                    DECK * (1.0 - DECK_SCALE),
+                    d,
+                    yaw,
+                    DECK_SCALE,
+                    PLANKS,
+                );
             }
         }
         for a in arenas() {
@@ -713,25 +733,23 @@ impl Combat {
                         _ => false,
                     } && !(th.a == OP_ADD && th.value == 0);
                     let col = if good { GOOD } else { BAD };
-                    // arches side by side across the gate (the model is 6.2 m wide), one glass panel through them
-                    let arches = (th.w / 4.7).round().max(1.0);
-                    let size = th.w / arches / 6.2;
-                    for k in 0..arches as i32 {
-                        let x = th.x + (k as f32 + 0.5 - arches * 0.5) * th.w / arches;
-                        sc.put(
-                            M_ARCH,
-                            0,
-                            0.0,
-                            x,
-                            DECK,
-                            th.d,
-                            0.0,
-                            size,
-                            col & 0x00ff_ffff | 0xd800_0000,
-                        );
-                        sc.last().fade = fade;
-                        sc.last().flash = (th.flash * 120.0) as u8;
-                    }
+                    // one arch across the gate, widened to fit, with a glass panel in it
+                    let wide = th.w / (ARCH_W * GATE_ARCH);
+                    sc.put(
+                        M_ARCH,
+                        0,
+                        0.0,
+                        th.x,
+                        DECK,
+                        th.d,
+                        0.0,
+                        GATE_ARCH,
+                        col & 0x00ff_ffff | 0xd800_0000,
+                    );
+                    let arch = sc.last();
+                    arch.wide = wide;
+                    arch.fade = fade;
+                    arch.flash = (th.flash * 120.0) as u8;
                     let panel = if good {
                         rgba(0x3a9bff, 95)
                     } else {
@@ -744,8 +762,8 @@ impl Combat {
                         th.x,
                         DECK,
                         th.d + 0.05,
-                        th.w - 0.9 * size,
-                        3.95 * size,
+                        th.w - 0.9 * GATE_ARCH * wide,
+                        3.95 * GATE_ARCH,
                         0.0,
                         0.0,
                         panel & 0x00ff_ffff | (((panel >> 24) as f32 * fade) as u32) << 24,
@@ -755,7 +773,7 @@ impl Combat {
                         LABEL_GATE,
                         sign_of(th.a),
                         th.x,
-                        DECK + 2.3 * size,
+                        DECK + 2.3 * GATE_ARCH,
                         th.d,
                         1.6 * pulse,
                         th.value,
@@ -815,7 +833,7 @@ impl Combat {
                             sc.last().flash = flash;
                             // the gun inside, turning over it
                             let gun = th.value.clamp(0, 4);
-                            let y = DECK + 1.95 + (t * 2.0).sin() * 0.1;
+                            let y = DECK + CRATE * 1.1 + (t * 2.0).sin() * 0.1;
                             sc.put(
                                 M_GUN + gun as u16,
                                 0,
@@ -824,7 +842,7 @@ impl Combat {
                                 y,
                                 th.d,
                                 t * 1.6,
-                                WEAPONS[gun as usize].scale * 2.0,
+                                WEAPONS[gun as usize].scale * 2.5,
                                 0,
                             );
                             sc.sprite(
@@ -834,8 +852,8 @@ impl Combat {
                                 th.x,
                                 y,
                                 th.d,
-                                2.0,
-                                2.0,
+                                CRATE * 1.3,
+                                CRATE * 1.3,
                                 0.0,
                                 0.0,
                                 rgba(0x60c0ff, 150),
@@ -846,9 +864,9 @@ impl Combat {
                                 LABEL_PLAIN,
                                 0,
                                 th.x,
-                                DECK + 0.62,
-                                th.d - 1.0,
-                                0.95 * pulse,
+                                DECK + CRATE * 0.41,
+                                th.d - CRATE * 0.67,
+                                1.4 * pulse,
                                 th.hp,
                                 rgba(0xffffff, 255),
                                 1.0,

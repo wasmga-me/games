@@ -107,10 +107,11 @@ impl Combat {
     /// Two gates side by side: a sum that helps and one that doesn't, or two that help unequally.
     fn lay_gates(&mut self, d0: f32, hard: f32) -> f32 {
         let e = self.s.expect.max(1.0);
+        let g = gains(e);
         let add = |p: &mut Self| {
             (
                 OP_ADD,
-                (3.0 + hard * 1.2 + e * p.rand(0.25, 0.6)).round().min(90.0) as i32,
+                (3.0 + hard * 1.2 + g * p.rand(0.25, 0.6)).round() as i32,
             )
         };
         // far down the endless pier a big squad no longer doubles
@@ -128,12 +129,7 @@ impl Combat {
                 },
             )
         };
-        let sub = |p: &mut Self| {
-            (
-                OP_SUB,
-                (2.0 + e * p.rand(0.3, 0.7) + hard).round().min(90.0) as i32,
-            )
-        };
+        let sub = |p: &mut Self| (OP_SUB, (2.0 + g * p.rand(0.3, 0.7) + hard).round() as i32);
         let div = |p: &mut Self| (OP_DIV, if hard >= 6.0 && p.chance(0.4) { 3 } else { 2 });
         let good = |p: &mut Self| {
             if e >= 5.0 && p.chance(0.45) {
@@ -272,8 +268,7 @@ impl Combat {
     /// in front of it: only the soldiers in line with it hit it.
     fn dps_in_line(&self, kind: i32) -> f32 {
         let e = self.s.expect.max(1.0);
-        let in_line =
-            (4.0 * half_width(kind) / (core::f32::consts::PI * radius(e as i32))).min(1.0);
+        let in_line = (4.0 * half_size(kind) / (core::f32::consts::PI * radius(e as i32))).min(1.0);
         e.min(MAX_SHOOTERS) * gun_dps(self.s.expect_gun) * in_line
     }
 
@@ -330,7 +325,7 @@ impl Combat {
 
     fn lay_barrel(&mut self, x: f32, d: f32, hard: f32) {
         let e = self.s.expect;
-        let value = (3.0 + e * 0.25 + hard).round().min(60.0) as i32;
+        let value = (3.0 + gains(e) * 0.25 + hard).round() as i32;
         let share = (0.35 + hard * 0.012).min(0.6);
         let hp = (3.0 + self.dps_in_line(K_BARREL) * self.in_range() * share).round() as i32;
         self.add_thing(Thing {
@@ -347,7 +342,7 @@ impl Combat {
 
     /// Holes in the deck, a narrow stretch, or a ship firing shells.
     fn lay_hazard(&mut self, d0: f32, hard: f32) -> f32 {
-        let row0 = (d0 / TILE).ceil() * TILE + TILE * 2.0;
+        let row0 = (d0 / TILE).ceil() * TILE + TILE;
         let roll = self.s.track_rng.below(if hard >= 5.0 {
             3
         } else if hard >= 3.0 {
@@ -365,29 +360,31 @@ impl Combat {
                 ..NO_THING
             });
         };
+        // what comes next starts 7.5 m past the last hole
+        let past = |end: f32| end - d0 + 7.5;
         let len = match roll {
             0 => {
-                // holes to steer round: one side, then the other
-                let first = self.s.track_rng.below(3) as i32 * 2;
-                hole(self, first, 4, row0, 2.0);
+                // holes to steer round, half the pier wide: one side, then the other
+                let first = self.s.track_rng.below(3) as i32;
+                hole(self, first, 2, row0, 1.0);
                 let second = match first {
-                    0 => 4,
-                    4 => 0,
+                    0 => 2,
+                    2 => 0,
                     _ if self.chance(0.5) => 0,
-                    _ => 4,
+                    _ => 2,
                 };
-                hole(self, second, 4, row0 + TILE * 5.0, 2.0);
+                hole(self, second, 2, row0 + TILE * 3.0, 1.0);
                 if hard >= 4.0 && self.chance(0.5) {
-                    hole(self, first, 4, row0 + TILE * 10.0, 2.0);
-                    TILE * 17.0
+                    hole(self, first, 2, row0 + TILE * 6.0, 1.0);
+                    past(row0 + TILE * 7.0)
                 } else {
-                    TILE * 12.0
+                    past(row0 + TILE * 4.0)
                 }
             }
             1 => {
                 // a narrow stretch, that may step aside half way
-                let rows = 4.0 + (hard / 3.0).min(3.0).floor();
-                let open = if hard >= 7.0 { 2 } else { 3 };
+                let rows = if hard >= 5.0 { 3.0 } else { 2.0 };
+                let open = if hard >= 7.0 { 1 } else { 2 };
                 let lane = self.s.track_rng.below((LANES - open + 1) as u32) as i32;
                 let side = |p: &mut Self, lane: i32, row: f32, rows: f32| {
                     if lane > 0 {
@@ -398,7 +395,7 @@ impl Combat {
                     }
                 };
                 side(self, lane, row0, rows);
-                if hard >= 5.0 && self.chance(0.6) {
+                if open > 1 && hard >= 5.0 && self.chance(0.6) {
                     // by less than its width, so the two stretches meet
                     let shift = 1 + self.s.track_rng.below(open as u32 - 1) as i32;
                     let next = if lane + shift > LANES - open || (lane >= shift && self.chance(0.5))
@@ -408,9 +405,9 @@ impl Combat {
                         lane + shift
                     };
                     side(self, next, row0 + rows * TILE, rows);
-                    (rows * 2.0 + 5.0) * TILE
+                    past(row0 + rows * 2.0 * TILE)
                 } else {
-                    (rows + 5.0) * TILE
+                    past(row0 + rows * TILE)
                 }
             }
             _ => {
@@ -492,7 +489,7 @@ impl Combat {
         let toughness = if self.s.endless() {
             0.6 + hard * 0.035
         } else {
-            (0.55 + hard * 0.025).min(1.1)
+            (0.55 + hard * 0.031).min(1.1)
         };
         let hp = (BOSS_SECONDS * toughness * dps).round().max(30.0) as i32;
         let home = arena + BOSS_HOME;
@@ -514,4 +511,11 @@ impl Combat {
 /// those that reach it, as the rest fall to its fire first.
 fn after_group(e: f32, n: i32) -> f32 {
     (e - n as f32 * 0.45).max(e * 0.45)
+}
+
+/// What sums on gates and barrels are sized by for a squad of e: e itself up
+/// to a hundred, then ten times its square root, so a big squad still grows
+/// by them but not past everything that thins it out.
+fn gains(e: f32) -> f32 {
+    e.min(10.0 * e.sqrt())
 }

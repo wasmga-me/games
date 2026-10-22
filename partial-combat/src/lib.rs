@@ -16,8 +16,9 @@ mod track;
 
 use wg::{Game, Input, Pointer, Rng, Screen};
 
-/// 1: the first; 3: a pier twice as wide, each gun its own shots, bosses that walk, jump and bring an army
-const VERSION: u32 = 3;
+/// 1: the first; 3: a pier twice as wide, each gun its own shots, bosses that walk, jump and bring an army;
+/// 4: lanes and holes laid in 5 m tiles, bigger crates
+const VERSION: u32 = 4;
 
 /// options, in catalog order: mode, level to start at
 pub const O_MODE: usize = 0;
@@ -26,8 +27,8 @@ pub const ENDLESS: i32 = 1;
 pub const LEVELS: i32 = 20;
 
 /// The pier: lanes of TILE metres, HALF either side of the middle, its deck DECK above the sea.
-pub const LANES: i32 = 8;
-pub const TILE: f32 = 2.5;
+pub const LANES: i32 = 4;
+pub const TILE: f32 = 5.0;
 pub const HALF: f32 = 10.0;
 pub const DECK: f32 = 0.93;
 
@@ -37,7 +38,11 @@ pub const MAXE: usize = 320;
 pub const MAXO: usize = 48;
 pub const MAXB: usize = 192;
 pub const MAXSH: usize = 16;
-pub const MAX_COUNT: i32 = 999;
+/// the most a squad can number, only so its sums stay in range
+pub const MAX_COUNT: i32 = 9_999_999;
+/// barrels' and crates' sizes
+pub const BARREL: f32 = 1.0;
+pub const CRATE: f32 = 2.6;
 /// room each soldier takes in the squad
 const SPACING: f32 = 0.34;
 /// soldiers firing at most; a bigger squad doesn't fire faster
@@ -138,7 +143,7 @@ pub const WEAPONS: [Weapon; 5] = [
         pierce: 0,
         speed: 34.0,
         range: 28.0,
-        scale: 0.36,
+        scale: 0.5,
     },
     Weapon {
         names: [
@@ -160,7 +165,7 @@ pub const WEAPONS: [Weapon; 5] = [
         pierce: 0,
         speed: 38.0,
         range: 26.0,
-        scale: 0.3,
+        scale: 0.42,
     },
     Weapon {
         names: [
@@ -182,7 +187,7 @@ pub const WEAPONS: [Weapon; 5] = [
         pierce: 0,
         speed: 46.0,
         range: 34.0,
-        scale: 0.27,
+        scale: 0.38,
     },
     Weapon {
         names: [
@@ -204,7 +209,7 @@ pub const WEAPONS: [Weapon; 5] = [
         pierce: 0,
         speed: 30.0,
         range: 21.0,
-        scale: 0.22,
+        scale: 0.31,
     },
     Weapon {
         names: [
@@ -226,7 +231,7 @@ pub const WEAPONS: [Weapon; 5] = [
         pierce: 3,
         speed: 70.0,
         range: 40.0,
-        scale: 0.17,
+        scale: 0.24,
     },
 ];
 /// damage a second one soldier puts out with gun w, all pellets hitting
@@ -708,7 +713,6 @@ impl Save {
     }
 }
 
-/// the squad's radius for n soldiers
 /// A squad of n through a gate of op and value; dividing rounds up.
 pub fn gate_sum(op: i32, v: i32, n: i32) -> i32 {
     match op {
@@ -719,6 +723,7 @@ pub fn gate_sum(op: i32, v: i32, n: i32) -> i32 {
     }
 }
 
+/// the squad's radius for n soldiers
 pub fn radius(n: i32) -> f32 {
     SPACING * (n.clamp(1, MAXV as i32) as f32 + 0.5).sqrt() + 0.3
 }
@@ -1186,9 +1191,9 @@ impl Combat {
                 }
                 K_BARREL | K_TNT | K_CRATE => {
                     t.hp > 0
-                        && (b.x - t.x).abs() < half_width(t.kind)
-                        && t.d >= lo - 0.6
-                        && t.d <= hi + 0.6
+                        && (b.x - t.x).abs() < half_size(t.kind)
+                        && t.d >= lo - half_size(t.kind)
+                        && t.d <= hi + half_size(t.kind)
                 }
                 _ => false,
             };
@@ -1289,7 +1294,7 @@ impl Combat {
                 if (t.a == OP_ADD || t.a == OP_SUB) && t.c % GATE_HITS == 0 {
                     // shooting a gate counts it up; a minus one turns plus
                     if t.a == OP_ADD {
-                        t.value = (t.value + 1).min(99);
+                        t.value = (t.value + 1).min(MAX_COUNT);
                     } else if t.value > 1 {
                         t.value -= 1;
                     } else {
@@ -1554,8 +1559,8 @@ impl Combat {
                     for i in 0..self.s.nsol as usize {
                         let q = self.s.sol[i];
                         if q.state != S_OK
-                            || (q.x - t.x).abs() > half_width(t.kind) + 0.1
-                            || (q.d - t.d).abs() > 0.6
+                            || (q.x - t.x).abs() > half_size(t.kind) + 0.1
+                            || (q.d - t.d).abs() > half_size(t.kind)
                         {
                             continue;
                         }
@@ -2143,12 +2148,12 @@ impl Combat {
     }
 }
 
-/// Half the width of a barrel or crate, for what hits it.
-pub fn half_width(kind: i32) -> f32 {
+/// Half the size of a barrel or crate, across and along the pier, for what hits it.
+pub fn half_size(kind: i32) -> f32 {
     if kind == K_CRATE {
-        0.7
+        CRATE * 0.5
     } else {
-        0.6
+        BARREL * 0.6
     }
 }
 
