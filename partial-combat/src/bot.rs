@@ -106,13 +106,13 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
                 matches!(t.kind, K_BARREL | K_CRATE)
                     && t.hp > 0
                     && t.d > s.d + 1.0
-                    && t.d - s.d < RANGE - 4.0
+                    && t.d - s.d < WEAPONS[s.weapon as usize].range - 4.0
                     && t.d < gd
             })
             .min_by(|a, b| a.d.total_cmp(&b.d))
         {
             want = if t.d - s.d < 3.5 {
-                t.x + if t.x > 0.0 { -1.8 } else { 1.8 }
+                t.x + if t.x > 0.0 { -2.2 } else { 2.2 }
             } else {
                 t.x
             };
@@ -139,9 +139,11 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
             .enemies()
             .iter()
             .find(|e| e.state == ES_WAIT && e.d - s.d < 25.0)
-            .map_or(0.0, |e| e.x.clamp(-2.0, 2.0));
+            .map_or(0.0, |e| e.x.clamp(-4.0, 4.0));
     }
     want = want.clamp(-HALF + 0.8, HALF - 0.8);
+    // the places across the pier it weighs, a quarter metre apart
+    let places = || (-36..=36).map(|i| i as f32 * 0.25);
     // keep to the deck: how far ahead x stays clear, and whether the squad gets there without crossing a hole
     let w = r.min(1.2);
     let ahead = |x: f32| {
@@ -167,27 +169,37 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
         let score = |x: f32| {
             ahead(x) as f32 * 100.0 - (x - want).abs() * 4.0 - if reach(x) { 0.0 } else { 400.0 }
         };
-        if let Some(x) = (-16..=16)
-            .map(|i| i as f32 * 0.25)
-            .max_by(|a, b| score(*a).total_cmp(&score(*b)))
+        if let Some((x, _)) = places()
+            .map(|x| (x, score(x)))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
         {
             want = x;
         }
     }
-    // shells about to land: where they catch the fewest
+    // shells about to land, and the boss about to jump: where they catch the fewest
+    let jump = s.boss.jumping().then_some((s.boss.tx, s.boss.td, JUMP_R));
     let hit = |x: f32| {
         s.shell[..s.nshell as usize]
             .iter()
             .filter(|h| h.t_max - h.t < 1.4)
-            .map(|h| (h.r + r - (x - h.x).hypot(s.d - h.d)).max(0.0))
+            .map(|h| (h.x, h.d, h.r))
+            .chain(jump)
+            .map(|(hx, hd, hr)| (hr + r - (x - hx).hypot(s.d - hd)).max(0.0))
             .sum::<f32>()
     };
-    if s.nshell > 0 && hit(want) > 0.0 && hash01(s.shell[0].x, salt ^ 7) < sk.dodge {
+    // one look per threat: the first shell, or where the jump comes down (it drifts after the squad)
+    let threat = if s.nshell > 0 {
+        s.shell[0].x
+    } else {
+        (s.boss.td * 2.0).round()
+    };
+    let seen = hash01(threat, salt ^ 7) < sk.dodge;
+    if (s.nshell > 0 || jump.is_some()) && hit(want) > 0.0 && seen {
         let score = |x: f32| hit(x) * 10.0 + (x - s.cx).abs();
-        if let Some(x) = (-16..=16)
-            .map(|i| i as f32 * 0.25)
+        if let Some((x, _)) = places()
             .filter(|&x| clear(x))
-            .min_by(|a, b| score(*a).total_cmp(&score(*b)))
+            .map(|x| (x, score(x)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
         {
             want = x;
         }
@@ -307,9 +319,10 @@ fn levels() {
 fn endless() {
     for sk in [SHARP, CASUAL] {
         let mut line = format!("{}:", sk.name);
-        let mut far = vec![];
+        let (mut far, mut ended) = (vec![], vec![]);
         for seed in SEEDS {
             let r = play(0, true, &sk, seed, 1500.0);
+            ended.push(r.time_s < 1500.0);
             line += &format!(
                 "  {:5.0} m {} bosses ({}, peak {})",
                 r.d, r.bosses, r.died, r.peak
@@ -318,7 +331,7 @@ fn endless() {
         }
         println!("{line}");
         // it ends: no run lasts the 25 minutes, and a sharp player gets past a few bosses
-        assert!(far.iter().all(|&d| d < 6000.0), "{line}");
+        assert!(ended.iter().all(|&e| e), "{line}");
         if sk.name == "sharp" {
             assert!(far.iter().all(|&d| d > 1000.0), "{line}");
         }
@@ -345,7 +358,7 @@ fn trace() {
         pressed: 0,
         dt: 20,
     };
-    for t in 0..30_000 {
+    for t in 0..75_000 {
         if (t * 20) % sk.look < 20 {
             p.s.tx = aim(&p, &sk, seed);
         }
@@ -381,7 +394,7 @@ fn trace() {
             let en = s.enemies().iter().filter(|e| e.state != ES_DOWN).count();
             println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} boss {}/{} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, s.boss.hp, s.boss.hp_max, near.join(" "));
         }
-        if ev & (wg::EV_GAMEOVER | wg::EV_LEVEL) != 0 {
+        if ev & wg::EV_GAMEOVER != 0 || (ev & wg::EV_LEVEL != 0 && !endless) {
             println!("ev {ev}");
             break;
         }

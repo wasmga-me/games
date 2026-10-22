@@ -183,7 +183,7 @@ async function figures() {
 
 // ---------- bosses: Quaternius' Animated Mech Pack ----------
 const MECHS = { George: "george", Leela: "leela", Mike: "mike", Stan: "stan" };
-const MECH_CLIPS = ["idle", "walk", "shoot", "punch", "death"];
+const MECH_CLIPS = ["idle", "walk", "shoot", "jump", "hello", "hitrecieve_1", "death"];
 const TEXTURE = 512;
 
 /** Moves every root node and animation of `from` into `doc`. */
