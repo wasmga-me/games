@@ -11,6 +11,7 @@ setup, pause and game over screens around it.
 | Breakwall | [wasmga.me/games/breakwall](https://wasmga.me/games/breakwall) | [breakwall/](breakwall) | Rust |
 | Facets | [wasmga.me/games/facets](https://wasmga.me/games/facets) | [facets/](facets) | Rust |
 | Flipside | [wasmga.me/games/flipside](https://wasmga.me/games/flipside) | [flipside.c](flipside.c) | C |
+| Greenside | [wasmga.me/games/greenside](https://wasmga.me/games/greenside) | [greenside/](greenside) | Rust |
 | Pantry Solitaire | [wasmga.me/games/pantry](https://wasmga.me/games/pantry) | [pantry/](pantry) | Rust |
 | Partial Combat: Clickbait Tactics | [wasmga.me/games/partial-combat](https://wasmga.me/games/partial-combat) | [partial-combat/](partial-combat) | Rust |
 | Sapper | [wasmga.me/games/sapper](https://wasmga.me/games/sapper) | [sapper.c](sapper.c) | C |
@@ -19,6 +20,7 @@ setup, pause and game over screens around it.
 | Sourdough Solitaire | [wasmga.me/games/sourdough](https://wasmga.me/games/sourdough) | [sourdough.c](sourdough.c) | C |
 | Sudoku | [wasmga.me/games/sudoku](https://wasmga.me/games/sudoku) | [sudoku/](sudoku) | Rust |
 | Tilestack | [wasmga.me/games/tilestack](https://wasmga.me/games/tilestack) | [tilestack/](tilestack) | Rust |
+| Updraft | [wasmga.me/games/updraft](https://wasmga.me/games/updraft) | [updraft/](updraft) | Rust |
 | Zork I, II and III (Infocom's) | [wasmga.me/games/zork1](https://wasmga.me/games/zork1) | [zmachine/](zmachine), [zork1/](zork1), [zork2/](zork2), [zork3/](zork3) | Rust |
 
 `branchwise/` links [libgit2](https://github.com/libgit2/libgit2) 1.9.1 (GPL-2.0
@@ -35,6 +37,13 @@ packs by [Quaternius](https://quaternius.com) and [Kenney](https://kenney.nl);
 there) downloads the packs and builds the `.glb` files and `fx.png` the game
 loads into `out/`. `cargo test --release -- --nocapture` in `partial-combat/` has bots play
 every level and the endless pier.
+
+`greenside/` and `updraft/` each have a bot (`src/bot.rs`): `cargo test --release`
+checks that a sharp player makes every Greenside hole in par and that Updraft's
+way up stays open on every pace, `cargo run --release --example par` in
+`greenside/` prints how many strokes a sharp and a sloppy player take on each
+hole, and `cargo run --release --example climb` in `updraft/` how high the bot
+gets.
 
 `tilestack/art/riichi/` holds the tile pictures of FluffyStuff's
 [riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles)
