@@ -1,11 +1,11 @@
 // Builds the models and effect pictures Partial Combat loads
 // (public/games/partial-combat/*.glb and fx.png, or $COMBAT_OUT) from the CC0
 // packs they come from, only the models, clips and pictures the game uses:
-//   npm install && node pack.mjs [figures giants mechs guns pier boats effects]
+//   npm install && node pack.mjs [figures giants mechs guns pier boats snow nature effects]
 // The packs are downloaded once into $COMBAT_CACHE (a temp folder by
 // default). Quaternius' packs come as FBX, turned into glTF by FBX2glTF.
 // Every model keeps its pack's own name, under a prefix (fig., giant., mech.,
-// gun., pier., boat.), and the game asks for them by those names.
+// gun., pier., boat., snow., nature.), and the game asks for them by those names.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +30,8 @@ const PACKS = {
   pirate: "https://kenney.nl/media/pages/assets/pirate-kit/e6d4bb1525-1771333093/kenney_pirate-kit.zip",
   watercraft: "https://kenney.nl/media/pages/assets/watercraft-kit/a335cfed49-1713519620/kenney_watercraft-pack.zip",
   particles: "https://kenney.nl/media/pages/assets/particle-pack/f8fe0f8cb8-1677578741/kenney_particle-pack.zip",
+  holiday: "https://kenney.nl/media/pages/assets/holiday-kit/3976a6496a-1733923970/kenney_holiday-kit.zip",
+  nature: "https://kenney.nl/media/pages/assets/nature-kit/37ac38a37b-1677698939/kenney_nature-kit.zip",
 };
 
 await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready, MeshoptSimplifier.ready]);
@@ -363,14 +365,24 @@ const PIRATE = [
   "tower-watch", "tower-complete-large", "castle-wall",
 ];
 const WATERCRAFT = ["gate", "gate-finish", "buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "ship-cargo-a"];
+// the other shores: snow from Kenney's Holiday Kit; desert and autumn lake from Kenney's Nature Kit
+const SNOW = ["tree-snow-a", "tree-snow-b", "tree-snow-c", "snowman-hat", "snow-flat-large", "rocks-large", "rocks-medium", "reindeer", "sled"];
+const NATURE = [
+  "cactus_tall", "cactus_short", "rock_tallA", "rock_tallB", "rock_tallC", "rock_tallD", "statue_obelisk", "statue_head",
+  "statue_columnDamaged", "tent_detailedOpen", "log_stack", "canoe", "rock_largeA", "rock_largeC",
+  "tree_oak_fall", "tree_detailed_fall", "tree_default_fall", "tree_fat_fall",
+];
 
 async function kit(packName, names, prefix, file) {
-  const dir = join(pack(packName), "Models", "GLB format");
+  // each kit keeps its .glb files in one of its Models folders
+  const dir = join(pack(packName), "Models");
   const doc = new Document();
   doc.createBuffer();
   doc.createScene();
   for (const name of names) {
-    const k = await io.read(join(dir, `${name}.glb`));
+    const glb = find(dir, `/${name}.glb`);
+    if (!glb) throw new Error(`${packName}: no ${name}.glb`);
+    const k = await io.read(glb);
     const roots = k.getRoot().listScenes()[0].listChildren();
     if (roots.length !== 1) throw new Error(`${name} has ${roots.length} roots`);
     roots[0].setName(`${prefix}.${name}`);
@@ -408,7 +420,17 @@ async function effects() {
 
 mkdirSync(OUT, { recursive: true });
 const only = process.argv.slice(2);
-const jobs = { figures, giants, mechs, guns, pier: () => kit("pirate", PIRATE, "pier", "pier.glb"), boats: () => kit("watercraft", WATERCRAFT, "boat", "boats.glb"), effects };
+const jobs = {
+  figures,
+  giants,
+  mechs,
+  guns,
+  pier: () => kit("pirate", PIRATE, "pier", "pier.glb"),
+  boats: () => kit("watercraft", WATERCRAFT, "boat", "boats.glb"),
+  snow: () => kit("holiday", SNOW, "snow", "snow.glb"),
+  nature: () => kit("nature", NATURE, "nature", "nature.glb"),
+  effects,
+};
 for (const [name, job] of Object.entries(jobs)) if (!only.length || only.includes(name)) await job();
 // served next to what it builds, for the Sources panel and the credits to link
 copyFileSync(fileURLToPath(import.meta.url), join(OUT, "pack.mjs"));
