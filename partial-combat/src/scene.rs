@@ -60,11 +60,9 @@ const BARREL_BLUE: u32 = rgba(0x3b7fd5, 190);
 const TNT_RED: u32 = rgba(0xd13a28, 210);
 const GOOD: u32 = rgba(0x0647ff, 255);
 const BAD: u32 = rgba(0xff0a0a, 255);
-/// the pier's planks, toned down from the kit's orange
-const PLANKS: u32 = rgba(0x472e17, 150);
 
 /// The models the game names, by index, as the page finds them in its files.
-pub const MODELS: [&str; 45] = [
+pub const MODELS: [&str; 72] = [
     "fig.soldier",
     "fig.beret",
     "fig.viking",
@@ -110,6 +108,33 @@ pub const MODELS: [&str; 45] = [
     "boat.boat-fishing-small",
     "boat.boat-tug-a",
     "boat.ship-cargo-a",
+    "snow.tree-snow-a",
+    "snow.tree-snow-b",
+    "snow.tree-snow-c",
+    "snow.snowman-hat",
+    "snow.snow-flat-large",
+    "snow.rocks-large",
+    "snow.rocks-medium",
+    "snow.reindeer",
+    "snow.sled",
+    "nature.cactus_tall",
+    "nature.cactus_short",
+    "nature.rock_tallA",
+    "nature.rock_tallB",
+    "nature.rock_tallC",
+    "nature.rock_tallD",
+    "nature.statue_obelisk",
+    "nature.statue_head",
+    "nature.statue_columnDamaged",
+    "nature.tent_detailedOpen",
+    "nature.log_stack",
+    "nature.canoe",
+    "nature.rock_largeA",
+    "nature.rock_largeC",
+    "nature.tree_oak_fall",
+    "nature.tree_detailed_fall",
+    "nature.tree_default_fall",
+    "nature.tree_fat_fall",
 ];
 /// A model's place in MODELS, looked up as the game is built.
 pub const fn model(name: &str) -> u16 {
@@ -139,20 +164,221 @@ const M_BARREL: u16 = model("pier.barrel");
 const M_CRATE: u16 = model("pier.crate");
 const M_BALL: u16 = model("pier.cannon-ball");
 const M_FLAG: u16 = model("pier.flag-pirate-high");
-const M_PALM: u16 = model("pier.palm-detailed-bend");
-const M_ROCKS: u16 = model("pier.rocks-a");
-const M_SAND: u16 = model("pier.patch-sand-foliage");
-const M_GRASS: u16 = model("pier.patch-grass-foliage");
-const M_SHIP: u16 = model("pier.ship-pirate-large");
 const M_SHIP_MEDIUM: u16 = model("pier.ship-pirate-medium");
 const M_TOWER: u16 = model("pier.tower-complete-large");
 const M_WALL: u16 = model("pier.castle-wall");
-const M_WATCH: u16 = model("pier.tower-watch");
 const M_ARCH: u16 = model("boat.gate");
 const M_FINISH: u16 = model("boat.gate-finish");
 const M_BUOY: u16 = model("boat.buoy-flag");
-const M_BOAT: u16 = model("boat.boat-speed-a");
-const M_CARGO: u16 = model("boat.ship-cargo-a");
+
+/// Models to pick from, each with the size it is drawn at, and their tint.
+/// One listed twice comes up twice as often.
+struct Set {
+    models: &'static [(u16, f32)],
+    tint: u32,
+}
+const fn set(models: &'static [(u16, f32)]) -> Set {
+    Set { models, tint: 0 }
+}
+const fn tinted(models: &'static [(u16, f32)], tint: u32) -> Set {
+    Set { models, tint }
+}
+impl Set {
+    fn pick(&self, h: u32) -> (u16, f32) {
+        self.models[h as usize % self.models.len()]
+    }
+}
+
+/// A shore the pier runs past: its looks one time round after another
+/// (view.ts THEMES), its planks' tint, and what stands in the water.
+struct Place {
+    looks: &'static [u32],
+    planks: u32,
+    /// rocks near the pier
+    rocks: Set,
+    /// islands: their ground, and the trees on them
+    grounds: Set,
+    trees: Set,
+    boats: Set,
+    /// the big things further out, how far (m) their middles stand off a
+    /// 5 m pier's edge, and whether they float
+    far: Set,
+    far_x: f32,
+    afloat: bool,
+    /// now and then one more thing near the shore, on the first ground at
+    /// this size, or in the water
+    sights: Set,
+    sight_ground: Option<f32>,
+}
+const TROPICS: Place = Place {
+    looks: &[0, 2, 1, 3],
+    // toned down from the kit's orange
+    planks: rgba(0x472e17, 150),
+    rocks: set(&[
+        (model("pier.rocks-a"), 1.0),
+        (model("pier.rocks-b"), 1.0),
+        (model("pier.rocks-c"), 1.0),
+        (model("pier.rocks-sand-a"), 1.0),
+    ]),
+    grounds: set(&[
+        (model("pier.patch-sand-foliage"), 1.4),
+        (model("pier.patch-grass-foliage"), 1.4),
+    ]),
+    trees: set(&[
+        (model("pier.palm-detailed-bend"), 1.2),
+        (model("pier.palm-detailed-straight"), 1.2),
+    ]),
+    boats: set(&[
+        (model("boat.boat-speed-a"), 1.2),
+        (model("boat.boat-sail-a"), 1.2),
+        (model("boat.boat-fishing-small"), 1.2),
+        (model("boat.boat-tug-a"), 1.2),
+    ]),
+    far: set(&[
+        (model("pier.ship-pirate-large"), 1.6),
+        (model("pier.ship-pirate-medium"), 1.6),
+        (model("boat.ship-cargo-a"), 1.6),
+        (model("pier.ship-wreck"), 1.6),
+    ]),
+    far_x: 26.0,
+    afloat: true,
+    sights: set(&[(model("pier.tower-watch"), 1.0)]),
+    sight_ground: None,
+};
+const SNOW: Place = Place {
+    looks: &[4, 5],
+    planks: rgba(0x9fa7b0, 170),
+    rocks: set(&[
+        (model("snow.rocks-medium"), 2.4),
+        (model("snow.rocks-large"), 1.3),
+        (model("snow.rocks-medium"), 1.8),
+        (model("snow.rocks-large"), 1.0),
+    ]),
+    grounds: set(&[(model("snow.snow-flat-large"), 3.5)]),
+    trees: set(&[
+        (model("snow.tree-snow-a"), 2.7),
+        (model("snow.tree-snow-b"), 2.7),
+        (model("snow.tree-snow-c"), 2.7),
+    ]),
+    boats: set(&[
+        (model("boat.boat-fishing-small"), 1.2),
+        (model("boat.boat-tug-a"), 1.2),
+        (model("boat.boat-sail-a"), 1.2),
+        (model("boat.boat-fishing-small"), 1.2),
+    ]),
+    // ice: the kit's snowy rocks, big and white
+    far: tinted(
+        &[
+            (model("snow.rocks-large"), 4.5),
+            (model("snow.rocks-medium"), 6.5),
+            (model("snow.rocks-large"), 5.5),
+            (model("snow.rocks-medium"), 8.0),
+        ],
+        rgba(0xe6f2fa, 210),
+    ),
+    far_x: 32.0,
+    afloat: false,
+    sights: set(&[
+        (model("snow.snowman-hat"), 3.2),
+        (model("snow.reindeer"), 3.0),
+        (model("snow.sled"), 3.0),
+    ]),
+    sight_ground: Some(1.8),
+};
+const LAKE_BOATS: Set = set(&[
+    (model("nature.canoe"), 3.5),
+    (model("boat.boat-sail-a"), 1.2),
+    (model("boat.boat-fishing-small"), 1.2),
+    (model("nature.canoe"), 3.5),
+]);
+const SANDSTONE: u32 = rgba(0xc0703f, 150);
+const DESERT: Place = Place {
+    looks: &[6, 7],
+    planks: rgba(0x8f7f6a, 180),
+    rocks: tinted(
+        &[
+            (model("nature.rock_tallA"), 7.0),
+            (model("nature.rock_tallB"), 7.0),
+            (model("nature.rock_tallC"), 8.0),
+            (model("nature.rock_tallD"), 8.0),
+        ],
+        SANDSTONE,
+    ),
+    grounds: set(&[(model("pier.patch-sand-foliage"), 1.6)]),
+    trees: tinted(
+        &[
+            (model("nature.cactus_tall"), 7.5),
+            (model("nature.cactus_short"), 7.5),
+        ],
+        rgba(0x5d7a3a, 130),
+    ),
+    boats: LAKE_BOATS,
+    // the far bank's mesas
+    far: tinted(
+        &[
+            (model("nature.rock_tallA"), 22.0),
+            (model("nature.rock_tallB"), 24.0),
+            (model("nature.rock_tallA"), 18.0),
+            (model("nature.rock_tallB"), 20.0),
+        ],
+        SANDSTONE,
+    ),
+    far_x: 35.0,
+    afloat: false,
+    sights: tinted(
+        &[
+            (model("nature.statue_head"), 6.0),
+            (model("nature.statue_obelisk"), 8.0),
+            (model("nature.statue_columnDamaged"), 8.0),
+        ],
+        rgba(0xd9a066, 140),
+    ),
+    sight_ground: Some(0.9),
+};
+const AUTUMN: Place = Place {
+    looks: &[8, 9],
+    planks: rgba(0x4a4038, 200),
+    rocks: set(&[
+        (model("nature.rock_largeA"), 7.0),
+        (model("nature.rock_largeC"), 7.0),
+        (model("nature.rock_largeA"), 5.0),
+        (model("nature.rock_largeC"), 5.0),
+    ]),
+    // grass gone over
+    grounds: tinted(
+        &[(model("pier.patch-grass-foliage"), 1.7)],
+        rgba(0x8a7a3c, 150),
+    ),
+    trees: set(&[
+        (model("nature.tree_oak_fall"), 5.5),
+        (model("nature.tree_detailed_fall"), 5.5),
+        (model("nature.tree_default_fall"), 4.5),
+        (model("nature.tree_fat_fall"), 6.0),
+    ]),
+    boats: LAKE_BOATS,
+    // boulders out in the lake
+    far: set(&[
+        (model("nature.rock_largeC"), 16.0),
+        (model("nature.rock_largeA"), 16.0),
+        (model("nature.rock_largeA"), 12.0),
+        (model("nature.rock_largeC"), 12.0),
+    ]),
+    far_x: 32.0,
+    afloat: false,
+    sights: set(&[
+        (model("nature.tent_detailedOpen"), 6.0),
+        (model("nature.log_stack"), 6.0),
+    ]),
+    sight_ground: Some(1.0),
+};
+const PLACES: [Place; 4] = [TROPICS, SNOW, DESERT, AUTUMN];
+
+/// The shore of a stretch of the run, and its light: one look after another each time round.
+fn shore(stage: i32) -> (&'static Place, u32) {
+    let (k, n) = (stage as usize, PLACES.len());
+    let place = &PLACES[k % n];
+    (place, place.looks[k / n % place.looks.len()])
+}
 
 pub const CLIPS: [&str; 12] = [
     "idle",
@@ -476,7 +702,8 @@ impl Combat {
         self.put_boss(&mut sc);
         self.put_shots(&mut sc);
         let fov = self.fov();
-        let theme = [0, 2, 1, 3][(self.s.level.max(0) % 4) as usize];
+        // the light of the shore the squad is on
+        let (_, theme) = shore(self.stage_at(self.s.d));
         let f = |v: f32| v.to_bits();
         let c = self.cam;
         sc.header = [
@@ -510,12 +737,12 @@ impl Combat {
         let s = &self.s;
         let first = ((s.d - 16.0) / TILE).floor().max(-15.0 / TILE) as i32;
         let mut last = ((s.d + 80.0) / TILE).ceil() as i32;
-        let arenas = || s.things().iter().filter(|t| t.kind == K_ARENA);
-        if let (false, Some(a)) = (s.endless(), arenas().next()) {
+        if let (false, Some(a)) = (s.endless(), s.arenas().next()) {
             last = last.min(((a.d + a.len) / TILE).ceil() as i32);
         }
         for row in first..last {
             let d = (row as f32 + 0.5) * TILE;
+            let planks = self.place_at(d).planks;
             for lane in 0..LANES {
                 let x = -HALF + (lane as f32 + 0.5) * TILE;
                 if !s.deck(x, d) {
@@ -534,11 +761,11 @@ impl Combat {
                     d,
                     yaw,
                     DECK_SCALE,
-                    PLANKS,
+                    planks,
                 );
             }
         }
-        for a in arenas() {
+        for a in s.arenas() {
             // flags at the arena's corners, the finish arch behind the boss
             for side in [-1.0, 1.0] {
                 sc.put(
@@ -587,20 +814,48 @@ impl Combat {
         }
     }
 
-    /// The sea round the pier: buoys, rocks, islands with palms, boats and ships, the same each time past.
+    /// Which stretch of the run d is in: the level, or on the endless pier
+    /// how many bosses are beaten before it (one stretch ends with each arena).
+    fn stage_at(&self, d: f32) -> i32 {
+        let s = &self.s;
+        let mut k = s.level.max(0);
+        if s.endless() {
+            // level already counts the beaten arenas (those arena_d no longer marks)
+            for a in s.arenas() {
+                k += (a.d + a.len <= d) as i32 - (a.d != s.arena_d) as i32;
+            }
+        }
+        k.max(0)
+    }
+
+    /// The shore along d.
+    fn place_at(&self, d: f32) -> &'static Place {
+        shore(self.stage_at(d)).0
+    }
+
+    /// The sea round the pier: buoys, and the shore's rocks, islands, boats and sights, the same each time past.
     fn put_decor(&self, sc: &mut Scene) {
         let s = &self.s;
         let seed = if s.endless() { 7 } else { s.level * 31 + 3 };
         let first = ((s.d - 20.0) / 12.0).floor() as i32;
-        let last = ((s.d + 130.0) / 12.0).ceil() as i32;
+        // no farther than where an arena ends when it is laid (track.rs AHEAD
+        // + 36), so a shore never changes in view
+        let ahead = s.d + 125.0;
+        let last = (ahead / 12.0).ceil() as i32;
         let t = self.clock;
         // the sea starts this much further out than on a pier 5 m to a side
         let out = HALF - 5.0;
+        // nothing stands in the water where a ship fires from
+        let clear = |side: f32, d: f32| {
+            !s.things()
+                .iter()
+                .any(|th| th.kind == K_SHIP && th.x * side > 0.0 && (th.d - d).abs() < 9.0)
+        };
         for seg in first..last {
             for side in [-1.0f32, 1.0] {
                 let h = hash2(seg * 2 + (side > 0.0) as i32, seed);
                 let d = seg as f32 * 12.0 + unit(h >> 3) * 10.0;
-                if seg % 2 == 0 {
+                if seg % 2 == 0 && clear(side, seg as f32 * 12.0) {
                     // buoys along the pier
                     let bob = (t * 1.6 + seg as f32).sin() * 0.08;
                     sc.put(
@@ -616,107 +871,76 @@ impl Combat {
                     );
                     sc.last().flags |= INST_NO_SHADOW;
                 }
-                let pick = h % 100;
+                if d > ahead || !clear(side, d) {
+                    continue;
+                }
+                let place = self.place_at(d);
                 let far = unit(hash2(seg, seed + 1 + (side > 0.0) as i32));
                 let bob = (t * 1.1 + seg as f32 * 0.7).sin();
-                match pick {
+                match h % 100 {
                     0..=17 => {
                         let x = side * (11.0 + out + far * 7.0);
-                        sc.put(
-                            M_ROCKS + (h % 4) as u16,
-                            0,
-                            0.0,
-                            x,
-                            -0.3,
-                            d,
-                            unit(h) * 6.3,
-                            1.0 + far * 0.6,
-                            0,
-                        );
+                        let (m, size) = place.rocks.pick(h);
+                        let (yaw, size) = (unit(h) * 6.3, size * (1.0 + far * 0.6));
+                        sc.put(m, 0, 0.0, x, -0.3, d, yaw, size, place.rocks.tint);
                     }
                     18..=31 => {
-                        // an island with a palm or two
+                        // an island with a tree or two
                         let x = side * (16.0 + out + far * 8.0);
-                        sc.put(
-                            if h & 1 == 0 { M_SAND } else { M_GRASS },
-                            0,
-                            0.0,
-                            x,
-                            -0.12,
-                            d,
-                            unit(h) * 6.3,
-                            1.4,
-                            0,
-                        );
-                        sc.put(
-                            M_PALM + (h >> 4 & 1) as u16,
-                            0,
-                            0.0,
-                            x - side * 1.2,
-                            0.0,
-                            d,
-                            unit(h >> 5) * 6.3,
-                            1.2,
-                            0,
-                        );
+                        let (ground, trees) = (&place.grounds, &place.trees);
+                        let (m, size) = ground.pick(h);
+                        sc.put(m, 0, 0.0, x, -0.12, d, unit(h) * 6.3, size, ground.tint);
+                        let (m, size) = trees.pick(h >> 4);
+                        let yaw = unit(h >> 5) * 6.3;
+                        sc.put(m, 0, 0.0, x - side * 1.2, 0.0, d, yaw, size, trees.tint);
                         if h & 64 != 0 {
-                            sc.put(
-                                M_PALM,
-                                0,
-                                0.0,
-                                x + side * 1.4,
-                                0.0,
-                                d + 1.2,
-                                unit(h >> 7) * 6.3,
-                                1.0,
-                                0,
-                            );
+                            let (m, size) = trees.models[0];
+                            let (x, yaw) = (x + side * 1.4, unit(h >> 7) * 6.3);
+                            let size = size * 5.0 / 6.0;
+                            sc.put(m, 0, 0.0, x, 0.0, d + 1.2, yaw, size, trees.tint);
                         }
                     }
                     32..=43 => {
                         let x = side * (10.0 + out + far * 9.0);
+                        let (m, size) = place.boats.pick(h >> 6);
+                        let yaw = if side < 0.0 { 0.3 } else { PI - 0.3 };
                         sc.put(
-                            M_BOAT + (h >> 6 & 3) as u16,
+                            m,
                             0,
                             0.0,
                             x,
                             bob * 0.1 - 0.05,
                             d,
-                            if side < 0.0 { 0.3 } else { PI - 0.3 },
-                            1.2,
-                            0,
+                            yaw,
+                            size,
+                            place.boats.tint,
                         );
                         sc.last().roll = bob * 0.05;
                     }
                     44..=51 => {
-                        let x = side * (26.0 + out + far * 14.0);
-                        let ship =
-                            [M_SHIP, M_SHIP_MEDIUM, M_CARGO, M_SHIP + 2][(h >> 6 & 3) as usize];
-                        sc.put(
-                            ship,
-                            0,
-                            0.0,
-                            x,
-                            bob * 0.15 - 0.1,
-                            d,
-                            if side < 0.0 { 0.2 } else { PI + 0.2 },
-                            1.6,
-                            0,
-                        );
-                        sc.last().roll = bob * 0.03;
+                        let x = side * (place.far_x + out + far * 14.0);
+                        let (m, size) = place.far.pick(h >> 6);
+                        let tint = place.far.tint;
+                        if place.afloat {
+                            let yaw = if side < 0.0 { 0.2 } else { PI + 0.2 };
+                            sc.put(m, 0, 0.0, x, bob * 0.15 - 0.1, d, yaw, size, tint);
+                            sc.last().roll = bob * 0.03;
+                        } else {
+                            sc.put(m, 0, 0.0, x, -0.4, d, unit(h) * 6.3, size, tint);
+                        }
                     }
                     52..=55 => {
-                        sc.put(
-                            M_WATCH,
-                            0,
-                            0.0,
-                            side * (13.0 + out + far * 4.0),
-                            -0.2,
-                            d,
-                            unit(h) * 6.3,
-                            1.0,
-                            0,
-                        );
+                        let x = side * (13.0 + out + far * 4.0);
+                        let yaw = unit(h) * 6.3;
+                        let (m, size) = place.sights.pick(h >> 6);
+                        let y = if let Some(size) = place.sight_ground {
+                            let (g, tint) = (place.grounds.models[0].0, place.grounds.tint);
+                            sc.put(g, 0, 0.0, x, -0.12, d, yaw, size, tint);
+                            0.0
+                        } else {
+                            -0.2
+                        };
+                        sc.put(m, 0, 0.0, x, y, d, yaw, size, place.sights.tint);
                     }
                     _ => {}
                 }

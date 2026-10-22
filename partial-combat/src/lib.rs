@@ -786,6 +786,9 @@ impl Save {
     pub fn things(&self) -> &[Thing] {
         &self.thing[..self.nthing as usize]
     }
+    pub fn arenas(&self) -> impl Iterator<Item = &Thing> {
+        self.things().iter().filter(|t| t.kind == K_ARENA)
+    }
     pub fn enemies(&self) -> &[Enemy] {
         &self.en[..self.nen as usize]
     }
@@ -2262,7 +2265,15 @@ impl Combat {
         let mut moved = [-1; MAXO];
         for k in 0..self.s.nthing as usize {
             let t = self.s.thing[k];
-            let end = t.d + t.len.max(0.0) + if t.kind == K_SHIP { 12.0 } else { 0.0 };
+            // ships stay while their hulls show, arenas while the shore
+            // behind them is drawn (scene.rs put_decor)
+            let end = t.d
+                + t.len.max(0.0)
+                + match t.kind {
+                    K_SHIP => 12.0,
+                    K_ARENA => 20.0,
+                    _ => 0.0,
+                };
             if end > sd - 16.0 {
                 self.s.thing[w] = t;
                 moved[k] = w as i32;
