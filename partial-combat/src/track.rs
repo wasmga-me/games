@@ -11,6 +11,12 @@ use crate::*;
 const AHEAD: f32 = 95.0;
 /// seconds a squad of the size expected takes to beat a boss
 const BOSS_SECONDS: f32 = 13.0;
+/// how far ahead of the plan a squad gets before the pier ahead is laid for
+/// it, and how many times a squad far behind the plan is laid for
+const SLACK: f32 = 1.25;
+const BEHIND: f32 = 2.0;
+/// seconds of the squad's fire a group of the tan army soaks up on its way in
+const FIGHT: f32 = 2.0;
 /// a gate pair: each gate half the pier wide
 const GATE_X: f32 = HALF * 0.5;
 const GATE_W: f32 = HALF - 0.6;
@@ -56,6 +62,19 @@ impl Combat {
     }
 
     fn lay_chunk(&mut self) {
+        // the plan, past the last chunk the squad got through, is kept from
+        // SLACK under the squad to BEHIND times it: a squad doing better gets
+        // a pier laid for it, and one far behind still has a chance
+        let s = &mut self.s;
+        let past = s.plan_at.iter().filter(|p| p[0] > 0.0 && p[0] <= s.d);
+        if let Some(p) = past.max_by(|a, b| a[0].total_cmp(&b[0])).copied() {
+            let n = s.count.max(1) as f32;
+            let lift = (n / (p[1] * SLACK)).max(1.0).min(n * BEHIND / p[1]);
+            s.expect = (s.expect * lift).min(MAX_COUNT as f32);
+            for p in &mut s.plan_at {
+                p[1] *= lift;
+            }
+        }
         let hard = self.hard_at();
         let c = self.s.chunk;
         self.s.chunk += 1;
@@ -66,7 +85,9 @@ impl Combat {
         };
         let k = if self.s.endless() { c % (total + 1) } else { c };
         if k >= total {
-            return self.lay_arena();
+            self.lay_arena();
+            self.s.plan_at[c as usize % PLANS] = [self.s.next_d, self.s.expect];
+            return;
         }
         // the last stretch before a boss is a gate pair, for one more boost
         let kind = if k == total - 1 {
@@ -102,6 +123,7 @@ impl Combat {
             _ => self.lay_hazard(d0, hard),
         };
         self.s.next_d = d0 + len;
+        self.s.plan_at[c as usize % PLANS] = [self.s.next_d, self.s.expect];
     }
 
     /// Two gates side by side: a sum that helps and one that doesn't, or two that help unequally.
@@ -156,7 +178,7 @@ impl Combat {
             (add(self), if e >= 3.0 { mul(self) } else { add(self) })
         } else if self.chance((0.55 - hard * 0.02).max(0.3)) {
             (good(self), bad(self))
-        } else if hard >= 5.0 && e >= 15.0 && self.chance(0.1 + hard * 0.012) {
+        } else if hard >= 5.0 && e >= 40.0 && self.chance(0.1 + hard * 0.012) {
             // two bad ones: take the lesser, or shoot one up
             (sub(self), div(self))
         } else {
@@ -209,47 +231,56 @@ impl Combat {
 
     /// An enemy group across the pier, waiting, sometimes behind a TNT barrel.
     fn lay_enemies(&mut self, d0: f32, hard: f32) -> f32 {
-        let e = self.s.expect;
+        let e = self.s.expect.max(1.0);
         // the share of the squad a group costs, more on later levels
         let loss = (0.19 + hard * 0.016).min(0.5);
-        let hp = enemy_hp(E_GRUNT, hard);
         // the endless pier's groups keep growing past what any squad holds off
         let most = if self.s.endless() {
             (70.0 + hard * 1.5).min(110.0) as i32
         } else {
             70
         };
-        let n = ((e * loss / reach(hp)).round() as i32 + 2).clamp(3, most);
+        let n = ((e * loss / share(e) * 2.0).round() as i32 + 2).clamp(3, most);
         let x = self.rand(-HALF * 0.4, HALF * 0.4);
         let d = d0 + 14.0;
-        let group = self.lay_group(x, d, n);
-        let runners = if hard >= 2.0 { 0.2 } else { 0.0 };
-        let rifles = if hard >= 4.0 { 0.15 } else { 0.0 };
+        // each kind's share of the group, from the level it turns up; riflemen
+        // and grenadiers first, as they stand at the back
+        let mix = [
+            (E_RIFLE, 4.0, 0.15),
+            (E_GRENADIER, 7.0, 0.08),
+            (E_HEAVY, 3.0, 0.1),
+            (E_RUNNER, 2.0, 0.2),
+        ]
+        .map(|(kind, from, odds)| (kind, if hard >= from { odds } else { 0.0 }));
+        // a brute in a small group, more in a big one, but none against a
+        // squad that one would cut down to nothing
         let brutes = if hard >= 5.0 {
-            1 + (hard / 6.0) as i32
+            (1 + n / 30 + (hard / 12.0) as i32).min((e / 20.0) as i32)
         } else {
             0
         };
+        let first = self.s.nen as usize;
         for i in 0..n {
             let (ox, oz) = slot(i as usize);
-            let roll = self.s.track_rng.float();
+            let mut roll = self.s.track_rng.float();
             let kind = if i < brutes {
                 E_BRUTE
-            } else if roll < rifles && oz > 0.0 {
-                E_RIFLE
-            } else if roll < rifles + runners {
-                E_RUNNER
             } else {
-                E_GRUNT
+                let mut kinds = mix.iter();
+                if oz <= 0.0 {
+                    kinds.nth(1);
+                }
+                kinds
+                    .find(|&&(_, odds)| {
+                        roll -= odds;
+                        roll < 0.0
+                    })
+                    .map_or(E_GRUNT, |k| k.0)
             };
-            self.spawn_enemy(
-                kind,
-                (x + ox * 1.6).clamp(-HALF + 0.4, HALF - 0.4),
-                d + oz * 1.4,
-                group,
-                ES_WAIT,
-            );
+            let ex = (x + ox * 1.6).clamp(-HALF + 0.4, HALF - 0.4);
+            self.spawn_enemy(kind, ex, d + oz * 1.4, ES_WAIT);
         }
+        let lost = self.send_army(first, e * loss);
         if hard >= 1.0 && self.chance(0.5) {
             let tx = (x + self.rand(-1.5, 1.5)).clamp(-HALF + 1.5, HALF - 1.5);
             self.add_thing(Thing {
@@ -261,20 +292,28 @@ impl Combat {
                 ..NO_THING
             });
         }
-        self.s.expect = after_group(e, n, hp).max(1.0);
+        self.s.expect = (e - lost).max(1.0);
         26.0
     }
 
-    /// The counter over a group of n enemies at x, d; its index, or -1.
-    fn lay_group(&mut self, x: f32, d: f32, n: i32) -> i32 {
-        self.add_thing(Thing {
-            kind: K_GROUP,
-            x,
-            d,
-            value: n,
-            ..NO_THING
-        })
-        .map_or(-1, |g| g as i32)
+    /// Sizes the army put down from first on to cost the squad expected about
+    /// `cost` soldiers: as many of it get through as that takes (from one in
+    /// twenty to four in five), each made tough enough that the rest fall to
+    /// the squad's fire on the way in. Returns what it should cost.
+    fn send_army(&mut self, first: usize, cost: f32) -> f32 {
+        let army = first..self.s.nen as usize;
+        let stake = self.s.en[army.clone()]
+            .iter()
+            .map(|e| worth(e.kind))
+            .sum::<i32>() as f32
+            * share(self.s.expect);
+        let through = (cost / stake.max(1.0)).clamp(0.05, 0.8);
+        let meant = self.dps();
+        self.toughen(first, meant * FIGHT / (1.0 - through));
+        for e in &mut self.s.en[army] {
+            e.meant = meant;
+        }
+        through * stake
     }
 
     /// Damage a second the squad expected puts into what it aims at.
@@ -469,43 +508,41 @@ impl Combat {
         let side = if self.chance(0.5) { -1.0 } else { 1.0 };
         let e = self.s.expect.max(3.0);
         // the army beside the boss: rows from its point towards the squad, one more each row up to ARMY_ROW
-        let n = ((e * (0.6 + hard * 0.015).min(0.9)).round() as i32 + 6).clamp(10, 160);
+        let cost = e * (0.3 + hard * 0.012).min(0.55);
+        let n = ((cost / share(e) * 2.0).round() as i32 + 6).clamp(10, 160);
         // what is left of the groups before it still stands, and the boss waves more on
         let n = n.min(MAXE as i32 - self.s.nen - 24).max(0);
         let ax = -side * 3.0;
-        let group = self.lay_group(ax, arena + 9.0, n);
-        let (mut row, mut k) = (0, 0);
-        while k < n {
+        let first = self.s.nen as usize;
+        let (mut row, mut left) = (0, n);
+        while left > 0 {
             let wide = (row + 1).min(ARMY_ROW);
-            for i in 0..wide {
-                if k >= n {
-                    break;
-                }
+            for i in 0..wide.min(left) {
                 let x = ax + (i as f32 - (wide - 1) as f32 * 0.5) * 0.85;
                 let kind = if row >= 3 && hard >= 3.0 && i % 5 == 2 {
                     E_RIFLE
+                } else if row >= 4 && hard >= 7.0 && i % 6 == 4 {
+                    E_GRENADIER
                 } else if hard >= 5.0 && row >= 5 && i == 0 {
                     E_BRUTE
+                } else if row >= 2 && hard >= 3.0 && i % 4 == 1 {
+                    E_HEAVY
                 } else {
                     E_GRUNT
                 };
-                self.spawn_enemy(
-                    kind,
-                    x.clamp(-HALF + 0.4, HALF - 0.4),
-                    arena + 6.0 + row as f32 * 0.75,
-                    group,
-                    ES_WAIT,
-                );
-                k += 1;
+                let ex = x.clamp(-HALF + 0.4, HALF - 0.4);
+                self.spawn_enemy(kind, ex, arena + 6.0 + row as f32 * 0.75, ES_WAIT);
             }
+            left -= wide.min(left);
             row += 1;
         }
+        let lost = self.send_army(first, cost);
         // the endless pier goes on past the boss for the squad left
-        self.s.expect = after_group(e, n, enemy_hp(E_GRUNT, hard)).max(3.0);
+        self.s.expect = (e - lost).max(3.0);
         let toughness = if self.s.endless() {
             0.6 + hard * 0.035
         } else {
-            (0.4 + hard * 0.04).min(1.2)
+            (0.5 + hard * 0.04).min(1.3)
         };
         let hp = (BOSS_SECONDS * toughness * self.dps()).round().max(30.0) as i32;
         let home = arena + BOSS_HOME;
@@ -517,6 +554,7 @@ impl Combat {
             hp,
             hp_max: hp,
             flinch_at: hp * 3 / 4,
+            meant: self.dps(),
             ..NO_BOSS
         };
         self.s.next_d = arena + 32.0;
@@ -530,13 +568,7 @@ fn gains(e: f32) -> f32 {
     e.min(10.0 * e.sqrt())
 }
 
-/// The squad expected of e after a group of n, each taking hp damage, comes
-/// at it: it loses about those that reach it, as the rest fall to its fire first.
-fn after_group(e: f32, n: i32, hp: i32) -> f32 {
-    (e - n as f32 * reach(hp)).max(e * 0.45)
-}
-
-/// The share of a group of the tan army, each taking hp damage, that gets to the squad.
-fn reach(hp: i32) -> f32 {
-    1.0 - 0.55 / hp as f32
+/// How many soldiers each one shown of a squad of e stands for.
+fn share(e: f32) -> f32 {
+    (e / shooters(e)).max(1.0)
 }

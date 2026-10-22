@@ -1,10 +1,12 @@
 //! Bots that play every level and the endless pier, for balancing:
 //!   cargo test --release -- --nocapture
 //! A sharp player picks the better gate, shoots barrels and crates open and
-//! keeps out of holes and shell fire; a casual one gets gates wrong now and
-//! then, doesn't steer at barrels and crates and dodges half the shells. The asserts hold
-//! the balance aimed for: a sharp player clears every level, a casual one
-//! most of the early ones and fewer of the last.
+//! keeps out of holes and shell fire; a good one now and then misses a gate
+//! or a shell; a casual one gets gates wrong more often, doesn't steer at
+//! barrels and crates and dodges half the shells. The asserts hold the
+//! balance aimed for: every level can be lost, a sharp player clears each
+//! nearly always, a good one most, a casual one most of the early ones and
+//! under half of the last.
 use crate::*;
 
 /// one step of the rules with nothing pressed
@@ -39,6 +41,15 @@ const SEEDS: [u32; 3] = [1, 2, 5];
 const LEVEL_SEEDS: [u32; 24] = [
     1, 2, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
 ];
+
+/// one who plays well but not flawlessly
+const GOOD: Skill = Skill {
+    name: "good",
+    gates: 0.95,
+    aim: true,
+    dodge: 0.7,
+    look: 180,
+};
 
 const CASUAL: Skill = Skill {
     name: "casual",
@@ -289,8 +300,8 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
 
 #[test]
 fn levels() {
-    let mut cleared = [[0; LEVELS as usize]; 2];
-    for (n, sk) in [SHARP, CASUAL].iter().enumerate() {
+    let mut cleared = [[0; LEVELS as usize]; 3];
+    for (n, sk) in [SHARP, GOOD, CASUAL].iter().enumerate() {
         println!("{}", sk.name);
         for level in 0..LEVELS {
             // each run its own game, so a level's runs play side by side
@@ -323,8 +334,10 @@ fn levels() {
             );
         }
     }
-    // a sharp player clears every level nearly always (5 runs in 6), a casual one most
-    // of the first five (11 in 15) and at most two thirds of the last five
+    // a sharp player clears every level nearly always (5 runs in 6); a good
+    // one 4 runs in 5 or more, but not 97 in 100; a casual one most of the
+    // first five (11 in 15), loses level 1 one run in 8 or more, and clears
+    // at most half of the last five
     let runs = LEVEL_SEEDS.len() as i32;
     let sum = |c: &[i32]| c.iter().sum::<i32>();
     assert!(
@@ -332,15 +345,21 @@ fn levels() {
         "sharp: {:?}",
         cleared[0]
     );
+    let good = sum(&cleared[1]) * 100;
     assert!(
-        sum(&cleared[1][..5]) * 15 >= runs * 5 * 11,
-        "casual: {:?}",
+        good >= runs * LEVELS * 80 && good <= runs * LEVELS * 97,
+        "good: {:?}",
         cleared[1]
     );
     assert!(
-        sum(&cleared[1][15..]) * 3 <= runs * 5 * 2,
+        sum(&cleared[2][..5]) * 15 >= runs * 5 * 11 && cleared[2][0] * 8 <= runs * 7,
         "casual: {:?}",
-        cleared[1]
+        cleared[2]
+    );
+    assert!(
+        sum(&cleared[2][15..]) * 2 <= runs * 5,
+        "casual: {:?}",
+        cleared[2]
     );
 }
 
