@@ -407,8 +407,52 @@ static void section_point(float x, float y, i32 din, i32 dout, float s, float be
   *py = ly + (ay - ly) * bend;
 }
 
-#define MAXP (MAXN * 9 + 4)
+/* A quarter circle of radius h round (cx, cy), from cx + h * u0 to
+ * cx + h * u1 (two directions at right angles), r thick with round ends:
+ * a body square the snake turns in, drawn in one go. */
+static void quarter(float cx, float cy, i32 u0, i32 u1, float h, float r, u32 c) {
+  float ux0 = (float)DX[u0], uy0 = (float)DY[u0], ux1 = (float)DX[u1], uy1 = (float)DY[u1];
+  float fx = cx + (ux0 + ux1) * h, fy = cy + (uy0 + uy1) * h; /* the far corner */
+  i32 x0 = floori(minf(cx, fx) - r - 1), x1 = ceili(maxf(cx, fx) + r + 1);
+  i32 y0 = floori(minf(cy, fy) - r - 1), y1 = ceili(maxf(cy, fy) + r + 1);
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 > FW) x1 = FW;
+  if (y1 > FH) y1 = FH;
+  float ex0 = cx + ux0 * h, ey0 = cy + uy0 * h, ex1 = cx + ux1 * h, ey1 = cy + uy1 * h;
+  for (i32 j = y0; j < y1; j++) {
+    float vy = j + 0.5f - cy;
+    u32 *row = fb + j * FW;
+    for (i32 i = x0; i < x1; i++) {
+      float vx = i + 0.5f - cx, d;
+      if (vx * ux0 + vy * uy0 >= 0 && vx * ux1 + vy * uy1 >= 0) {
+        d = absf(sqrtf_(vx * vx + vy * vy) - h); /* beside the arc */
+      } else {
+        /* past one end: the distance to the nearer end */
+        float ax = vx + cx - ex0, ay = vy + cy - ey0, bx = vx + cx - ex1, by = vy + cy - ey1;
+        d = sqrtf_(minf(ax * ax + ay * ay, bx * bx + by * by));
+      }
+      float cov = clampf(r + 0.5f - d, 0, 1);
+      if (cov > 0) blend(row + i, c, (u32)(cov * 256));
+    }
+  }
+}
+
+#define MAXP 64
 static struct { float x, y, t; } P[MAXP];
+static i32 np;
+
+/* draws the run of body points in P, narrowing where t < 1, and empties it */
+static void flush_points(float r, u32 c) {
+  for (i32 j = 0; j < np; j++) {
+    float w = r * (0.65f + 0.35f * clampf(P[j].t, 0, 1));
+    if (np == 1) disc(P[j].x, P[j].y, w, c, 1);
+    if (j == 0) continue;
+    float w0 = r * (0.65f + 0.35f * clampf(P[j - 1].t, 0, 1));
+    capsule_grad(P[j - 1].x, P[j - 1].y, P[j].x, P[j].y, w0, w, c, c, 1);
+  }
+  np = 0;
+}
 
 static void draw_snake(void) {
   const Theme *t = TH;
@@ -434,8 +478,16 @@ static void draw_snake(void) {
   /* The body is one path through the squares: straight through a square it
    * crosses, a quarter circle through one where it turns. The tail and head
    * glide along that path, so the snake bends round corners smoothly. One
-   * width all along, narrowing over the last square to the tip. */
-  i32 n = S.len, np = 0;
+   * width all along, narrowing over the last square to the tip. The squares
+   * between the moving ends are drawn whole: a straight run as one line, a
+   * turn as one quarter circle; the ends go through P as short lines. */
+  u32 c = t->body;
+  if (hurt && (S.phase == OVER || (S.timer / 150) & 1)) c = mixc(grey, c, 0.6f);
+  float hx, hy, fx = (float)DX[d], fy = (float)DY[d];
+  float run_x = 0, run_y = 0, run_ex = 0, run_ey = 0;
+  i32 run = -1; /* the way the straight run being gathered goes, or -1 */
+  i32 n = S.len;
+  np = 0;
   /* a head turned mid-step curves onto the new way by the time it leaves its square */
   float bend = A.bend_from < 0 ? 1 : clampf((hu - A.bend_from) / (0.5f - A.bend_from), 0, 1);
   float tu = eating || n == 1 ? 0 : hu;
@@ -465,6 +517,25 @@ static void draw_snake(void) {
     if (i == -1) s1 = hu - 0.5f;
     if (i == -1 && hu <= 0.5f) break;
     float along = (float)(n - 1 - i) - 0.5f - tu;
+    x += shake;
+    if (run >= 0 && (i <= 0 || din != run || dout != run || s0 > 0 || along < 1)) {
+      /* along the grid, a line with round ends is a rounded box: quicker to fill */
+      rrect(minf(run_x, run_ex) - r, minf(run_y, run_ey) - r, absf(run_ex - run_x) + 2 * r, absf(run_ey - run_y) + 2 * r, r, c, 1);
+      run = -1;
+    }
+    if (i > 0 && s0 == 0 && along >= 1) {
+      /* a whole square at full width */
+      float h = cs * 0.5f;
+      flush_points(r, c);
+      if (din != dout) {
+        quarter(x + (DX[dout] - DX[din]) * h, y + (DY[dout] - DY[din]) * h, (dout + 2) % 4, din, h, r, c);
+      } else {
+        if (run < 0) { run = din; run_x = x - DX[din] * h; run_y = y - DY[din] * h; }
+        run_ex = x + DX[din] * h;
+        run_ey = y + DY[din] * h;
+      }
+      continue;
+    }
     i32 steps = din == dout ? 1 : 8;
     for (i32 j = 0; j <= steps; j++) {
       if (j == 0 && np > 0) continue; /* shared with the last section's end */
@@ -476,19 +547,9 @@ static void draw_snake(void) {
       }
     }
   }
-  u32 c = t->body;
-  if (hurt && (S.phase == OVER || (S.timer / 150) & 1)) c = mixc(grey, c, 0.6f);
-  for (i32 j = 0; j < np; j++) {
-    float w = r * (0.65f + 0.35f * clampf(P[j].t, 0, 1));
-    if (np == 1) disc(P[j].x + shake, P[j].y, w, c, 1);
-    if (j == 0) continue;
-    float w0 = r * (0.65f + 0.35f * clampf(P[j - 1].t, 0, 1));
-    capsule_grad(P[j - 1].x + shake, P[j - 1].y, P[j].x + shake, P[j].y, w0, w, c, c, 1);
-  }
-
   /* head and eyes, looking along the path */
-  float hx = P[np - 1].x + shake, hy = P[np - 1].y;
-  float fx = (float)DX[d], fy = (float)DY[d];
+  hx = P[np - 1].x;
+  hy = P[np - 1].y;
   if (np > 1) {
     float vx = P[np - 1].x - P[np - 2].x, vy = P[np - 1].y - P[np - 2].y, l = vx * vx + vy * vy;
     if (l > 1e-6f) {
@@ -497,6 +558,7 @@ static void draw_snake(void) {
       fy = vy * l;
     }
   }
+  flush_points(r, c);
   if (!open) {
     /* blocked: it faces what it ran into, pressed a little against it */
     fx = (float)DX[d];
