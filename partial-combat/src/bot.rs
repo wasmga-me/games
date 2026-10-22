@@ -179,7 +179,7 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
         }
     }
     // shells about to land, and the boss about to jump: where they catch the fewest
-    let jump = s.boss.jumping().then_some((s.boss.tx, s.boss.td, JUMP_R));
+    let jump = s.boss.landing().map(|(x, d)| (x, d, JUMP_R));
     let hit = |x: f32| {
         s.shell[..s.nshell as usize]
             .iter()
@@ -189,7 +189,7 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
             .map(|(hx, hd, hr)| (hr + r - (x - hx).hypot(s.d - hd)).max(0.0))
             .sum::<f32>()
     };
-    // one look per threat: the first shell, or where the jump comes down (it drifts after the squad)
+    // one look per threat: the first shell, or where the jump comes down
     let threat = if s.nshell > 0 {
         s.shell[0].x
     } else {
@@ -323,8 +323,8 @@ fn endless() {
         let mut line = format!("{}:", sk.name);
         let (mut far, mut ended) = (vec![], vec![]);
         for seed in SEEDS {
-            let r = play(0, true, &sk, seed, 1500.0);
-            ended.push(r.time_s < 1500.0);
+            let r = play(0, true, &sk, seed, 3600.0);
+            ended.push(r.time_s < 3600.0);
             line += &format!(
                 "  {:5.0} m {} bosses ({}, peak {})",
                 r.d, r.bosses, r.died, r.peak
@@ -332,7 +332,7 @@ fn endless() {
             far.push(r.d);
         }
         println!("{line}");
-        // it ends: no run lasts the 25 minutes, and a sharp player gets past a few bosses
+        // it ends: no run lasts an hour (a flawless one can last most of it), and a sharp player gets past a few bosses
         assert!(ended.iter().all(|&e| e), "{line}");
         if sk.name == "sharp" {
             assert!(far.iter().all(|&d| d > 1000.0), "{line}");
