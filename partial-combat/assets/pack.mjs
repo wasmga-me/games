@@ -13,7 +13,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Document, NodeIO } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { dedup, meshopt, prune, quantize, resample, simplify, weld } from "@gltf-transform/functions";
+import { dedup, meshopt, normals, prune, quantize, resample, simplify, weld } from "@gltf-transform/functions";
 import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from "meshoptimizer";
 import sharp from "sharp";
 
@@ -121,12 +121,19 @@ function dropStillChannels(doc) {
   }
 }
 
-async function finish(doc, file, { simplifyTo } = {}) {
+/**
+ * Writes the document out small. `simplify` cuts its meshes to that share of
+ * their triangles where that moves them less than `error` (of their size):
+ * the flat-shaded packs repeat each corner per face, so their corners are
+ * joined first and the faces' normals made again after.
+ */
+async function finish(doc, file, { simplify: ratio, error = 0.02 } = {}) {
   dropStillChannels(doc);
+  if (ratio) for (const p of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) p.getAttribute("NORMAL")?.dispose();
   await doc.transform(
     dedup(),
     weld(),
-    ...(simplifyTo ? [simplify({ simplifier: MeshoptSimplifier, ratio: simplifyTo, error: 0.002, lockBorder: true })] : []),
+    ...(ratio ? [simplify({ simplifier: MeshoptSimplifier, ratio, error, lockBorder: true }), normals(), weld()] : []),
     resample({ tolerance: 1e-4 }),
     prune({ keepLeaves: true }),
     quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12, quantizeWeight: 8 }),
@@ -178,7 +185,8 @@ async function figures() {
     if (!FIGURE_CLIPS.includes(n)) drop(a);
     else a.setName(n);
   }
-  await finish(doc, "figures.glb");
+  // a squad is hundreds of them: cut to about a third of their triangles, they look the same from the camera
+  await finish(doc, "figures.glb", { simplify: 0.25 });
 }
 
 // ---------- bosses: Quaternius' Animated Mech Pack ----------
@@ -236,7 +244,8 @@ async function guns() {
     for (const m of g.getRoot().listMaterials()) m.setMetallicFactor(0).setRoughnessFactor(0.4);
     await mergeInto(doc, g);
   }
-  await finish(doc, "guns.glb");
+  // each soldier holds one
+  await finish(doc, "guns.glb", { simplify: 0.2 });
 }
 
 // ---------- pier and shore: Kenney's Pirate Kit, boats: Kenney's Watercraft Kit ----------

@@ -111,8 +111,10 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
             })
             .min_by(|a, b| a.d.total_cmp(&b.d))
         {
-            want = if t.d - s.d < 3.5 {
-                t.x + if t.x > 0.0 { -2.2 } else { 2.2 }
+            // close, it steps the squad round it
+            let clear = half_size(t.kind) + radius(s.count) + 0.4;
+            want = if t.d - s.d < clear + 1.0 {
+                t.x + clear * if t.x > 0.0 { -1.0 } else { 1.0 }
             } else {
                 t.x
             };
