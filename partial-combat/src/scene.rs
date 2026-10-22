@@ -1019,7 +1019,7 @@ impl Combat {
                         fade,
                     );
                 }
-                K_BARREL | K_TNT | K_CRATE if th.hp > 0 => {
+                _ if th.breakable() => {
                     let flash = (th.flash * 160.0) as u8;
                     match th.kind {
                         K_BARREL => {
@@ -1251,7 +1251,7 @@ impl Combat {
                     DECK + 2.1,
                     e.d,
                     0.16,
-                    (e.hp * 1000 / (6 + (s.hardness() * 0.3) as i32).max(1)).min(1000),
+                    (e.hp * 1000 / enemy_hp(E_BRUTE, s.hardness()).max(1)).min(1000),
                     rgba(0xe04030, 255),
                     1.0,
                 );

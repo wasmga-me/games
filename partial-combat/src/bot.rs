@@ -2,16 +2,23 @@
 //!   cargo test --release -- --nocapture
 //! A sharp player picks the better gate, shoots barrels and crates open and
 //! keeps out of holes and shell fire; a casual one gets gates wrong now and
-//! then, doesn't line up shots and dodges half the shells. The asserts hold
+//! then, doesn't steer at barrels and crates and dodges half the shells. The asserts hold
 //! the balance aimed for: a sharp player clears every level, a casual one
 //! most of the early ones and fewer of the last.
 use crate::*;
+
+/// one step of the rules with nothing pressed
+const STEP: Input = Input {
+    held: 0,
+    pressed: 0,
+    dt: 20,
+};
 
 struct Skill {
     name: &'static str,
     /// how often the better gate is picked
     gates: f32,
-    /// lines up on barrels and crates
+    /// steers at barrels and crates so the squad's fire turns on them
     aim: bool,
     /// how often a shell is seen in time
     dodge: f32,
@@ -218,11 +225,6 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
     p.s.opt = [endless as i32, level];
     p.start(seed);
     let mut run = Run::default();
-    let input = Input {
-        held: 0,
-        pressed: 0,
-        dt: 20,
-    };
     let mut t = 0;
     let mut boss_t = 0;
     let mut cause = "";
@@ -231,7 +233,7 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
             p.s.tx = aim(&p, sk, seed);
         }
         let (before, phase) = (p.s.count, p.s.phase);
-        let ev = p.update(&input);
+        let ev = p.update(&STEP);
         t += 20;
         if p.s.count < before {
             // what was near when soldiers were lost
@@ -380,17 +382,12 @@ fn trace() {
     let mut p = Combat::new();
     p.s.opt = [endless as i32, level.max(0)];
     p.start(seed);
-    let input = Input {
-        held: 0,
-        pressed: 0,
-        dt: 20,
-    };
     for t in 0..75_000 {
         if (t * 20) % sk.look < 20 {
             p.s.tx = aim(&p, &sk, seed);
         }
         let before = (p.s.count, p.s.phase);
-        let ev = p.update(&input);
+        let ev = p.update(&STEP);
         let s = &p.s;
         if t % 25 == 0 || s.count < before.0 - 3 || s.phase != before.1 {
             let near: Vec<String> = s
@@ -425,5 +422,66 @@ fn trace() {
             println!("ev {ev}");
             break;
         }
+    }
+}
+
+/// Damage a second a squad of n with gun puts into a barrel or crate across
+/// its way, as a share of squad_dps().
+fn aimed(n: i32, gun: i32, kind: i32) -> f32 {
+    const HP: i32 = 1_000_000;
+    let mut p = Combat::new();
+    p.start(1);
+    p.s.count = n;
+    p.s.weapon = gun;
+    p.fill_squad();
+    p.s.nen = 0;
+    p.s.nthing = 1;
+    // near the squad's edge, so only its fire turned that way reaches it,
+    // and the squad standing so nobody runs into it
+    p.s.thing[0] = Thing {
+        kind,
+        x: p.s.cx + radius(n) * 0.8,
+        d: p.s.d + 10.0,
+        hp: HP,
+        hp_max: HP,
+        ..NO_THING
+    };
+    p.s.speed = 0.0;
+    // two seconds, the first bullets' flight in them
+    for _ in 0..100 {
+        p.update(&STEP);
+    }
+    (HP - p.s.thing[0].hp) as f32 / (2.0 * squad_dps(n as f32, gun))
+}
+
+/// However big the squad and whatever its gun, a barrel or crate in its way
+/// takes about all of its fire.
+#[test]
+fn aimed_fire() {
+    for kind in [K_BARREL, K_CRATE] {
+        for gun in 0..WEAPONS.len() as i32 {
+            for n in [10, 30, 100, 200, 1000] {
+                let r = aimed(n, gun, kind);
+                assert!(
+                    (0.75..1.2).contains(&r),
+                    "{n} soldiers with gun {gun} put {r:.2} of the damage planned into a {}",
+                    if kind == K_CRATE { "crate" } else { "barrel" }
+                );
+            }
+        }
+    }
+}
+
+/// Each gun a crate hands out beats the one before at a barrel, crate, gate
+/// or boss, and at a crowd of grunts.
+#[test]
+fn guns_climb() {
+    let crowd = |w: usize| {
+        let g = &WEAPONS[w];
+        g.rate * (g.pellets * (g.pierce + 1)) as f32
+    };
+    for w in 1..WEAPONS.len() {
+        assert!(gun_dps(w as i32) >= gun_dps(w as i32 - 1) * 1.5, "gun {w}");
+        assert!(crowd(w) > crowd(w - 1), "gun {w}");
     }
 }
