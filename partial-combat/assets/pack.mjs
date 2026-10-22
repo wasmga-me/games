@@ -130,9 +130,11 @@ function dropStillChannels(doc) {
  * Writes the document out small. `simplify` cuts its meshes to that share of
  * their triangles where that moves them less than `error` (of their size):
  * the flat-shaded packs repeat each corner per face, so their corners are
- * joined first and the faces' normals made again after.
+ * joined first and the faces' normals made again after. `volume` "scene"
+ * quantizes every mesh in one space, so meshes that share parts share them
+ * in the file too.
  */
-async function finish(doc, file, { simplify: ratio, error = 0.02 } = {}) {
+async function finish(doc, file, { simplify: ratio, error = 0.02, volume = "mesh" } = {}) {
   dropStillChannels(doc);
   if (ratio) for (const p of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) p.getAttribute("NORMAL")?.dispose();
   await doc.transform(
@@ -141,8 +143,8 @@ async function finish(doc, file, { simplify: ratio, error = 0.02 } = {}) {
     ...(ratio ? [simplify({ simplifier: MeshoptSimplifier, ratio, error, lockBorder: true }), normals(), weld()] : []),
     resample({ tolerance: 1e-4 }),
     prune({ keepLeaves: true }),
-    quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12, quantizeWeight: 8 }),
-    meshopt({ encoder: MeshoptEncoder, level: "medium" }),
+    quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12, quantizeWeight: 8, quantizationVolume: volume }),
+    meshopt({ encoder: MeshoptEncoder, level: "medium", quantizationVolume: volume }),
   );
   const bytes = await io.writeBinary(doc);
   writeFileSync(join(OUT, file), bytes);
@@ -221,7 +223,7 @@ async function giants() {
     else drop(a);
   }
   // a boss is one big figure close up: it keeps most of its triangles
-  await finish(doc, "giants.glb", { simplify: 0.6 });
+  await finish(doc, "giants.glb", { simplify: 0.6, volume: "scene" });
 }
 
 /** Where a clip has a node's translation, rotation or scale at t (s), or its rest. */
