@@ -359,10 +359,16 @@ pub const A_SHELLS: i32 = 3;
 pub const A_TROOPS: i32 = 4;
 /// walking up to the squad and jumping on it, at tx, td
 pub const A_JUMP: i32 = 5;
-/// how far it lands from where it jumps
+/// how far short of the squad it stops to jump
 pub const JUMP_REACH: f32 = 4.5;
+/// the longest leap it takes
+pub const JUMP_FAR: f32 = 8.0;
 /// how far round where it lands soldiers are knocked out
 pub const JUMP_R: f32 = 3.8;
+/// Where across the pier it jumps at a squad at cx, kept in from the edges.
+fn jump_x(cx: f32) -> f32 {
+    cx.clamp(-HALF + JUMP_R * 0.6, HALF - JUMP_R * 0.6)
+}
 
 /// The mechs (scene.rs MODELS) as their clips have them: the walk's loop
 /// (s), how far a foot goes back a second at the clip's pace (m at scale 1),
@@ -441,9 +447,9 @@ pub struct Boss {
     pub flinch_at: i32,
 }
 impl Boss {
-    /// on its way to jump on the squad, or in the air
-    pub fn jumping(&self) -> bool {
-        self.state == 2 && self.atk == A_JUMP
+    /// where it will come down, once it has picked the spot (it stays put)
+    pub fn landing(&self) -> Option<(f32, f32)> {
+        (self.state == 2 && self.atk == A_JUMP && self.stage >= 1).then_some((self.tx, self.td))
     }
     /// how fast it walks, m/s
     pub fn speed(&self) -> f32 {
@@ -1008,7 +1014,9 @@ impl Combat {
         const EDGE: f32 = 0.3;
         let spread = (r - 0.3).max(0.01);
         let room = ((hi - lo) * 0.5 - EDGE).max(0.2);
-        let squeeze = (room / spread).min(1.0);
+        // steered against an edge it squeezes up, to half its width
+        let off = (self.s.cx - lo).min(hi - self.s.cx) - EDGE;
+        let squeeze = (room / spread).min((off / spread).max(0.5)).min(1.0);
         let used = spread * squeeze;
         let mid = self
             .s
@@ -1873,31 +1881,31 @@ impl Combat {
         0
     }
 
-    /// Walking up to the squad, then jumping on it (A_JUMP): it lands at tx, td.
+    /// Walking up to the squad (in line with tx), then jumping on it (A_JUMP). It picks where it
+    /// will land (tx, td) as it stops and holds a moment, so a squad that moves off is missed.
     fn boss_jump(&mut self, dt: f32, hard: f32, enraged: bool) -> u32 {
-        let (cx, sd) = (self.s.cx, self.s.d);
-        let r = radius(self.s.alive() as i32);
         let b = &mut self.s.boss;
         let (stage, t) = (b.stage, b.atk_t);
         let m = &MECHS[b.kind as usize];
-        if stage < 2 {
-            // it keeps its eye on the squad as it comes
-            let follow = (3.0 + hard * 0.1).min(5.0) * dt;
-            let want_x = cx.clamp(-HALF + JUMP_R * 0.6, HALF - JUMP_R * 0.6);
-            b.tx += (want_x - b.tx).clamp(-follow, follow);
-            b.td = sd + r * 0.6;
-        }
         let (tx, td) = (b.tx, b.td);
         match stage {
             0 => {
-                if self.boss_walk(tx, td + JUMP_REACH, dt) || t > 6.0 {
+                // straight up to the squad's front, keeping pace as it walks on to the arena
+                let front = self.s.d + radius(self.s.alive() as i32) * 0.6;
+                if self.boss_walk(tx, front + JUMP_REACH, dt) || t > 6.0 {
+                    // where the squad is now, as far as one leap goes
+                    let b = &mut self.s.boss;
+                    let (dx, dd) = (jump_x(self.s.cx) - b.x, front - b.d);
+                    let k = (JUMP_FAR / dx.hypot(dd).max(0.1)).min(1.0);
+                    (b.tx, b.td) = (b.x + dx * k, b.d + dd * k);
                     self.boss_stage(1);
                 }
             }
             1 => {
                 let b = &mut self.s.boss;
                 let want = (tx - b.x).atan2(b.d - td);
-                if turn(&mut b.yaw, want, 2.5 * dt) || t > 0.8 {
+                let hold = (1.0 - hard * 0.03).max(0.4) * if enraged { 0.8 } else { 1.0 };
+                if turn(&mut b.yaw, want, 2.5 * dt) && t > hold {
                     b.from = [b.x, b.d];
                     self.boss_stage(2);
                 }
@@ -1947,9 +1955,9 @@ impl Combat {
             A_VOLLEY
         };
         self.boss_start(atk);
-        let x = self.s.boss.x;
         if atk == A_MOVE {
             // another spot, well along the arena
+            let x = self.s.boss.x;
             let mut tx = self.s.frand(-HALF + 3.0, HALF - 3.0);
             if (tx - x).abs() < 3.0 {
                 tx = if x > 0.0 { x - 4.0 } else { x + 4.0 };
@@ -1957,8 +1965,8 @@ impl Combat {
             let td = self.s.arena_d + BOSS_HOME + self.s.frand(-1.5, 1.5);
             (self.s.boss.tx, self.s.boss.td) = (tx, td);
         } else if atk == A_JUMP {
-            // it aims from where it stands at the squad (boss_jump)
-            (self.s.boss.tx, self.s.boss.td) = (x, self.s.d);
+            // it walks straight up to the squad, in line with where it is now (boss_jump)
+            self.s.boss.tx = jump_x(self.s.cx);
         }
     }
 

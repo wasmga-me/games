@@ -30,6 +30,7 @@ const SPRITE_BILLBOARD: u8 = 0;
 const SPRITE_GROUND: u8 = 1;
 const SPRITE_PANEL: u8 = 2;
 const SPRITE_STREAK: u8 = 3;
+const SPRITE_OVER: u8 = 1;
 const PICTURE_BOX: u8 = 255;
 // pictures in fx.png (fx.ts PIC)
 const PIC_FLARE: u8 = 4;
@@ -202,7 +203,7 @@ struct Sprite {
     kind: u8,
     picture: u8,
     add: u8,
-    _pad: u8,
+    flags: u8,
     pos: [f32; 3],
     w: f32,
     h: f32,
@@ -346,7 +347,7 @@ impl Scene {
             kind,
             picture,
             add: add as u8,
-            _pad: 0,
+            flags: 0,
             pos: [x, y, -d],
             w,
             h,
@@ -1062,16 +1063,17 @@ impl Combat {
         // the shader whitens in linear light, so a little reads as a lot on a big dark mech
         i.flash = (b.flash.max(0.0) * 25.0) as u8;
         i.fade = fade;
-        if b.jumping() && self.s.phase == P_BOSS {
-            // where it will land: a ring that fills as it comes down
+        let m = &MECHS[b.kind as usize];
+        let down = b.stage == 2 && b.atk_t >= m.land;
+        if let (P_BOSS, Some((x, d)), false) = (self.s.phase, b.landing(), down) {
+            // where it will land: a ring that fills as it comes down, gone once it is down
             let u = if b.stage == 2 {
-                let m = &MECHS[b.kind as usize];
                 (b.atk_t / m.land).clamp(0.0, 1.0)
             } else {
                 0.0
             };
             let blink = 0.75 + 0.25 * (self.clock * 9.0).sin();
-            warning(sc, b.tx, b.td, JUMP_R, u, blink);
+            warning(sc, x, d, JUMP_R, u, blink);
         }
     }
 
@@ -1161,6 +1163,20 @@ impl Combat {
 /// A red mark on the deck where something will come down, r round, `u` of
 /// the way there: its ring blinks and the middle fills as it nears.
 fn warning(sc: &mut Scene, x: f32, d: f32, r: f32, u: f32, blink: f32) {
+    let from = sc.sprites.len();
+    sc.sprite(
+        SPRITE_GROUND,
+        PIC_CIRCLE,
+        false,
+        x,
+        DECK + 0.04,
+        d,
+        r * 2.0,
+        r * 2.0,
+        0.0,
+        0.0,
+        rgba(0xff2010, (70.0 + 60.0 * u) as u8),
+    );
     sc.sprite(
         SPRITE_GROUND,
         PIC_RING,
@@ -1173,19 +1189,6 @@ fn warning(sc: &mut Scene, x: f32, d: f32, r: f32, u: f32, blink: f32) {
         0.0,
         0.0,
         rgba(0xff2a18, (255.0 * blink) as u8),
-    );
-    sc.sprite(
-        SPRITE_GROUND,
-        PIC_CIRCLE,
-        false,
-        x,
-        DECK + 0.04,
-        d,
-        r * 2.0,
-        r * 2.0,
-        0.0,
-        0.0,
-        rgba(0xff2010, (40.0 + 60.0 * u) as u8),
     );
     if u > 0.0 {
         sc.sprite(
@@ -1201,6 +1204,10 @@ fn warning(sc: &mut Scene, x: f32, d: f32, r: f32, u: f32, blink: f32) {
             0.0,
             rgba(0xff5030, 220),
         );
+    }
+    // over the squad standing on it, so it shows through
+    for s in &mut sc.sprites[from..] {
+        s.flags |= SPRITE_OVER;
     }
 }
 
