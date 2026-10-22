@@ -135,13 +135,37 @@ fn noise(k: i32, salt: u32) -> f32 {
     (h & 0xffff) as f32 / 65_535.0
 }
 
-fn sky(s: &mut Screen, st: &State, t: &Theme, now: f32) {
-    let (x0, y0, x1, y1) = s.visible();
-    // the sky darkens over the first 2,000 m
+/// The sky's colours at the top and bottom of the climb: it darkens over
+/// the first 2,000 m.
+fn sky_colours(st: &State, t: &Theme) -> (u32, u32, f32) {
     let up = (st.cam / 20_000.0).clamp(0.0, 1.0);
-    let top = mix(t.sky_top, t.high_top, up);
-    let bottom = mix(t.sky_bottom, t.high_bottom, up);
-    s.rect_grad(x0, y0, x1 - x0, y1 - y0, 0.0, top, bottom, 1.0);
+    (mix(t.high_top, t.sky_top, up), mix(t.high_bottom, t.sky_bottom, up), up)
+}
+
+/// The sky's gradient, filled a row at a time (the whole screen, so it has
+/// to be cheap); on a screen wider than the climb, the sky beyond its edges
+/// is shaded, so the edges the puff wraps round show.
+fn sky_fill(s: &mut Screen, st: &State, t: &Theme) {
+    let (top, bottom, _) = sky_colours(st, t);
+    let (_, y0, _, y1) = s.visible();
+    let (w, h) = s.size_px();
+    let (py0, py1) = (s.px(0.0, y0).1, s.px(0.0, y1).1);
+    let (a, b) = (s.px(0.0, 0.0).0.round().clamp(0.0, w as f32) as usize, s.px(PW, 0.0).0.round().clamp(0.0, w as f32) as usize);
+    for j in 0..h {
+        let c = mix(bottom, top, (j as f32 + 0.5 - py0) / (py1 - py0));
+        let row = s.row_px(j);
+        row[a..b].fill(c);
+        if a > 0 || b < w as usize {
+            let dark = mix(0, c, 0.42);
+            row[..a].fill(dark);
+            row[b..].fill(dark);
+        }
+    }
+}
+
+/// Stars and clouds, drawn inside the climb.
+fn sky(s: &mut Screen, st: &State, t: &Theme, now: f32) {
+    let (top, bottom, up) = sky_colours(st, t);
     let stars = (t.stars + up * 0.8).min(1.0);
     if stars > 0.05 {
         // stars hang still, far away
@@ -180,10 +204,10 @@ fn ledge(s: &mut Screen, l: &Ledge, cam: f32, t: &Theme) {
         return;
     }
     if l.kind == GROUND {
-        let (x0, _, x1, y1) = s.visible();
-        s.rect(x0, y, x1 - x0, y1 - y + 1.0, 0.0, t.soil, 1.0);
-        s.rect(x0, y, x1 - x0, 10.0, 0.0, t.grass, 1.0);
-        s.rect(x0, y, x1 - x0, 3.0, 0.0, mix(t.grass, rgb(255, 255, 255), 0.3), 1.0);
+        let (_, _, _, y1) = s.visible();
+        s.rect(0.0, y, PW, y1 - y + 1.0, 0.0, t.soil, 1.0);
+        s.rect(0.0, y, PW, 10.0, 0.0, t.grass, 1.0);
+        s.rect(0.0, y, PW, 3.0, 0.0, mix(t.grass, rgb(255, 255, 255), 0.3), 1.0);
         return;
     }
     if l.crumble_ms > 0 {
@@ -324,6 +348,10 @@ fn hud(s: &mut Screen, st: &State, t: &Theme) {
 
 pub fn draw(s: &mut Screen, st: &State, a: &Anim) {
     let t = &THEMES[st.opt[O_THEME].clamp(0, N_THEMES - 1) as usize];
+    sky_fill(s, st, t);
+    // everything else stays inside the climb: what goes past an edge comes in on the other side
+    let (_, y0, _, y1) = s.visible();
+    s.set_clip(0.0, y0, PW, y1 - y0);
     sky(s, st, t, a.now);
     for l in st.ledges.iter().filter(|l| l.w > 0.0) {
         ledge(s, l, st.cam, t);
@@ -347,20 +375,18 @@ pub fn draw(s: &mut Screen, st: &State, a: &Anim) {
     for p in a.parts.iter().filter(|p| p.life > 0.0) {
         s.disc(p.x, sy(st.cam, p.alt), 2.0, p.c, (p.life * 2.0).min(1.0));
     }
-    sides(s);
     hud(s, st, t);
+    s.no_clip();
+    edges(s);
 }
 
-/// On a screen wider than the climb, the sky beyond its edges is shaded, so
-/// the edges the puff wraps round show.
-fn sides(s: &mut Screen) {
+/// A thin light line down each edge of the climb, on a screen wider than it.
+fn edges(s: &mut Screen) {
     let (x0, y0, x1, y1) = s.visible();
     if x0 < -0.5 {
-        s.rect(x0, y0, -x0, y1 - y0, 0.0, 0, 0.42);
         s.rect(-1.5, y0, 1.5, y1 - y0, 0.0, rgb(255, 255, 255), 0.25);
     }
     if x1 > PW + 0.5 {
-        s.rect(PW, y0, x1 - PW, y1 - y0, 0.0, 0, 0.42);
         s.rect(PW, y0, 1.5, y1 - y0, 0.0, rgb(255, 255, 255), 0.25);
     }
 }

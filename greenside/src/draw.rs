@@ -398,7 +398,7 @@ pub fn draw(s: &mut Screen, st: &State, a: &Anim, d: &Drag) {
         let r = r + 2.5 * f;
         s.disc(x + 2.0, y + 3.0, r + 1.0, 0, 0.25);
         s.disc(x, y, r, t.bumper, 1.0);
-        s.ring(x, y, r - 2.0, 1.6, mix(t.bumper_hi, rgb(255, 255, 255), f), 0.9);
+        s.ring(x, y, r - 2.0, 1.6, mix(rgb(255, 255, 255), t.bumper_hi, f), 0.9);
         s.disc(x - r * 0.3, y - r * 0.35, r * 0.28, rgb(255, 255, 255), 0.35 + 0.5 * f);
     }
     for m in h.movers {
@@ -467,7 +467,7 @@ pub fn draw(s: &mut Screen, st: &State, a: &Anim, d: &Drag) {
 fn aim(s: &mut Screen, st: &State, drag: &Drag, t: &Theme) {
     let (ux, uy) = (st.aim.cos(), st.aim.sin());
     let len = 18.0 + 120.0 * st.power;
-    let hot = mix(rgb(255, 255, 255), rgb(255, 110, 70), st.power);
+    let hot = mix(rgb(255, 110, 70), rgb(255, 255, 255), st.power);
     let mut d = 11.0;
     while d < len {
         let f = d / len;
@@ -513,7 +513,7 @@ fn banner(s: &mut Screen, st: &State) {
     let size = s.fit_size(&name, 34.0, 300.0);
     let (cx, cy) = (PW / 2.0, PH / 2.0 + 4.0);
     let rise = 10.0 * (1.0 - wg::ease_out(f));
-    s.shadow(cx - 170.0, cy - 46.0 + rise, 340.0, 92.0, 20.0, 12.0, 0, 0.35 * f);
+    s.shadow_hollow(cx - 170.0, cy - 46.0 + rise, 340.0, 92.0, 20.0, 12.0, 0, 0.35 * f, 8.0);
     s.rect(cx - 170.0, cy - 46.0 + rise, 340.0, 92.0, 20.0, rgb(28, 30, 26), 0.82 * f);
     s.text_c(&name, cx, cy - 12.0 + rise, size, rgb(255, 255, 255), f);
     let pts = format!("+{}", st.cleared_points());
