@@ -77,11 +77,17 @@ const LONG_AGO: i32 = 10_000;
 /// the most a gap between ledges grows to on each pace, inside a bounce
 const GAP_CAP: [f32; N_PACES as usize] = [118.0, 142.0, 156.0];
 const _: () = assert!(GAP_CAP[2] < BOUNCE - 20.0);
+/// the gaps between ledges at the ground on each pace (shortest, longest),
+/// growing to (FAR, GAP_CAP) at the pace's hardest
+const GAP_START: [(f32, f32); N_PACES as usize] = [(28.0, 72.0), (70.0, 110.0), (105.0, 140.0)];
+const FAR: [f32; N_PACES as usize] = [78.0, 120.0, 140.0];
+/// how often a spare crumbling ledge sits between two, at the ground and at the hardest
+const SPARE: [(f32, f32); N_PACES as usize] = [(0.12, 0.42), (0.06, 0.15), (0.0, 0.0)];
 /// the height at which each pace is at its hardest
 const HARDEST: [f32; N_PACES as usize] = [20_000.0, 16_000.0, 9_000.0];
 /// how fast the screen rises on its own (plan units a second) on each pace,
 /// at first and at its hardest, and from what height
-const RISE: [(f32, f32, f32); N_PACES as usize] = [(0.0, 0.0, 0.0), (25.0, 70.0, 2_000.0), (45.0, 105.0, 300.0)];
+const RISE: [(f32, f32, f32); N_PACES as usize] = [(0.0, 0.0, 0.0), (40.0, 100.0, 2_000.0), (70.0, 150.0, 300.0)];
 /// birds: from what height, and how many more than on Normal
 const BIRDS: [(f32, f32); N_PACES as usize] = [(4_000.0, 0.7), (1_500.0, 1.2), (500.0, 1.8)];
 /// how much more often ledges slide and how much faster than on Normal,
@@ -222,9 +228,9 @@ impl State {
         while self.top < self.cam + PH * 1.6 {
             let p = self.progress();
             // the gap to the next ledge grows with height
-            let cap = GAP_CAP[pace];
-            let lo = 28.0 + 50.0 * p;
-            let hi = 72.0 + (cap - 72.0) * p;
+            let (lo0, hi0) = GAP_START[pace];
+            let lo = lo0 + (FAR[pace] - lo0) * p;
+            let hi = hi0 + (GAP_CAP[pace] - hi0) * p;
             let gap = lo + (hi - lo) * self.rng.float();
             // after a crumbling ledge on the way up, a still one
             let after_crumble = self.ledges.iter().any(|l| l.w > 0.0 && l.alt == self.top && l.kind == CRUMBLE);
@@ -248,7 +254,8 @@ impl State {
                 }
             }
             // a crumbling ledge between, never the only way up
-            if self.rng.float() < 0.12 + 0.3 * p {
+            let (spare0, spare1) = SPARE[pace];
+            if self.rng.float() < spare0 + (spare1 - spare0) * p {
                 let cx = self.rng.float() * (PW - LEDGE_W);
                 let calt = alt - gap * 0.5;
                 self.put_ledge(Ledge::new(cx, calt, LEDGE_W, 0.0, CRUMBLE, -1.0));
