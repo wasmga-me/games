@@ -483,9 +483,8 @@ static void draw_snake(void) {
    * turn as one quarter circle; the ends go through P as short lines. */
   u32 c = t->body;
   if (hurt && (S.phase == OVER || (S.timer / 150) & 1)) c = mixc(grey, c, 0.6f);
-  float hx, hy, fx = (float)DX[d], fy = (float)DY[d];
   float run_x = 0, run_y = 0, run_ex = 0, run_ey = 0;
-  i32 run = -1; /* the way the straight run being gathered goes, or -1 */
+  i32 run = 0; /* a straight run is being gathered */
   i32 n = S.len;
   np = 0;
   /* a head turned mid-step curves onto the new way by the time it leaves its square */
@@ -518,19 +517,18 @@ static void draw_snake(void) {
     if (i == -1 && hu <= 0.5f) break;
     float along = (float)(n - 1 - i) - 0.5f - tu;
     x += shake;
-    if (run >= 0 && (i <= 0 || din != run || dout != run || s0 > 0 || along < 1)) {
-      /* along the grid, a line with round ends is a rounded box: quicker to fill */
-      rrect(minf(run_x, run_ex) - r, minf(run_y, run_ey) - r, absf(run_ex - run_x) + 2 * r, absf(run_ey - run_y) + 2 * r, r, c, 1);
-      run = -1;
+    i32 whole = i > 0 && s0 == 0 && along >= 1; /* a whole square at full width */
+    if (run && !(whole && din == dout)) {
+      capsule(run_x, run_y, run_ex, run_ey, r, c, 1);
+      run = 0;
     }
-    if (i > 0 && s0 == 0 && along >= 1) {
-      /* a whole square at full width */
+    if (whole) {
       float h = cs * 0.5f;
       flush_points(r, c);
       if (din != dout) {
         quarter(x + (DX[dout] - DX[din]) * h, y + (DY[dout] - DY[din]) * h, (dout + 2) % 4, din, h, r, c);
       } else {
-        if (run < 0) { run = din; run_x = x - DX[din] * h; run_y = y - DY[din] * h; }
+        if (!run) { run = 1; run_x = x - DX[din] * h; run_y = y - DY[din] * h; }
         run_ex = x + DX[din] * h;
         run_ey = y + DY[din] * h;
       }
@@ -548,8 +546,8 @@ static void draw_snake(void) {
     }
   }
   /* head and eyes, looking along the path */
-  hx = P[np - 1].x;
-  hy = P[np - 1].y;
+  float hx = P[np - 1].x, hy = P[np - 1].y;
+  float fx = (float)DX[d], fy = (float)DY[d];
   if (np > 1) {
     float vx = P[np - 1].x - P[np - 2].x, vy = P[np - 1].y - P[np - 2].y, l = vx * vx + vy * vy;
     if (l > 1e-6f) {

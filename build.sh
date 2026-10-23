@@ -33,7 +33,7 @@ engine() {
 engine
 for g in $GAMES; do
   mkdir -p "$OUT/$g"
-  clang -I "$WG_C" --target=wasm32 -O2 -ffreestanding -fno-builtin -nostdlib \
+  clang -I "$WG_C" --target=wasm32 -O2 -mbulk-memory -ffreestanding -fno-builtin -nostdlib \
     -Wall -Wextra -Wno-unused-function \
     -Wl,--no-entry -Wl,--strip-debug \
     -o "$OUT/$g/$g.wasm" "$g.c"

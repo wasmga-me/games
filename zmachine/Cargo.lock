@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "wg"
 version = "0.1.0"
-source = "git+https://github.com/wasmga-me/wasmgame-wg#786659aea8ada04ddd2272d8a4371cd8df20482b"
+source = "git+https://github.com/wasmga-me/wasmgame-wg#29e67f4584ce104bd142b4b1851cb160c5818487"
 
 [[package]]
 name = "zmachine"

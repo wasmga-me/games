@@ -82,8 +82,8 @@ static void blend(u32 *p, u32 c, u32 a) {
 }
 
 static void clear(u32 c) {
-  u32 *p = fb, *end = fb + FW * FH;
-  while (p < end) *p++ = c;
+  for (i32 i = 0; i < FW; i++) fb[i] = c;
+  for (i32 j = 1; j < FH; j++) memcpy(fb + j * FW, fb, (unsigned long)FW * 4);
 }
 
 static void span(u32 *row, i32 a, i32 b, u32 c, u32 al) {
@@ -623,7 +623,7 @@ static void draw(void) {
     fb = keep;
     under_ok = 1;
   }
-  for (i32 i = 0, e = FW * FH; i < e; i++) fb[i] = under[i];
+  memcpy(fb, under, (unsigned long)FW * FH * 4);
 
   score_box(L.px, L.py, tr("Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки"), S.score);
   score_box(L.px + L.pdx, L.py + L.pdy, tr("Best", "最高分", "ベスト", "최고", "Récord", "Recorde", "Record", "Rekord", "Рекорд"), S.best[n]);
