@@ -21,8 +21,8 @@ pub fn steer(s: &State) -> f32 {
         if wrap_dx(s.x, mid).abs() > reach {
             continue;
         }
-        // a crumbling ledge only when nothing else will do
-        let score = l.alt - if l.kind == CRUMBLE { 400.0 } else { 0.0 };
+        // a crumbling ledge only when nothing as high will do
+        let score = l.alt - if l.kind == CRUMBLE { 20.0 } else { 0.0 };
         if best.is_none_or(|b| score > b.0) {
             best = Some((score, mid));
         }
@@ -73,6 +73,30 @@ mod tests {
                 let s = super::climb(pace, seed, 180_000);
                 assert!(s.height() >= 2500, "pace {pace} seed {seed}: {} m", s.height());
             }
+        }
+    }
+
+    /// back down on the ground after the first ledge, the run is over
+    #[test]
+    fn the_ground_holds_only_at_the_start() {
+        use crate::play::*;
+        for pace in 0..3 {
+            let mut s = State::zero();
+            s.opt[O_PACE] = pace;
+            s.start(7);
+            let mut t = 0;
+            while s.ledges.iter().any(|l| l.kind == GROUND && l.crumble_ms == 0) {
+                s.frame(0, Some(super::steer(&s)), 16, &mut NoFx);
+                t += 16;
+                assert!(t < 10_000, "pace {pace}: never left the ground");
+            }
+            // dropped back to just above the ground
+            s.alt = R + 20.0;
+            s.vy = -200.0;
+            for _ in 0..30 {
+                s.frame(0, None, 16, &mut NoFx);
+            }
+            assert!(s.over(), "pace {pace}: still bouncing at {} m", s.height());
         }
     }
 }
