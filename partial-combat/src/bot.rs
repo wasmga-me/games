@@ -62,15 +62,16 @@ const CASUAL: Skill = Skill {
 #[derive(Default, Debug)]
 struct Run {
     won: bool,
-    /// metres reached, and soldiers at the boss and at the end
+    /// metres reached, soldiers on meeting the first mech or giant and at
+    /// the end, and seconds spent near them
     d: f32,
-    at_boss: i32,
+    at_big: i32,
     peak: i32,
     end: i32,
-    boss_s: f32,
+    big_s: f32,
     time_s: f32,
     score: i32,
-    bosses: i32,
+    bigs: i32,
     /// what knocked the squad out
     died: &'static str,
 }
@@ -166,16 +167,24 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
             .map_or(0.0, |e| e.x.clamp(-4.0, 4.0));
     }
     want = want.clamp(-HALF + 0.8, HALF - 0.8);
-    // shells about to land: where they catch the fewest
+    // shells about to land, and mechs and giants about to stamp: where they catch the fewest
+    let stamps = s.big.iter().filter_map(|b| b.landing());
     let hit = |x: f32| {
         s.shell[..s.nshell as usize]
             .iter()
             .filter(|h| h.t_max - h.t < 1.4)
-            .map(|h| (h.r + r - (x - h.x).hypot(s.d - h.d)).max(0.0))
+            .map(|h| (h.x, h.d, h.r))
+            .chain(stamps.clone().map(|(x, d)| (x, d, STAMP_R)))
+            .map(|(hx, hd, hr)| (hr + r - (x - hx).hypot(s.d - hd)).max(0.0))
             .sum::<f32>()
     };
-    // one look per threat: the first shell
-    let seen = s.nshell > 0 && hash01(s.shell[0].x, salt ^ 7) < sk.dodge;
+    // one look per threat: the first shell, or where the first stamp comes down
+    let threat = if s.nshell > 0 {
+        Some(s.shell[0].x)
+    } else {
+        stamps.clone().next().map(|(x, _)| (x * 4.0).round())
+    };
+    let seen = threat.is_some_and(|t| hash01(t, salt ^ 7) < sk.dodge);
     if seen && hit(want) > 0.0 {
         let score = |x: f32| hit(x) * 10.0 + (x - s.cx).abs();
         // weighing places across the pier a quarter metre apart
@@ -190,9 +199,11 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
     want
 }
 
-/// The boss marching on the squad and nearly there.
-fn near_boss(s: &Save) -> bool {
-    s.boss.state == 2 && s.boss.d - s.d < 15.0
+/// A mech or giant marching on the squad and nearly there.
+fn near_big(s: &Save) -> bool {
+    s.big
+        .iter()
+        .any(|b| b.state == BIG_MARCH && b.d - s.d < 15.0)
 }
 
 fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
@@ -201,20 +212,20 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
     p.start(seed);
     let mut run = Run::default();
     let mut t = 0;
-    let mut boss_t = 0;
+    let mut big_t = 0;
     let mut cause = "";
     while (t as f32) < secs * 1000.0 {
         if t % sk.look < 20 {
             p.s.tx = aim(&p, sk, seed);
         }
-        let (before, boss) = (p.s.count, near_boss(&p.s));
+        let (before, big) = (p.s.count, near_big(&p.s));
         let ev = p.update(&STEP);
         t += 20;
         if p.s.count < before {
             // what was near when soldiers were lost
             let s = &p.s;
-            cause = if boss {
-                "boss"
+            cause = if big {
+                "big"
             } else if s
                 .enemies()
                 .iter()
@@ -233,19 +244,16 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
             assert!(kept.loaded(), "a save made in play fails loaded()");
         }
         run.peak = run.peak.max(p.s.count);
-        if near_boss(&p.s) {
-            if boss_t == 0 {
-                run.at_boss = p.s.count;
+        if near_big(&p.s) {
+            if big_t == 0 {
+                run.at_big = p.s.count;
             }
-            boss_t += 20;
+            big_t += 20;
         }
         if ev & wg::EV_LEVEL != 0 {
-            run.boss_s = boss_t as f32 / 1000.0;
-            boss_t = 0;
-            if !endless {
-                run.won = true;
-                break;
-            }
+            run.big_s = big_t as f32 / 1000.0;
+            run.won = true;
+            break;
         }
         if ev & wg::EV_GAMEOVER != 0 {
             run.died = cause;
@@ -256,7 +264,7 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
     run.end = p.s.count;
     run.time_s = t as f32 / 1000.0;
     run.score = p.s.score;
-    run.bosses = p.s.bosses;
+    run.bigs = p.s.bigs;
     run
 }
 
@@ -281,12 +289,12 @@ fn levels() {
             cleared[n][level as usize] = won.len() as i32;
             let per = won.len().max(1) as i32;
             println!(
-                "  level {:2}: won {:2} of {}, {:4} at the boss, {:4.1}s on it, {:4} left{}",
+                "  level {:2}: won {:2} of {}, {:4} at the first big one, {:4.1}s near them, {:4} left{}",
                 level + 1,
                 won.len(),
                 runs.len(),
-                won.iter().map(|r| r.at_boss).sum::<i32>() / per,
-                won.iter().map(|r| r.boss_s).sum::<f32>() / per as f32,
+                won.iter().map(|r| r.at_big).sum::<i32>() / per,
+                won.iter().map(|r| r.big_s).sum::<f32>() / per as f32,
                 won.iter().map(|r| r.end).sum::<i32>() / per,
                 if lost.is_empty() {
                     String::new()
@@ -334,13 +342,13 @@ fn endless() {
             let r = play(0, true, &sk, seed, 3600.0);
             ended.push(r.time_s < 3600.0);
             line += &format!(
-                "  {:5.0} m {} bosses ({}, peak {})",
-                r.d, r.bosses, r.died, r.peak
+                "  {:5.0} m {} big ones ({}, peak {})",
+                r.d, r.bigs, r.died, r.peak
             );
             far.push(r.d);
         }
         println!("{line}");
-        // it ends: no run lasts an hour (a flawless one can last most of it), and a sharp player gets past a few bosses
+        // it ends: no run lasts an hour (a flawless one can last most of it), and a sharp player gets past a kilometre
         assert!(ended.iter().all(|&e| e), "{line}");
         if sk.name == "sharp" {
             assert!(far.iter().all(|&d| d > 1000.0), "{line}");
@@ -387,7 +395,8 @@ fn trace() {
                 })
                 .collect();
             let en = s.enemies().iter().filter(|e| e.up()).count();
-            println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} boss {}/{} plan {:.0}/{} fire {:.2} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, s.boss.hp, s.boss.hp_max, s.expect, s.expect_gun, s.fire() / s.planned_fire(s.d), near.join(" "));
+            let big = s.nearest_big().unwrap_or(&NO_BIG);
+            println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} big {}/{} plan {:.0}/{} fire {:.2} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, big.hp, big.hp_max, s.expect, s.expect_gun, s.fire() / s.planned_fire(s.d), near.join(" "));
         }
         if ev & wg::EV_GAMEOVER != 0 || (ev & wg::EV_LEVEL != 0 && !endless) {
             println!("ev {ev}");
@@ -444,7 +453,7 @@ fn aimed_fire() {
 }
 
 /// Each gun a crate hands out beats the one before at a barrel, crate, gate
-/// or boss, and at a crowd of grunts.
+/// or mech, and at a crowd of grunts.
 #[test]
 fn guns_climb() {
     let crowd = |w: usize| {

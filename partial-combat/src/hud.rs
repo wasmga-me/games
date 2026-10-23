@@ -1,5 +1,5 @@
-//! The game's own picture over the 3D scene: the level and how far to its
-//! boss (or the distance, endless), the score, and a word in the middle as
+//! The game's own picture over the 3D scene: the level and how far along
+//! its pier (or the distance, endless), the score, and a word in the middle as
 //! things happen. Drawn on a clear screen in overlay mode, so the page lays
 //! it over the scene; only redrawn when what it shows changes, and then only
 //! the band at the top it draws in, which is all the page uploads and shows.
@@ -28,19 +28,6 @@ fn banner_text(p: &Combat) -> String {
     let s = &p.s;
     match s.banner {
         B_LEVEL => level_text(s.banner_v),
-        B_CLEAR if s.endless() => wg::tr(&[
-            "Boss defeated",
-            "击败首领",
-            "ボス撃破",
-            "보스 격파",
-            "Jefe derrotado",
-            "Chefe derrotado",
-            "Boss vaincu",
-            "Boss besiegt",
-            "Босс побеждён",
-            "擊敗首領",
-        ])
-        .into(),
         B_CLEAR => wg::tr(&[
             "Level cleared",
             "过关",
@@ -59,14 +46,14 @@ fn banner_text(p: &Combat) -> String {
     }
 }
 
-/// How far the squad is to the boss, 0 to 1.
+/// How far the squad is along the level's pier, 0 to 1.
 fn progress(s: &Save) -> f32 {
-    if s.phase != P_RUN || s.boss.state == 3 {
+    if s.phase != P_RUN {
         return 1.0;
     }
-    // before the boss is laid, the pier laid so far is most of the way
-    let end = if s.boss.state != 0 {
-        s.boss.front()
+    // before its end is laid, the pier laid so far is most of the way
+    let end = if s.end_d > 0.0 {
+        s.end_d
     } else {
         s.next_d + 40.0
     };
@@ -140,7 +127,7 @@ pub fn draw(p: &mut Combat, s: &mut Screen) {
     };
     text(s, &left, x0 + 16.0, top, 17.0, 0, 1.0);
     text(s, &st.score.to_string(), x1 - 16.0, top, 21.0, 2, 1.0);
-    // how far to the boss
+    // how far to the end of the level
     let bw = (w * 0.34).min(180.0);
     let bx = x0 + (w - bw) / 2.0;
     let by = top - 4.0;

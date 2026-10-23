@@ -1,28 +1,37 @@
 //! Laying the pier ahead of the squad, a chunk at a time: gate pairs, the
-//! tan army in ranks, barrels, gun crates, ships firing from the sea, and
-//! the boss in the army that ends a level. A level is laid from its own seed, so it is
-//! the same every time; the endless pier from the run's.
+//! tan army in ranks with mechs and giants among it, barrels, gun crates
+//! and ships firing from the sea, to the biggest army that ends a level. A
+//! level is laid from its own seed, so it is the same every time; the
+//! endless pier from the run's.
 //!
 //! As it lays the pier it keeps `expect`, the squad a player who picks well
-//! would have by then, and sizes enemies, barrels and the boss by it.
+//! would have by then, and sizes everything on it by that.
 use crate::*;
 
 /// how far ahead of the squad the pier is laid
 const AHEAD: f32 = 95.0;
-/// seconds of the squad expected's fire a boss soaks up
-const BOSS_SECONDS: f32 = 16.0;
-/// how many soldiers a boss knocks out before it falls to its stamps' toll
-/// alone, as a share of the squad expected to meet it: more than that squad,
-/// so it has to be shot as it comes
-const PLAN_SHARE: f32 = 1.8;
+/// seconds of the squad expected's fire a mech or giant at the end of a
+/// level soaks up, and how strong one in an army before is against that
+const BIG_SECONDS: f32 = 16.0;
+const LESSER: f32 = 0.25;
+/// how many soldiers a mech or giant knocks out before it falls to its
+/// stamps' toll alone, as a share of the squad expected to meet it: most
+/// of that squad, so it has to be shot as it comes; and the share of that
+/// squad the plan counts one costing a squad that shoots it
+const PLAN_SHARE: f32 = 0.8;
+const BIG_TOLL: f32 = 0.2;
 /// how far ahead of the plan a squad gets before the pier ahead is laid for
 /// it, and how many times a squad far behind the plan is laid for
 const SLACK: f32 = 1.25;
 const BEHIND: f32 = 2.0;
 /// seconds of the squad's fire an army soaks up on its way in, and how
 /// many more on each level harder
-const FIGHT: f32 = 1.3;
-const FIGHT_UP: f32 = 0.05;
+const FIGHT: f32 = 1.4;
+const FIGHT_UP: f32 = 0.045;
+/// metres more room after a level's opening gates on each level harder, so
+/// the squad they make opens fire before an army running faster and
+/// tougher there reaches it
+const OPENING: f32 = 0.6;
 /// the most an army puts on the pier, a level's and far down the endless pier's
 const ARMY: f32 = 120.0;
 const ARMY_FAR: f32 = 220.0;
@@ -34,7 +43,7 @@ const SIDE_X: f32 = HALF * 0.5;
 /// how far out a ship stands off the pier, in water scene.rs put_decor() leaves clear
 const SHIP_X: f32 = HALF + 8.0;
 /// how far apart the tan army stands in its ranks, across and along the
-/// pier, and the least room it leaves round a boss
+/// pier, and the least room it leaves round a mech or giant
 const RANK_X: f32 = 1.5;
 const RANK_D: f32 = 1.4;
 const CROWD_GAP: f32 = 2.6;
@@ -46,15 +55,9 @@ const C_BARREL: i32 = 3;
 const C_SHIP: i32 = 4;
 
 impl Combat {
-    /// Lays the pier on ahead, until a boss is laid: the end of a level, or
-    /// on the endless pier till it is beaten.
+    /// Lays the pier on ahead, to a level's last army or on and on.
     pub fn lay_track(&mut self) {
-        if self.s.boss.state != 0 {
-            return;
-        }
-        // past a boss the endless pier goes on from where the squad got to
-        self.s.next_d = self.s.next_d.max(self.s.d + 12.0);
-        while self.s.boss.state == 0 && self.s.next_d < self.s.d + AHEAD {
+        while self.s.end_d == 0.0 && self.s.next_d < self.s.d + AHEAD {
             self.lay_chunk();
         }
     }
@@ -104,13 +107,11 @@ impl Combat {
             8 + (self.s.level / 2).min(5)
         };
         let k = if self.s.endless() { c % (total + 1) } else { c };
-        if k >= total {
-            self.lay_boss();
-            self.plan(c, self.s.boss.d);
-            return;
-        }
-        // the last stretch before a boss is a gate pair, for one more boost
-        let kind = if k == total - 1 {
+        // the last stretch before a level's last army, or the endless pier's
+        // every so often, is a gate pair for one more boost
+        let kind = if k >= total {
+            C_ENEMY
+        } else if k == total - 1 {
             C_GATES
         } else {
             match k {
@@ -138,14 +139,35 @@ impl Combat {
         };
         let d0 = self.s.next_d;
         let len = match kind {
-            C_GATES => self.lay_gates(d0, hard, c == 0 || k == total - 1),
-            C_ENEMY => self.lay_enemies(d0, hard),
+            C_GATES if c == 0 => self.lay_gates(d0, hard, true) + hard * OPENING,
+            C_GATES => self.lay_gates(d0, hard, k == total - 1),
+            C_ENEMY => {
+                // a mech or giant in a level's last army, and a lesser one
+                // in more of the rest later on, once the squad expected is
+                // big enough to take one, leaving a place on the pier for
+                // the last one
+                let free = self.s.big.iter().filter(|b| b.state == BIG_NONE).count();
+                let big = if k >= total {
+                    1.0
+                } else if self.s.expect >= 30.0
+                    && free > 1
+                    && self.chance((0.15 + hard * 0.03).min(0.6))
+                {
+                    LESSER
+                } else {
+                    0.0
+                };
+                self.lay_enemies(d0, hard, big)
+            }
             C_CRATE => self.lay_crate(d0, hard),
             C_BARREL => self.lay_barrels(d0, hard),
             _ => self.lay_ship(d0, hard),
         };
         self.s.next_d = d0 + len;
         self.plan(c, self.s.next_d);
+        if k >= total && !self.s.endless() {
+            self.s.end_d = self.s.next_d;
+        }
     }
 
     /// Notes what the squad is expected to be past chunk c, which ends at d.
@@ -202,7 +224,7 @@ impl Combat {
             }
         };
         // a level opens with two gates that both help, so a wrong guess there
-        // isn't the end, and the last before the boss is one more boost
+        // isn't the end, and the last before a level's last army is one more boost
         let pair = if boost {
             (add(self), if e >= 3.0 { mul(self) } else { add(self) })
         } else if self.chance((0.55 - hard * 0.02).max(0.3)) {
@@ -259,23 +281,41 @@ impl Combat {
     }
 
     /// An army across the pier, as many as the squad expected cuts down on
-    /// its way in, sometimes behind a TNT barrel.
-    fn lay_enemies(&mut self, d0: f32, hard: f32) -> f32 {
+    /// its way in, sometimes behind a TNT barrel; with a mech or giant in it
+    /// as strong as `big` of the strongest, if more than 0 and one more fits
+    /// on the pier, the army then bigger to match.
+    fn lay_enemies(&mut self, d0: f32, hard: f32, big: f32) -> f32 {
         let e = self.s.expect.max(1.0);
+        let slot = self
+            .s
+            .big
+            .iter()
+            .position(|b| b.state == BIG_NONE)
+            .filter(|_| big > 0.0);
+        let big = if slot.is_some() { big } else { 0.0 };
         // the share of the squad an army costs, more on later levels
         let loss = (0.19 + hard * 0.016).min(0.5);
-        // the endless pier's armies keep growing past what any squad holds off
+        let loss = loss + ((0.3 + hard * 0.012).min(0.55) - loss) * big;
+        // the endless pier's armies keep growing past what any squad holds
+        // off, as far as there is room beside what is left of those before
         let most = if self.s.endless() {
             (ARMY + hard * 3.0).min(ARMY_FAR)
         } else {
             ARMY
         };
-        let fight = FIGHT + hard * FIGHT_UP;
-        let n = self.army_size(hard, fight, most);
+        let room = (MAXE as i32 - self.s.nen - 8).max(0) as f32;
+        let (most, fight) = (
+            most * (1.0 + big),
+            (FIGHT + hard * FIGHT_UP) * (1.0 + 0.3 * big),
+        );
+        let n = self.army_size(hard, fight, most.min(room));
+        // room left round a mech's or giant's legs, which stand about half its width out
+        let kind = big_kind(self.s.level + self.s.chunk);
+        let clear = slot.map_or(0.0, |_| (BODIES[kind as usize].half() + 1.0).max(CROWD_GAP));
         let x = self.rand(-HALF * 0.4, HALF * 0.4);
         let front = d0 + 14.0;
         let first = self.s.nen as usize;
-        let (x, _, deep) = self.lay_army(n, x, front, 0.0, hard);
+        let (x, home, deep) = self.lay_army(n, x, front, clear, hard);
         let lost = self.send_army(first, e * loss, fight);
         if hard >= 1.0 && self.chance(0.5) {
             let tx = (x + self.rand(-1.5, 1.5)).clamp(-HALF + 1.5, HALF - 1.5);
@@ -289,7 +329,37 @@ impl Combat {
             });
         }
         self.s.expect = (e - lost).max(1.0);
+        if let Some(i) = slot {
+            self.lay_big(i, kind, x, home, hard, big);
+            self.s.expect = (self.s.expect - e * big * BIG_TOLL).max(1.0);
+        }
         front - d0 + deep + 8.0
+    }
+
+    /// A mech or giant of kind at x, d in slot i, as tough as `big` of
+    /// BIG_SECONDS of the fire of the squad expected past its army.
+    fn lay_big(&mut self, i: usize, kind: i32, x: f32, d: f32, hard: f32, big: f32) {
+        let toughness = if self.s.endless() {
+            0.6 + hard * 0.035
+        } else {
+            (0.8 + hard * 0.025).min(1.3)
+        };
+        let hp = (BIG_SECONDS * big * toughness * self.dps())
+            .round()
+            .max(30.0) as i32;
+        let e = self.s.expect * big;
+        self.s.big[i] = Big {
+            state: BIG_WAIT,
+            kind,
+            x,
+            d,
+            hp,
+            hp_max: hp,
+            worth: ((e * PLAN_SHARE / share(e)).round() as i32).max(3),
+            flinch_at: hp * 3 / 4,
+            meant: self.s.planned_fire(d - THIN),
+            ..NO_BIG
+        };
     }
 
     /// How many an army numbers: as many as soak up `fight` seconds of the
@@ -307,7 +377,7 @@ impl Combat {
     /// Puts down an army of n in ranks from `front` on back, round x, as wide
     /// as their number calls for: brutes in the middle of its front, the rest
     /// by mix(), each rank from its middle out, with room left in the middle
-    /// for a boss if `clear` > 0. Returns its middle, where a boss stands
+    /// for a mech or giant if `clear` > 0. Returns its middle, where one stands
     /// in it, and how deep it stands.
     fn lay_army(&mut self, n: usize, x: f32, front: f32, clear: f32, hard: f32) -> (f32, f32, f32) {
         let wide = ((n as f32).sqrt() * RANK_X * 1.2).clamp(5.0, HALF * 2.0 - 1.0);
@@ -320,7 +390,7 @@ impl Combat {
         let home = front + (rows - 1) as f32 * RANK_D * 0.5;
         // a brute in a small army, more in a big one, but none against a
         // squad that one would cut down to nothing
-        let brutes = if hard >= 5.0 {
+        let brutes = if hard >= 2.0 {
             (1 + n / 30 + (hard / 12.0) as usize).min((self.s.expect / 20.0) as usize)
         } else {
             0
@@ -485,64 +555,20 @@ impl Combat {
         self.s.expect *= 0.9;
         30.0
     }
-
-    /// The end of a level: the boss in the middle of the biggest army yet,
-    /// which marches on the squad with it.
-    fn lay_boss(&mut self) {
-        let hard = self.hard_at();
-        let e = self.s.expect.max(3.0);
-        // the fire the squad expected brings it, before its army's toll
-        let meant = self.dps();
-        let cost = e * (0.3 + hard * 0.012).min(0.55);
-        let kind = boss_kind(self.s.level);
-        // room left round its legs, which stand about half its width out
-        let m = &BODIES[kind as usize];
-        let clear = (m.half() + 1.0).max(CROWD_GAP);
-        // a third as big again as an army before it, as far as there is
-        // room beside what is left of those
-        let room = (MAXE as i32 - self.s.nen - 8).max(0) as f32;
-        let fight = (FIGHT + hard * FIGHT_UP) * 1.3;
-        let n = self.army_size(hard, fight, (ARMY * 2.0).min(room));
-        let x = self.rand(-3.0, 3.0);
-        // next_d stays at the end of the last gates: the boss wakes once the
-        // squad is past them (Combat::boss_step)
-        let front = self.s.next_d + 8.0;
-        let first = self.s.nen as usize;
-        let (x, home, _) = self.lay_army(n, x, front, clear, hard);
-        let lost = self.send_army(first, cost, fight);
-        // the endless pier goes on past the boss for the squad left
-        self.s.expect = (e - lost).max(3.0);
-        let toughness = if self.s.endless() {
-            0.6 + hard * 0.035
-        } else {
-            (0.8 + hard * 0.025).min(1.3)
-        };
-        let hp = (BOSS_SECONDS * toughness * self.dps()).round().max(30.0) as i32;
-        self.s.boss = Boss {
-            state: 1,
-            kind,
-            x,
-            d: home,
-            hp,
-            hp_max: hp,
-            worth: ((self.s.expect * PLAN_SHARE / share(self.s.expect)).round() as i32).max(3),
-            flinch_at: hp * 3 / 4,
-            meant,
-            ..NO_BOSS
-        };
-    }
 }
 
-/// Each kind's share of an army where the pier is that hard, from the level
-/// it turns up; riflemen and grenadiers first, as they stand at the back.
+/// Each kind's share of an army where the pier is that hard: every kind
+/// from the first level, half its share there and all of it by the sixth;
+/// riflemen and grenadiers first, as they stand at the back.
 fn mix(hard: f32) -> [(i32, f32); 4] {
+    let k = (0.4 + hard * 0.1).min(1.0);
     [
-        (E_RIFLE, 4.0, 0.15),
-        (E_GRENADIER, 7.0, 0.08),
-        (E_HEAVY, 3.0, 0.1),
-        (E_RUNNER, 2.0, 0.2),
+        (E_RIFLE, 0.15),
+        (E_GRENADIER, 0.08),
+        (E_HEAVY, 0.1),
+        (E_RUNNER, 0.2),
     ]
-    .map(|(kind, from, odds)| (kind, if hard >= from { odds } else { 0.0 }))
+    .map(|(kind, odds)| (kind, odds * k))
 }
 
 /// What sums on gates and barrels are sized by for a squad of e: e itself up

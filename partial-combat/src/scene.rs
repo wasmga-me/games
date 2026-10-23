@@ -41,7 +41,7 @@ const LABEL_PILL: u8 = 0;
 const LABEL_GATE: u8 = 1;
 const LABEL_PLAIN: u8 = 2;
 const LABEL_BAR: u8 = 3;
-/// the tan army's and the boss's health bars
+/// the tan army's and the mechs' and giants' health bars
 const HURT: u32 = 0xe04030;
 const INST_LOOP: u8 = 1;
 const INST_NO_SHADOW: u8 = 2;
@@ -376,6 +376,10 @@ const AUTUMN: Place = Place {
     sight_ground: Some(1.0),
 };
 const PLACES: [Place; 4] = [TROPICS, SNOW, DESERT, AUTUMN];
+/// metres of the endless pier along each shore, and how far it takes to
+/// fade into the next
+const SHORE_M: f32 = 400.0;
+const SHORE_FADE: f32 = 40.0;
 
 /// The shore of a stretch of the run, and its light: one look after another each time round.
 fn shore(stage: i32) -> (&'static Place, u32) {
@@ -647,9 +651,10 @@ impl Combat {
         let half = HALF + 1.0 - tall * 5.0;
         let fov = self.fov().to_radians();
         let far = (half / ((fov * 0.5).tan() * self.aspect.max(0.3))).clamp(15.0, 34.0);
-        // back and up, bit by bit from 50 m off the boss to 12, so it and its army fit
-        let b = &s.boss;
-        let gap = if b.state != 0 {
+        // back and up, bit by bit from 50 m off the nearest mech or giant to
+        // 12, so it and its army fit
+        let b = s.nearest_big().unwrap_or(&NO_BIG);
+        let gap = if b.up() {
             (b.d - sd - 12.0).clamp(0.0, 50.0)
         } else {
             50.0
@@ -702,9 +707,9 @@ impl Combat {
             self.follow(0.0);
         }
         // the shore the squad is on (shore()), fading into the next as a
-        // level, or a boss's stretch of the endless pier, clears; the deck goes
-        // over to the next shore's planks meanwhile
-        let (level, u) = (self.s.level.max(0), self.clearing());
+        // level clears or the endless pier runs on; the deck goes over to
+        // the next shore's planks meanwhile
+        let (level, u) = self.stage();
         let (stage, show) = (level + (u > 0.5) as i32, ((u - 0.5).abs() * 4.0).min(1.0));
         let (place, theme) = shore(stage);
         let planks = blend(shore(level).0.planks, shore(level + 1).0.planks, smooth(u));
@@ -713,7 +718,9 @@ impl Combat {
         self.put_things(&mut sc);
         self.put_squad(&mut sc);
         self.put_enemies(&mut sc);
-        self.put_boss(&mut sc);
+        for i in 0..MAXBIG {
+            self.put_big(&mut sc, i);
+        }
         self.put_shots(&mut sc);
         let fov = self.fov();
         let f = |v: f32| v.to_bits();
@@ -775,13 +782,19 @@ impl Combat {
         }
     }
 
-    /// How far through clearing a level the squad is, 0 to 1 (0 while it isn't).
-    fn clearing(&self) -> f32 {
+    /// The shore the squad is on, and how far it has faded into the next, 0
+    /// to 1: through a level clearing, or the last SHORE_FADE of each SHORE_M
+    /// down the endless pier.
+    fn stage(&self) -> (i32, f32) {
         let s = &self.s;
-        if s.phase != P_CLEAR {
-            return 0.0;
+        if s.endless() {
+            let into = s.d % SHORE_M - (SHORE_M - SHORE_FADE);
+            ((s.d / SHORE_M) as i32, (into / SHORE_FADE).max(0.0))
+        } else if s.phase == P_CLEAR {
+            (s.level, (s.phase_ms as f32 / CLEAR_MS as f32).min(1.0))
+        } else {
+            (s.level.max(0), 0.0)
         }
-        (s.phase_ms as f32 / CLEAR_MS as f32).min(1.0)
     }
 
     /// The sea round the pier: buoys, and the shore's rocks, islands, boats
@@ -1169,19 +1182,19 @@ impl Combat {
         }
     }
 
-    fn put_boss(&self, sc: &mut Scene) {
-        let b = &self.s.boss;
-        if b.state == 0 || b.d > self.s.d + 85.0 {
+    fn put_big(&self, sc: &mut Scene, i: usize) {
+        let b = &self.s.big[i];
+        if b.state == BIG_NONE || b.d > self.s.d + 85.0 {
             return;
         }
         let m = b.body();
-        let (clip, t, flags) = if b.state == 3 {
+        let (clip, t, flags) = if b.state == BIG_DOWN {
             (C_DEATH, b.t, 0)
         } else if b.hurt > 0.0 {
             (C_REEL, 0.55 - b.hurt, 0)
-        } else if b.stamp >= 0.0 {
-            (C_JUMP, b.stamp, 0)
-        } else if self.boss_walked {
+        } else if b.jump() >= 0.0 {
+            (C_JUMP, b.jump(), 0)
+        } else if self.walked & 1 << i != 0 && b.stamp < 0.0 {
             (C_WALK, b.walk, INST_LOOP)
         } else {
             (C_IDLE, b.t, INST_LOOP)
@@ -1193,7 +1206,7 @@ impl Combat {
         };
         // a giant going down tips over its side, stiff as a toy, falling faster as it goes
         let (mut x, mut y, mut d, mut roll) = (b.x, DECK, b.d, 0.0);
-        if !m.armoured && b.state == 3 {
+        if !m.armoured && b.state == BIG_DOWN {
             let u = ((b.t - TOPPLE[0]) / (TOPPLE[1] - TOPPLE[0])).clamp(0.0, 1.0);
             let a = PI / 2.0 * u * u;
             let side = b.fall_side();
@@ -1213,8 +1226,14 @@ impl Combat {
         if m.gun >= 0 {
             sc.gun(m.gun, at, fade);
         }
+        if let Some((x, d)) = b.landing() {
+            // where it comes down: a ring that fills as it does, gone once it is down
+            let u = (b.jump() / m.land).clamp(0.0, 1.0);
+            let blink = 0.75 + 0.25 * (self.clock * 9.0).sin();
+            warning(sc, x, d, STAMP_R, u, blink);
+        }
         // its health over its head, as a brute's
-        if b.state != 3 {
+        if b.state != BIG_DOWN {
             sc.bar(
                 5,
                 b.x,

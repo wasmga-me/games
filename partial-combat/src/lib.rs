@@ -2,8 +2,8 @@
 //! A squad of green plastic soldiers runs down a pier over the sea, firing
 //! ahead on its own. Steer it through the gate that grows it most, shoot
 //! barrels for more soldiers and crates for better guns, keep out of shell
-//! fire, outnumber the tan army, and beat the boss marching in among the last
-//! of it. Twenty levels, or one endless pier.
+//! fire, and outnumber the tan army and the mechs and giants marching in
+//! among it. Twenty levels, or one endless pier.
 //!
 //! Runs on the wg engine, drawn in 3D: every frame the page reads the scene
 //! from wg3d_scene (scene.rs) and draws it, and lays this module's own
@@ -20,7 +20,7 @@ use wg::{Game, Input, Pointer, Rng, Screen};
 /// 4: lanes and holes laid in 5 m tiles, bigger crates;
 /// 5: heavies and grenadiers, each tan soldier with its own hp_max and size;
 /// 6: no holes or arenas, nobody falling;
-/// 7: armies of hundreds, and a boss that marches in with its own rather than stopping the squad
+/// 7: armies of hundreds, with mechs and giants among them in place of a boss at the end
 const VERSION: u32 = 7;
 
 /// options, in catalog order: mode, level to start at
@@ -100,7 +100,7 @@ const THIN: f32 = 55.0;
 pub const FADE: f32 = 0.6;
 /// how near the squad riflemen and grenadiers start firing
 pub const STAND_RANGE: f32 = 26.0;
-/// how near the squad the rest of the tan army, and its boss, march on it
+/// how near the squad the rest of the tan army, its mechs and giants too, march on it
 const MARCH: f32 = 34.0;
 
 // things on the pier
@@ -392,12 +392,14 @@ impl Shell {
     }
 }
 
-/// how far round where a boss stamps soldiers are knocked out
+/// how far round where a mech or giant stamps soldiers are knocked out
 const STAMP_R: f32 = 3.4;
-/// how many times the fire it was sized for a squad meeting a boss can have and still find it as tough
-const BOSS_UP: f32 = 4.0;
+/// how many times the fire it was sized for a squad meeting a mech or giant can have and still find it as tough
+const BIG_UP: f32 = 4.0;
+/// the most mechs and giants on the pier at once
+pub const MAXBIG: usize = 4;
 
-/// A boss's body: its model (scene.rs MODELS) and tint; as its clips have
+/// A mech's or giant's body: its model (scene.rs MODELS) and tint; as its clips have
 /// it, the walk's loop (s), how far a foot goes back a second at the clip's
 /// pace (m at scale 1), and when in its stamp (the jump clip) the feet come
 /// down and how long it lasts (s); then the size it is drawn at, and at scale 1
@@ -425,11 +427,11 @@ impl Body {
         self.width * self.scale * 0.5
     }
 }
-/// how big a mech boss is drawn
-pub const BOSS_SCALE: f32 = 1.9;
+/// how big a mech is drawn
+pub const BIG_SCALE: f32 = 1.9;
 /// the first kinds are mechs, the rest giants: people from the soldiers' pack (pack.mjs makes their jump and fall)
 const MECHS: i32 = 4;
-/// the bosses are tan plastic like the army they lead, each a shade of its own
+/// mechs and giants are tan plastic like the army they march with, each a shade of its own
 const fn tint(rgb: u32) -> u32 {
     scene::rgba(rgb, 225)
 }
@@ -443,7 +445,7 @@ pub const BODIES: [Body; 8] = {
         stride: 8.6,
         land: 0.5,
         leap: 0.833,
-        scale: BOSS_SCALE,
+        scale: BIG_SCALE,
         height: 6.0,
         width: 2.0,
         foot: 1.0,
@@ -512,31 +514,38 @@ pub const BODIES: [Body; 8] = {
         },
     ]
 };
-/// A level's boss: a mech and a giant by turns.
-pub fn boss_kind(level: i32) -> i32 {
+/// The n-th mech or giant: a mech and a giant by turns.
+pub fn big_kind(n: i32) -> i32 {
     let giants = BODIES.len() as i32 - MECHS;
-    if level % 2 == 0 {
-        level / 2 % MECHS
+    if n % 2 == 0 {
+        n / 2 % MECHS
     } else {
-        MECHS + level / 2 % giants
+        MECHS + n / 2 % giants
     }
 }
 /// when a giant going down starts to tip over, and when it hits the deck (s)
 pub const TOPPLE: [f32; 2] = [0.25, 1.15];
-/// the ping of a round off the boss's armour
+/// the ping of a round off a mech's armour
 const CLANG: u32 = 0xff_70d0ff;
 /// blast(): a TNT barrel's, meant for the enemy; a grenade's, which spares the tan army
 const BLAST_TNT: u32 = 1;
 const BLAST_FOE: u32 = 2;
-/// A boss's flash runs from 1 down to this before it can blink again: a tenth of a second lit, then a gap.
+/// A mech's or giant's flash runs from 1 down to this before it can blink again: a tenth of a second lit, then a gap.
 const BLINK_GAP: f32 = -3.0;
 
-/// The tan army's biggest: it marches in among a crowd of its soldiers and
-/// fights the squad hand to hand, stamping on the front of it.
+/// The tan army's biggest, a mech or a giant: it marches in among a crowd
+/// of its soldiers and fights the squad hand to hand, stamping on the front of it.
+/// Big.state: no mech or giant in the slot, one waiting in its army, marching
+/// on the squad, going down
+pub const BIG_NONE: i32 = 0;
+pub const BIG_WAIT: i32 = 1;
+pub const BIG_MARCH: i32 = 2;
+pub const BIG_DOWN: i32 = 3;
+
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct Boss {
-    /// 0 none, 1 waiting, 2 marching on the squad, 3 going down
+pub struct Big {
+    /// one of BIG_*
     pub state: i32,
     /// which body (BODIES)
     pub kind: i32,
@@ -548,9 +557,11 @@ pub struct Boss {
     pub worth: i32,
     /// seconds in its state
     pub t: f32,
-    /// till it can stamp again, and how far into a stamp it is (below 0, not stamping)
+    /// till it can stamp again, how far into a stamp it is (below 0, not
+    /// stamping), and how long that stamp holds, its mark showing, before it leaps
     pub cool: f32,
     pub stamp: f32,
+    pub hold: f32,
     /// lit when above 0, see BLINK_GAP
     pub flash: f32,
     /// which way it faces (0 the squad)
@@ -560,10 +571,11 @@ pub struct Boss {
     /// a flinch under way (s), and the hp below which it flinches next
     pub hurt: f32,
     pub flinch_at: i32,
-    /// the squad's fire (damage a second) its hp was set for
+    /// the squad's fire (damage a second) the plan has THIN short of it, as
+    /// Enemy.meant; 0 once its hp is set to the squad's
     pub meant: f32,
 }
-impl Boss {
+impl Big {
     pub fn body(&self) -> &'static Body {
         &BODIES[self.kind as usize]
     }
@@ -576,9 +588,22 @@ impl Boss {
     pub fn gap(&self) -> f32 {
         self.body().half() + 0.6
     }
-    /// Where its front is, which it stamps on and the squad aims at.
+    /// Where its front is, which it stamps on.
     pub fn front(&self) -> f32 {
         self.d - self.gap()
+    }
+    /// Waiting in its army or marching on the squad.
+    pub fn up(&self) -> bool {
+        self.state == BIG_WAIT || self.state == BIG_MARCH
+    }
+    /// Seconds into a stamp's jump, once it has held its moment (less till then).
+    pub fn jump(&self) -> f32 {
+        self.stamp - self.hold
+    }
+    /// Where a stamp under way comes down, till it does.
+    pub fn landing(&self) -> Option<(f32, f32)> {
+        (self.state == BIG_MARCH && self.stamp >= 0.0 && self.jump() < self.body().land)
+            .then(|| (self.x, self.front()))
     }
     /// which way a giant tips over, to its left (1) or right (-1):
     /// the side nearer the pier's middle, and a little away from the camera
@@ -603,7 +628,6 @@ pub struct Save {
     pub track_rng: Rng,
     pub phase: i32,
     pub phase_ms: i32,
-    /// the level, or in endless the bosses beaten so far
     pub level: i32,
     pub time_ms: i32,
     pub score: i32,
@@ -612,7 +636,8 @@ pub struct Save {
     pub cleared: i32,
     pub cleared_score: i32,
     pub kills: i32,
-    pub bosses: i32,
+    /// mechs and giants beaten
+    pub bigs: i32,
     pub biggest: i32,
     pub count: i32,
     pub weapon: i32,
@@ -627,6 +652,8 @@ pub struct Save {
     /// the pier is laid out up to here; chunks laid so far; the squad's size the layout expects
     pub next_d: f32,
     pub chunk: i32,
+    /// where a level's pier ends, once its last army is laid (0 till then)
+    pub end_d: f32,
     pub expect: f32,
     pub expect_gun: i32,
     /// where each of the last chunks laid ends (0 for none), and the size
@@ -646,14 +673,14 @@ pub struct Save {
     pub bul: [Bullet; MAXB],
     pub nshell: i32,
     pub shell: [Shell; MAXSH],
-    pub boss: Boss,
+    pub big: [Big; MAXBIG],
 }
 unsafe impl wg::Plain for Sol {}
 unsafe impl wg::Plain for Enemy {}
 unsafe impl wg::Plain for Thing {}
 unsafe impl wg::Plain for Bullet {}
 unsafe impl wg::Plain for Shell {}
-unsafe impl wg::Plain for Boss {}
+unsafe impl wg::Plain for Big {}
 unsafe impl wg::Plain for Save {}
 
 const NO_SOL: Sol = Sol {
@@ -714,8 +741,8 @@ const NO_SHELL: Shell = Shell {
     t_max: 1.0,
     kind: 0,
 };
-pub const NO_BOSS: Boss = Boss {
-    state: 0,
+pub const NO_BIG: Big = Big {
+    state: BIG_NONE,
     kind: 0,
     x: 0.0,
     d: 0.0,
@@ -725,6 +752,7 @@ pub const NO_BOSS: Boss = Boss {
     t: 0.0,
     cool: 0.0,
     stamp: -1.0,
+    hold: 0.0,
     flash: 0.0,
     yaw: 0.0,
     walk: 0.0,
@@ -749,7 +777,7 @@ impl Save {
             cleared: -1,
             cleared_score: 0,
             kills: 0,
-            bosses: 0,
+            bigs: 0,
             biggest: 0,
             count: 0,
             weapon: 0,
@@ -761,6 +789,7 @@ impl Save {
             drag: [0.0; 3],
             next_d: 0.0,
             chunk: 0,
+            end_d: 0.0,
             expect: 0.0,
             expect_gun: 0,
             plan_at: [[0.0; 3]; PLANS],
@@ -778,7 +807,7 @@ impl Save {
             bul: [NO_BULLET; MAXB],
             nshell: 0,
             shell: [NO_SHELL; MAXSH],
-            boss: NO_BOSS,
+            big: [NO_BIG; MAXBIG],
         }
     }
     pub fn endless(&self) -> bool {
@@ -808,6 +837,13 @@ impl Save {
             3
         }
     }
+    /// The nearest mech or giant up, if any.
+    pub fn nearest_big(&self) -> Option<&Big> {
+        self.big
+            .iter()
+            .filter(|b| b.up())
+            .min_by(|a, b| a.d.total_cmp(&b.d))
+    }
     /// The plan for the last chunk that ends by d, if any.
     pub fn plan_by(&self, d: f32) -> Option<[f32; 3]> {
         self.plan_at
@@ -831,17 +867,9 @@ impl Save {
     /// How hard the pier is at d: the level, or in endless also how far it has come.
     pub fn hardness_at(&self, d: f32) -> f32 {
         if self.endless() {
-            d / 160.0 + self.level as f32
+            d / 100.0
         } else {
             self.level as f32
-        }
-    }
-    /// How fast the squad goes on (m/s): its speed, easing to a stop as a boss goes down in front of it.
-    pub fn pace(&self) -> f32 {
-        if self.boss.state == 3 {
-            self.speed * (1.0 - self.boss.t / 0.6).max(0.0)
-        } else {
-            self.speed
         }
     }
     /// How many soldiers are still standing.
@@ -870,7 +898,7 @@ pub fn enemy_hp(kind: i32, hard: f32) -> i32 {
     }
 }
 
-/// How fast a tan soldier of kind marches on the squad where the pier is that hard (m/s); the boss keeps a grunt's pace.
+/// How fast a tan soldier of kind marches on the squad where the pier is that hard (m/s); a mech or giant keeps a grunt's pace.
 pub fn march_speed(kind: i32, hard: f32) -> f32 {
     let base = match kind {
         E_RUNNER => 6.5,
@@ -959,8 +987,8 @@ pub struct Combat {
     /// seconds shown, for the sea and things bobbing on it; the screen's shape
     pub clock: f32,
     pub aspect: f32,
-    /// the boss stepped this frame: its walk plays
-    pub boss_walked: bool,
+    /// which mechs and giants (a bit each, by slot) stepped this frame: their walks play
+    pub walked: u32,
 }
 
 impl Combat {
@@ -992,6 +1020,7 @@ impl Combat {
         s.fire_acc = 0.0;
         s.next_d = 12.0;
         s.chunk = 0;
+        s.end_d = 0.0;
         s.expect = s.count as f32;
         s.expect_gun = 0;
         s.plan_at = [[0.0; 3]; PLANS];
@@ -1000,7 +1029,7 @@ impl Combat {
         s.nthing = 0;
         s.nbul = 0;
         s.nshell = 0;
-        s.boss = NO_BOSS;
+        s.big = [NO_BIG; MAXBIG];
         s.track_rng = if s.endless() {
             Rng::new(s.rng.next())
         } else {
@@ -1099,7 +1128,7 @@ impl Combat {
     /// One step of the rules, dt seconds long.
     fn step(&mut self, input: &Input, dt: f32) -> u32 {
         let mut ev = 0;
-        self.boss_walked = false;
+        self.walked = 0;
         self.s.phase_ms += (dt * 1000.0) as i32;
         self.s.banner_ms += (dt * 1000.0) as i32;
         self.s.shake = (self.s.shake - dt * 2.5).max(0.0);
@@ -1110,23 +1139,20 @@ impl Combat {
                 return 0;
             }
             P_CLEAR => {
+                // the squad slows to a stop, and one shot down as it got
+                // there still goes down
+                self.s.d += self.s.speed * (1.0 - self.s.phase_ms as f32 / 600.0).max(0.0) * dt;
                 self.move_soldiers(dt);
-                self.s.boss.t += dt;
+                for i in 0..MAXBIG {
+                    self.big_step(i, dt);
+                }
                 if self.s.phase_ms > 600 && self.s.phase_ms - (dt * 1000.0) as i32 <= 600 {
                     let (x, d) = (self.s.cx, self.s.d);
                     self.fx(scene::FX_CONFETTI, x, DECK, d - 2.0, 0.0, 0.0, 0.0, 0);
                 }
                 if self.s.phase_ms >= CLEAR_MS {
-                    if self.s.endless() {
-                        // on down the pier
-                        self.s.phase = P_RUN;
-                        self.s.phase_ms = 0;
-                        self.s.boss = NO_BOSS;
-                        self.s.level += 1;
-                    } else {
-                        self.s.level += 1;
-                        self.begin_level();
-                    }
+                    self.s.level += 1;
+                    self.begin_level();
                 }
                 return 0;
             }
@@ -1134,7 +1160,7 @@ impl Combat {
         }
         self.s.time_ms += (dt * 1000.0) as i32;
         self.steer(input, dt);
-        self.s.d += self.s.pace() * dt;
+        self.s.d += self.s.speed * dt;
         self.lay_track();
         self.move_soldiers(dt);
         self.fire(dt);
@@ -1142,9 +1168,20 @@ impl Combat {
         self.move_enemies(dt);
         self.pass_things(dt);
         self.move_shells(dt);
-        ev |= self.boss_step(dt);
+        for i in 0..MAXBIG {
+            self.big_step(i, dt);
+        }
         self.drop_behind();
-        if self.s.count <= 0 && self.s.phase != P_CLEAR {
+        // a level is won at the end of its pier, past its last army and with
+        // no mech or giant still standing
+        if self.s.end_d > 0.0
+            && self.s.d > self.s.end_d
+            && self.s.count > 0
+            && !self.s.big.iter().any(Big::up)
+        {
+            ev |= self.level_cleared();
+        }
+        if self.s.count <= 0 {
             self.s.count = 0;
             for i in 0..self.s.nsol as usize {
                 if self.s.sol[i].state == S_OK {
@@ -1266,23 +1303,27 @@ impl Combat {
         if self.s.fire_acc < 1.0 {
             return;
         }
-        // the tan army and its boss in range first, each shot at the one
+        // the tan army, mechs and giants too, in range first, each shot at the one
         // nearest the soldier firing it; else the nearest barrel, crate or TNT
         // across the squad's way, so however wide the squad has spread, all
         // of it shoots at what it is running into
         let sd = self.s.d;
         let reach = sd + g.range * 0.8;
-        let mut foes = [(0.0, 0.0); MAXE + 1];
+        let mut foes = [(0.0, 0.0); MAXE + MAXBIG];
         let mut nfoe = 0;
-        let b = &self.s.boss;
-        let boss = (b.state == 2).then(|| (b.x, b.d));
+        let bigs = self
+            .s
+            .big
+            .iter()
+            .filter(|b| b.state == BIG_MARCH)
+            .map(|b| (b.x, b.d));
         for (x, d) in self
             .s
             .enemies()
             .iter()
             .filter(|e| e.up())
             .map(|e| (e.x, e.d))
-            .chain(boss)
+            .chain(bigs)
         {
             if d > sd && d < reach {
                 foes[nfoe] = (x, d);
@@ -1472,21 +1513,27 @@ impl Combat {
             self.hit_thing(k, b.dmg);
             return true;
         }
-        // the boss, its legs and body: the same box whichever it is, so each is as easy to hit
-        let boss = self.s.boss;
-        let (wide, deep) = (0.85 * BOSS_SCALE, 0.7 * BOSS_SCALE);
-        if boss.state == 2
-            && (b.x - boss.x).abs() < wide
-            && boss.d >= lo - deep
-            && boss.d <= hi + deep
-        {
-            let y = DECK + self.s.frand(0.18, 0.6) * boss.tall();
-            if boss.body().armoured {
+        // the nearest mech or giant, legs and body: the same box whichever it
+        // is, so each is as easy to hit
+        let (wide, deep) = (0.85 * BIG_SCALE, 0.7 * BIG_SCALE);
+        let hit = (0..MAXBIG)
+            .filter(|&i| {
+                let g = &self.s.big[i];
+                g.state == BIG_MARCH
+                    && (b.x - g.x).abs() < wide
+                    && g.d >= lo - deep
+                    && g.d <= hi + deep
+            })
+            .min_by(|&i, &j| self.s.big[i].d.total_cmp(&self.s.big[j].d));
+        if let Some(i) = hit {
+            let g = self.s.big[i];
+            let y = DECK + self.s.frand(0.18, 0.6) * g.tall();
+            if g.body().armoured {
                 self.fx(
                     scene::FX_CLANG,
                     b.x,
                     y,
-                    boss.d - deep,
+                    g.d - deep,
                     // a shot's damage, not all the bullet carries
                     WEAPONS[b.gun as usize].dmg as f32,
                     0.0,
@@ -1494,28 +1541,19 @@ impl Combat {
                     CLANG,
                 );
             } else {
-                self.fx(
-                    scene::FX_HIT,
-                    b.x,
-                    y,
-                    boss.d - deep,
-                    0.0,
-                    0.0,
-                    0.0,
-                    scene::TAN,
-                );
+                self.fx(scene::FX_HIT, b.x, y, g.d - deep, 0.0, 0.0, 0.0, scene::TAN);
             }
             let hurt = b.dmg;
-            let boss = &mut self.s.boss;
-            boss.hp = (boss.hp - hurt).max(0);
+            let g = &mut self.s.big[i];
+            g.hp = (g.hp - hurt).max(0);
             // under steady fire it blinks now and then rather than stays white
-            if boss.flash <= BLINK_GAP {
-                boss.flash = 1.0;
+            if g.flash <= BLINK_GAP {
+                g.flash = 1.0;
             }
-            let dead = boss.hp == 0;
+            let dead = g.hp == 0;
             self.add_score(hurt);
             if dead {
-                self.boss_down();
+                self.big_down(i);
             }
             return true;
         }
@@ -1906,7 +1944,7 @@ impl Combat {
     /// Where the squad will be in `flight` seconds, give or take wide across and long along.
     fn ahead(&mut self, flight: f32, wide: f32, long: f32) -> (f32, f32) {
         let x = (self.s.cx + self.s.frand(-wide, wide)).clamp(-HALF + 0.8, HALF - 0.8);
-        let d = self.s.d + self.s.pace() * flight + self.s.frand(-long, long);
+        let d = self.s.d + self.s.speed * flight + self.s.frand(-long, long);
         (x, d)
     }
 
@@ -1977,24 +2015,29 @@ impl Combat {
         }
     }
 
-    /// The boss waits among its crowd and marches on the squad with it; once
-    /// at the squad's front it keeps there, pushed back as the squad comes
-    /// on, and stamps on the soldiers in front of it now and then.
-    fn boss_step(&mut self, dt: f32) -> u32 {
+    /// A mech or giant waits in its army and marches on the squad with it;
+    /// once at the squad's front it keeps there, pushed back as the squad
+    /// comes on, and stamps on the soldiers in front of it now and then.
+    fn big_step(&mut self, i: usize, dt: f32) {
         let (hard, sd) = (self.s.hardness(), self.s.d);
-        let b = &mut self.s.boss;
+        let b = &mut self.s.big[i];
         b.t += dt;
         b.flash = (b.flash - dt * 10.0).max(BLINK_GAP);
         match b.state {
-            // the squad near, and past the gates before its army, where
-            // lay_boss() left the pier laid to
-            1 if b.d - sd < MARCH && sd > self.s.next_d => {
-                self.boss_wake();
-                return 0;
+            BIG_WAIT => {
+                let near = b.d - sd;
+                if b.meant > 0.0 && near < THIN {
+                    self.big_sized(i);
+                }
+                if near < MARCH {
+                    let b = &mut self.s.big[i];
+                    (b.state, b.t) = (BIG_MARCH, 0.0);
+                }
+                return;
             }
-            2 => {}
-            3 => return self.boss_falling(dt),
-            _ => return 0,
+            BIG_MARCH => {}
+            BIG_DOWN => return self.big_falling(i, dt),
+            _ => return,
         }
         let enraged = b.hp * 2 < b.hp_max;
         if enraged && ticks(b.t, dt, 5.0) {
@@ -2012,7 +2055,7 @@ impl Combat {
             );
         }
         // it reels as each quarter of its hp goes, unless in the middle of a stamp
-        let b = &mut self.s.boss;
+        let b = &mut self.s.big[i];
         if b.hp < b.flinch_at && b.stamp < 0.0 {
             while b.hp < b.flinch_at {
                 b.flinch_at -= (b.hp_max / 4).max(1);
@@ -2034,39 +2077,43 @@ impl Combat {
             self.fx(scene::FX_BLAST, x, DECK + 0.6 * tall, d, 0.5, 0.0, 0.0, 0);
             self.s.shake = self.s.shake.max(0.2);
         }
-        self.s.boss.hurt = (self.s.boss.hurt - dt).max(0.0);
-        self.boss_move(dt, hard);
-        self.boss_stamp(dt, hard, enraged);
-        0
+        let b = &mut self.s.big[i];
+        b.hurt = (b.hurt - dt).max(0.0);
+        self.big_move(i, dt, hard);
+        self.big_stamp(i, dt, hard, enraged);
     }
 
-    /// The boss sets off with its army: a squad that comes firing less than
-    /// planned meets a weaker boss, but not by as much, and one firing more
-    /// a tougher one.
-    fn boss_wake(&mut self) {
+    /// Sizes a mech or giant to the squad coming at it, as its army is
+    /// thinned: a squad firing less than planned meets a weaker one, but
+    /// not by as much, and one firing more a tougher one that stamps on more.
+    fn big_sized(&mut self, i: usize) {
         let fire = self.s.fire();
-        let b = &mut self.s.boss;
+        let b = &mut self.s.big[i];
         let k = fire / b.meant;
-        let k = if k < 1.0 { k.sqrt() } else { k.min(BOSS_UP) };
+        let k = if k < 1.0 { k.sqrt() } else { k.min(BIG_UP) };
         b.hp = ((b.hp as f32 * k).round() as i32).max(30);
-        (b.hp_max, b.flinch_at) = (b.hp, b.hp * 3 / 4);
-        (b.state, b.t) = (2, 0.0);
+        b.worth = ((b.worth as f32 * k).round() as i32).max(3);
+        (b.hp_max, b.flinch_at, b.meant) = (b.hp, b.hp * 3 / 4, 0.0);
     }
 
-    /// Once at the squad the boss stamps on the soldiers in front of it as
-    /// often as it can, each it knocks out costing it a blow, as a brute's do.
-    fn boss_stamp(&mut self, dt: f32, hard: f32, enraged: bool) {
-        let b = &mut self.s.boss;
+    /// Once at the squad a mech or giant stamps on the soldiers in front of
+    /// it as often as it can, each it knocks out costing it a blow, as a
+    /// brute's do. It holds a moment first, its mark on the deck, so a squad
+    /// that moves off is missed.
+    fn big_stamp(&mut self, i: usize, dt: f32, hard: f32, enraged: bool) {
+        let b = &mut self.s.big[i];
         let m = b.body();
         if b.stamp < 0.0 {
             b.cool -= dt;
-            if b.cool <= 0.0 && b.hurt == 0.0 && self.boss_close() {
-                self.s.boss.stamp = 0.0;
+            if b.cool <= 0.0 && b.hurt == 0.0 && self.big_close(i) {
+                let b = &mut self.s.big[i];
+                b.stamp = 0.0;
+                b.hold = (0.8 - hard * 0.025).max(0.35) * if enraged { 0.8 } else { 1.0 };
             }
             return;
         }
         b.stamp += dt;
-        if crossed(b.stamp, dt, m.land) {
+        if crossed(b.jump(), dt, m.land) {
             let (x, d, cost) = (b.x, b.front(), blow(b.hp_max, b.worth));
             self.fx(scene::FX_STOMP, x, DECK, d, STAMP_R, 0.0, 0.0, 0);
             self.s.shake = self.s.shake.max(0.6);
@@ -2074,28 +2121,28 @@ impl Combat {
                 let q = self.s.sol[k];
                 if q.state == S_OK && (q.x - x).hypot(q.d - d) < STAMP_R {
                     self.lose(k);
-                    self.s.boss.hp -= cost;
-                    if self.s.boss.hp <= 0 {
+                    self.s.big[i].hp -= cost;
+                    if self.s.big[i].hp <= 0 {
                         break;
                     }
                 }
             }
-            if self.s.boss.hp <= 0 {
-                self.s.boss.hp = 0;
-                self.boss_down();
+            if self.s.big[i].hp <= 0 {
+                self.s.big[i].hp = 0;
+                self.big_down(i);
                 return;
             }
         }
-        let b = &mut self.s.boss;
-        if b.stamp > m.leap {
+        let b = &mut self.s.big[i];
+        if b.jump() > m.leap {
             b.stamp = -1.0;
             b.cool = (0.8 - hard * 0.015).max(0.4) * if enraged { 0.7 } else { 1.0 };
         }
     }
 
-    /// A boss going down, tipping over or in blasts; then the level is won.
-    fn boss_falling(&mut self, dt: f32) -> u32 {
-        let b = &self.s.boss;
+    /// A mech or giant going down, tipping over or in blasts; then it is gone.
+    fn big_falling(&mut self, i: usize, dt: f32) {
+        let b = &self.s.big[i];
         let (t, x, d, tall) = (b.t, b.x, b.d, b.tall());
         let m = b.body();
         if !m.armoured {
@@ -2123,19 +2170,18 @@ impl Combat {
             self.s.shake = self.s.shake.max(0.3);
         }
         if t >= 2.4 {
-            return self.level_cleared();
+            self.s.big[i] = NO_BIG;
         }
-        0
     }
 
-    /// The front of the squad, where the boss stands to stamp on it.
+    /// The front of the squad, where mechs and giants stand to stamp on it.
     fn squad_front(&self) -> f32 {
         self.s.d + radius(self.s.alive() as i32) * 0.9
     }
 
-    /// Whether the boss stands at the squad's front with soldiers under its stamp.
-    fn boss_close(&self) -> bool {
-        let b = &self.s.boss;
+    /// Whether a mech or giant stands at the squad's front with soldiers under its stamp.
+    fn big_close(&self, i: usize) -> bool {
+        let b = &self.s.big[i];
         let (x, d) = (b.x, b.front());
         d <= self.squad_front() + 0.3
             && self
@@ -2145,15 +2191,26 @@ impl Combat {
                 .any(|q| q.state == S_OK && (q.x - x).hypot(q.d - d) < STAMP_R)
     }
 
-    /// The boss walks at its crowd's pace towards the squad's front and across
-    /// to its middle, facing it (not while it reels or stamps), and is pushed
-    /// back once there as the squad comes on: its walk plays as far as it
-    /// goes, backwards when pushed.
-    fn boss_move(&mut self, dt: f32, hard: f32) {
+    /// A mech or giant walks at its crowd's pace towards the squad's front
+    /// and across to its middle, facing it (not while it reels or stamps),
+    /// and is pushed back once there as the squad comes on, or behind another
+    /// in its way: its walk plays as far as it goes, backwards when pushed.
+    fn big_move(&mut self, i: usize, dt: f32, hard: f32) {
         let (cx, sd, front) = (self.s.cx, self.s.d, self.squad_front());
-        let b = &mut self.s.boss;
+        let me = self.s.big[i];
+        let at = front + me.gap();
+        // another in front in the way holds it back where it is, but never
+        // pushes it back
+        let mut held = f32::MIN;
+        for (j, o) in self.s.big.iter().enumerate() {
+            let wide = o.body().half() + me.body().half();
+            let ahead = o.d < me.d || (o.d == me.d && j < i);
+            if j != i && o.state == BIG_MARCH && ahead && (o.x - me.x).abs() < wide {
+                held = held.max(o.d + wide + 0.5);
+            }
+        }
+        let b = &mut self.s.big[i];
         let (x0, d0) = (b.x, b.d);
-        let at = front + b.gap();
         if b.hurt == 0.0 && b.stamp < 0.0 {
             let step = march_speed(E_GRUNT, hard) * dt;
             b.d -= step;
@@ -2161,7 +2218,7 @@ impl Combat {
         }
         let side = HALF - b.body().half();
         b.x = b.x.clamp(-side, side);
-        b.d = b.d.max(at);
+        b.d = b.d.max(at).max(held.min(d0));
         turn(&mut b.yaw, (cx - b.x).atan2(b.d - sd), 1.8 * dt);
         let along = d0 - b.d;
         let went = along.abs().max((b.x - x0).abs());
@@ -2183,7 +2240,7 @@ impl Combat {
             self.fx(scene::FX_STEP, x, DECK, d, m.foot * m.scale, 0.0, 0.0, 0);
             self.s.shake = self.s.shake.max(0.12);
         }
-        self.boss_walked = true;
+        self.walked |= 1 << i;
     }
 
     /// A tan soldier of kind, with its kind's hp (toughen() can raise it).
@@ -2225,39 +2282,23 @@ impl Combat {
         }
     }
 
-    fn boss_down(&mut self) {
-        let b = &mut self.s.boss;
-        (b.state, b.t, b.stamp, b.hurt) = (3, 0.0, -1.0, 0.0);
-        self.hush_shells();
-        // its troops fall with it, worth nothing more
-        for k in 0..self.s.nen as usize {
-            let e = &mut self.s.en[k];
-            if e.up() {
-                (e.state, e.t) = (ES_DOWN, 0.0);
-                let (x, d) = (e.x, e.d);
-                self.fx(scene::FX_PUFF, x, DECK, d, 0.0, 0.0, 0.0, scene::TAN);
-            }
-        }
-        // the enemy's shots in the air fizzle
-        for b in &mut self.s.bul[..self.s.nbul as usize] {
-            if !b.ours() {
-                b.life = 0.0;
-            }
-        }
-        self.s.bosses += 1;
-        let bonus = 500 + 100 * self.s.level;
+    fn big_down(&mut self, i: usize) {
+        let b = &mut self.s.big[i];
+        (b.state, b.t, b.stamp, b.hurt) = (BIG_DOWN, 0.0, -1.0, 0.0);
+        self.s.bigs += 1;
+        let bonus = 200 + 50 * self.s.level;
         self.add_score(bonus);
     }
 
     fn level_cleared(&mut self) -> u32 {
+        // the shells and shots still in the air are done with
+        self.hush_shells();
+        self.s.nbul = 0;
         let bonus = self.s.count * 5;
         self.add_score(bonus);
         self.s.phase = P_CLEAR;
         self.s.phase_ms = 0;
         self.banner(B_CLEAR, 0);
-        if self.s.endless() {
-            return wg::EV_LEVEL;
-        }
         self.s.cleared = self.s.level;
         self.s.cleared_score = self.s.level_score;
         if self.s.level + 1 >= LEVELS {
@@ -2351,7 +2392,7 @@ impl Game for Combat {
             cam_set: false,
             clock: 0.0,
             aspect: 1.0,
-            boss_walked: false,
+            walked: 0,
         }
     }
     fn save(&mut self) -> &mut Save {
@@ -2432,7 +2473,7 @@ impl Game for Combat {
             0 if !s.endless() => s.level + 1,
             1 if s.endless() => s.d as i32,
             2 => s.kills,
-            3 => s.bosses,
+            3 => s.bigs,
             4 => s.biggest,
             5 => s.time_ms,
             _ => -1,
@@ -2461,10 +2502,15 @@ impl Game for Combat {
                     && e.size < 4.0
                     && e.meant.is_finite()
             })
-            && (0..BODIES.len() as i32).contains(&s.boss.kind)
+            && s.big.iter().all(|b| {
+                (BIG_NONE..=BIG_DOWN).contains(&b.state)
+                    && (0..BODIES.len() as i32).contains(&b.kind)
+                    && b.meant.is_finite()
+                    && b.hold.is_finite()
+            })
             && s.plan_at.iter().flatten().all(|v| v.is_finite())
-            && s.boss.meant.is_finite()
             && s.d.is_finite()
+            && s.end_d.is_finite()
             && s.cx.is_finite();
         self.fx.clear();
         self.cam_set = false;
