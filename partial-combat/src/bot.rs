@@ -166,25 +166,17 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
             .map_or(0.0, |e| e.x.clamp(-4.0, 4.0));
     }
     want = want.clamp(-HALF + 0.8, HALF - 0.8);
-    // shells about to land, and the boss about to jump: where they catch the fewest
-    let jump = s.boss.landing().map(|(x, d)| (x, d, JUMP_R));
+    // shells about to land: where they catch the fewest
     let hit = |x: f32| {
         s.shell[..s.nshell as usize]
             .iter()
             .filter(|h| h.t_max - h.t < 1.4)
-            .map(|h| (h.x, h.d, h.r))
-            .chain(jump)
-            .map(|(hx, hd, hr)| (hr + r - (x - hx).hypot(s.d - hd)).max(0.0))
+            .map(|h| (h.r + r - (x - h.x).hypot(s.d - h.d)).max(0.0))
             .sum::<f32>()
     };
-    // one look per threat: the first shell, or where the jump comes down
-    let threat = if s.nshell > 0 {
-        s.shell[0].x
-    } else {
-        (s.boss.td * 2.0).round()
-    };
-    let seen = hash01(threat, salt ^ 7) < sk.dodge;
-    if (s.nshell > 0 || jump.is_some()) && hit(want) > 0.0 && seen {
+    // one look per threat: the first shell
+    let seen = s.nshell > 0 && hash01(s.shell[0].x, salt ^ 7) < sk.dodge;
+    if seen && hit(want) > 0.0 {
         let score = |x: f32| hit(x) * 10.0 + (x - s.cx).abs();
         // weighing places across the pier a quarter metre apart
         if let Some((x, _)) = (-36..=36)
@@ -196,6 +188,11 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
         }
     }
     want
+}
+
+/// The boss marching on the squad and nearly there.
+fn near_boss(s: &Save) -> bool {
+    s.boss.state == 2 && s.boss.d - s.d < 15.0
 }
 
 fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
@@ -210,13 +207,13 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
         if t % sk.look < 20 {
             p.s.tx = aim(&p, sk, seed);
         }
-        let (before, phase) = (p.s.count, p.s.phase);
+        let (before, boss) = (p.s.count, near_boss(&p.s));
         let ev = p.update(&STEP);
         t += 20;
         if p.s.count < before {
             // what was near when soldiers were lost
             let s = &p.s;
-            cause = if phase == P_BOSS {
+            cause = if boss {
                 "boss"
             } else if s
                 .enemies()
@@ -236,7 +233,7 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
             assert!(kept.loaded(), "a save made in play fails loaded()");
         }
         run.peak = run.peak.max(p.s.count);
-        if p.s.phase == P_BOSS {
+        if near_boss(&p.s) {
             if boss_t == 0 {
                 run.at_boss = p.s.count;
             }
@@ -358,10 +355,10 @@ fn trace() {
     let level: i32 = std::env::var("BOT_LEVEL").map_or(1, |v| v.parse().unwrap()) - 1;
     let seed: u32 = std::env::var("BOT_SEED").map_or(1, |v| v.parse().unwrap());
     let endless = level < 0;
-    let sk = if std::env::var("BOT_SKILL").is_ok_and(|v| v == "casual") {
-        CASUAL
-    } else {
-        SHARP
+    let sk = match std::env::var("BOT_SKILL").as_deref() {
+        Ok("casual") => CASUAL,
+        Ok("good") => GOOD,
+        _ => SHARP,
     };
     let mut p = Combat::new();
     p.s.opt = [endless as i32, level.max(0)];
@@ -389,8 +386,8 @@ fn trace() {
                     )
                 })
                 .collect();
-            let en = s.enemies().iter().filter(|e| e.state != ES_DOWN).count();
-            println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} boss {}/{} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, s.boss.hp, s.boss.hp_max, near.join(" "));
+            let en = s.enemies().iter().filter(|e| e.up()).count();
+            println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} boss {}/{} plan {:.0}/{} fire {:.2} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, s.boss.hp, s.boss.hp_max, s.expect, s.expect_gun, s.fire() / s.planned_fire(s.d), near.join(" "));
         }
         if ev & wg::EV_GAMEOVER != 0 || (ev & wg::EV_LEVEL != 0 && !endless) {
             println!("ev {ev}");

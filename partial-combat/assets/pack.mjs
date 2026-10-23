@@ -394,10 +394,10 @@ async function characters(names) {
 // whichever it is. The pack has no leap or fall, so those are made of poses
 // from its other clips: [s, clip, s into that clip], eased from one to the next.
 const GIANTS = { Knight_Golden_Male: "knight", Pirate_Male: "pirate", Goblin_Male: "goblin", Zombie_Male: "zombie" };
-const GIANT_CLIPS = { idle: "idle", walk: "walk", shoot_onehanded: "shoot", victory: "hello", recievehit: "hitrecieve_1" };
+const GIANT_CLIPS = { idle: "idle", walk: "walk", recievehit: "hitrecieve_1" };
 // a crouch, up with its arms raised, down onto its hands, and back up
 const LEAP = [[0, "idle", 0], [0.2, "pickup", 0.3], [0.4, "victory", 0.85], [0.62, "pickup", 0.6], [0.95, "pickup", 0.9], [1.3, "idle", 0]];
-// its feet leave the deck and land (s; PERSON's lift and land in lib.rs) on an arc this high, 3.5 m at
+// its feet leave the deck and land (s; the second is PERSON's land in lib.rs) on an arc this high, 3.5 m at
 // PERSON's scale of 3.4: the rig's root bone goes up, as the feet hang from it
 const LEAP_UP = { bone: "Bone", from: 0.3, to: 0.63, height: 3.5 / 3.4 };
 // caught by a hit and held stiff (the last frame stays), as the game tips it over
@@ -488,7 +488,7 @@ function upIn(node) {
 
 // ---------- bosses: Quaternius' Animated Mech Pack ----------
 const MECHS = { George: "george", Leela: "leela", Mike: "mike", Stan: "stan" };
-const MECH_CLIPS = ["idle", "walk", "shoot", "jump", "hello", "hitrecieve_1", "death"];
+const MECH_CLIPS = ["idle", "walk", "jump", "hitrecieve_1", "death"];
 const TEXTURE = 512;
 
 /** Moves every root node and animation of `from` into `doc`. */

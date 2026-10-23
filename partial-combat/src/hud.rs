@@ -28,10 +28,6 @@ fn banner_text(p: &Combat) -> String {
     let s = &p.s;
     match s.banner {
         B_LEVEL => level_text(s.banner_v),
-        B_BOSS => wg::tr(&[
-            "Boss", "首领", "ボス", "보스", "Jefe", "Chefe", "Boss", "Boss", "Босс", "首領",
-        ])
-        .into(),
         B_CLEAR if s.endless() => wg::tr(&[
             "Boss defeated",
             "击败首领",
@@ -65,21 +61,16 @@ fn banner_text(p: &Combat) -> String {
 
 /// How far the squad is to the boss, 0 to 1.
 fn progress(s: &Save) -> f32 {
-    if s.phase != P_RUN {
+    if s.phase != P_RUN || s.boss.state == 3 {
         return 1.0;
     }
     // before the boss is laid, the pier laid so far is most of the way
-    let end = if s.stop_d > 0.0 {
-        s.stop_d
+    let end = if s.boss.state != 0 {
+        s.boss.front()
     } else {
         s.next_d + 40.0
     };
     (s.d / end.max(1.0)).clamp(0.0, 1.0)
-}
-
-/// The boss's health left, 0 to 1, while it is fought.
-fn boss_left(s: &Save) -> Option<f32> {
-    (s.phase == P_BOSS && s.boss.state == 2).then(|| s.boss.hp as f32 / s.boss.hp_max.max(1) as f32)
 }
 
 fn banner_alpha(s: &Save) -> f32 {
@@ -104,7 +95,6 @@ pub fn picture(p: &Combat) -> u32 {
         s.banner_v,
         (banner_alpha(s) * 40.0) as i32,
         s.phase,
-        boss_left(s).map_or(-1, |f| (f * 160.0) as i32),
     ];
     wg::hash(0, wg::bytes_of(&shown))
 }
@@ -150,19 +140,12 @@ pub fn draw(p: &mut Combat, s: &mut Screen) {
     };
     text(s, &left, x0 + 16.0, top, 17.0, 0, 1.0);
     text(s, &st.score.to_string(), x1 - 16.0, top, 21.0, 2, 1.0);
-    // how far to the boss, then how much the boss has left
+    // how far to the boss
     let bw = (w * 0.34).min(180.0);
     let bx = x0 + (w - bw) / 2.0;
     let by = top - 4.0;
-    let boss = boss_left(st);
-    if boss.is_some() || !st.endless() {
+    if !st.endless() {
         s.rect(bx, by, bw, 8.0, 4.0, wg::hex(0x10141c), 0.4);
-    }
-    if let Some(f) = boss {
-        if f > 0.0 {
-            s.rect(bx, by, (bw * f).max(8.0), 8.0, 4.0, wg::hex(0xe8402a), 0.95);
-        }
-    } else if !st.endless() {
         let f = progress(st);
         if f > 0.0 {
             s.rect(bx, by, (bw * f).max(8.0), 8.0, 4.0, wg::hex(0x8fdc5a), 0.95);
