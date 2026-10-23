@@ -415,14 +415,18 @@ static void reveal(i32 x, i32 y) {
   if (S.opened == S.cols * S.rows - S.mines) win();
 }
 
-/* an open number with as many flags around it as it says opens the rest */
-static void chord(i32 x, i32 y) {
-  if (!on_board(x, y) || S.st[y][x] != OPEN || !S.adj[y][x]) return;
+static i32 flags_around(i32 x, i32 y) {
   i32 f = 0;
   for (i32 j = -1; j <= 1; j++)
     for (i32 i = -1; i <= 1; i++)
       if (on_board(x + i, y + j) && S.st[y + j][x + i] == FLAG) f++;
-  if (f != S.adj[y][x]) return;
+  return f;
+}
+
+/* an open number with as many flags around it as it says opens the rest */
+static void chord(i32 x, i32 y) {
+  if (!on_board(x, y) || S.st[y][x] != OPEN || !S.adj[y][x]) return;
+  if (flags_around(x, y) != S.adj[y][x]) return;
   for (i32 j = -1; j <= 1 && S.phase == PLAY; j++)
     for (i32 i = -1; i <= 1 && S.phase == PLAY; i++) reveal(x + i, y + j);
 }
@@ -809,4 +813,118 @@ WG_EXPORT(wg_state_loaded) i32 wg_state_loaded(void) {
   memset(pop, 0, sizeof pop);
   view_redraw();
   return 1;
+}
+
+/* ---------- accessible board ----------
+ * The page lays a grid of squares over the board for screen readers,
+ * keyboards and switches (the wg_a11y_* exports in wg.h); the words are
+ * the game's own, in the page's language. */
+static char a11y_buf[200];
+static char a11y_said[120];
+
+/* s into p; returns the end */
+static char *put(char *p, const char *s) {
+  while (*s) *p++ = *s++;
+  *p = 0;
+  return p;
+}
+
+/* s with # replaced by n, into p; returns the end */
+static char *put_n(char *p, const char *s, i32 n) {
+  char num[12];
+  for (; *s; s++) {
+    if (*s != '#') { *p++ = *s; continue; }
+    for (const char *d = itoa10(n, num); *d; d++) *p++ = *d;
+  }
+  *p = 0;
+  return p;
+}
+
+static char *cell_label(i32 x, i32 y, char *p) {
+  i32 st = S.st[y][x], n = S.adj[y][x];
+  const char *s;
+  if (S.phase == LOST && S.mine[y][x] && st != FLAG)
+    s = x == S.boom_x && y == S.boom_y
+      ? tr("mine, exploded", "地雷，已引爆", "地雷、爆発", "지뢰, 폭발", "mina, explotó", "mina, explodiu", "mine, explosée", "Mine, explodiert", "мина, взорвалась", "地雷，已引爆")
+      : tr("mine", "地雷", "地雷", "지뢰", "mina", "mina", "mine", "Mine", "мина", "地雷");
+  else if (S.phase == LOST && st == FLAG && !S.mine[y][x])
+    s = tr("wrong flag", "插错的旗", "間違った旗", "잘못된 깃발", "bandera errónea", "bandeira errada", "drapeau erroné", "falsche Flagge", "ошибочный флажок", "插錯的旗");
+  else if (st == FLAG)
+    s = tr("flagged", "已插旗", "旗", "깃발", "con bandera", "com bandeira", "drapeau", "Flagge", "флажок", "已插旗");
+  else if (st == MARK)
+    s = tr("question mark", "问号", "はてな", "물음표", "interrogación", "interrogação", "point d'interrogation", "Fragezeichen", "вопрос", "問號");
+  else if (st == CLOSED)
+    s = tr("covered", "未翻开", "未開封", "닫힘", "cubierta", "coberta", "couverte", "verdeckt", "закрыта", "未翻開");
+  else if (!n)
+    s = tr("empty", "空", "空", "빈 칸", "vacía", "vazia", "vide", "leer", "пусто", "空");
+  else if (n == 1)
+    s = tr("1 mine nearby", "周围 1 颗雷", "周りに地雷 1 個", "주변 지뢰 1개", "1 mina cerca", "1 mina perto", "1 mine autour", "1 Mine daneben", "мин рядом: 1", "周圍 1 顆雷");
+  else
+    s = tr("# mines nearby", "周围 # 颗雷", "周りに地雷 # 個", "주변 지뢰 #개", "# minas cerca", "# minas perto", "# mines autour", "# Minen daneben", "мин рядом: #", "周圍 # 顆雷");
+  return put_n(p, s, n);
+}
+
+/* the board's size, cols << 16 | rows */
+WG_EXPORT(wg_a11y_grid) i32 wg_a11y_grid(void) { return S.cols << 16 | S.rows; }
+WG_EXPORT(wg_a11y_cursor) i32 wg_a11y_cursor(void) { return S.cur_y << 16 | S.cur_x; }
+WG_EXPORT(wg_a11y_focus) void wg_a11y_focus(i32 x, i32 y) {
+  if (!on_board(x, y)) return;
+  S.cur_x = x;
+  S.cur_y = y;
+  S.keyboard = 1;
+}
+WG_EXPORT(wg_a11y_rect) i32 wg_a11y_rect(i32 k) {
+  if (k == 0) return (i32)(VX + S.ox * VK);
+  if (k == 1) return (i32)(VY + S.oy * VK);
+  return (i32)(S.cell * VK * 100);
+}
+WG_EXPORT(wg_a11y_rev) u32 wg_a11y_rev(void) {
+  i32 v[] = {S.phase, S.cols, S.rows, wg_lang_i};
+  return hash_bytes(hash_bytes(0, S.st, sizeof S.st), v, sizeof v);
+}
+WG_EXPORT(wg_a11y_buf) char *wg_a11y_buf(void) { return a11y_buf; }
+
+WG_EXPORT(wg_a11y_text) i32 wg_a11y_text(i32 kind, i32 x, i32 y) {
+  char *p = a11y_buf;
+  *p = 0;
+  if (kind == WG_A11Y_CELL && on_board(x, y)) p = cell_label(x, y, p);
+  else if (kind == WG_A11Y_STATUS) {
+    p = put_n(p, tr("Mines left: #, ", "剩余地雷：#，", "残り地雷 #、", "남은 지뢰 #, ", "Minas restantes: #, ", "Minas restantes: #, ", "Mines restantes : #, ", "Übrige Minen: #, ", "Осталось мин: #, ", "剩餘地雷：#，"), S.mines - S.flags);
+    p = put_n(p, tr("time: # s", "用时 # 秒", "時間 # 秒", "시간 #초", "tiempo: # s", "tempo: # s", "temps : # s", "Zeit: # s", "время: # с", "用時 # 秒"), S.time_ms / 1000);
+    if (S.flag_mode) p = put(p, tr(", flag mode", "，插旗模式", "、旗モード", ", 깃발 모드", ", modo bandera", ", modo bandeira", ", mode drapeau", ", Flaggenmodus", ", режим флажков", "，插旗模式"));
+  } else if (kind == WG_A11Y_SAID) {
+    p = put(p, a11y_said);
+    a11y_said[0] = 0;
+  } else if (kind == WG_A11Y_KEYS)
+    p = put(p, tr("Arrows move, Space opens, X flags, I reads mines left and time.",
+                "方向键移动，空格翻开，X 插旗，I 读出剩余地雷和用时。",
+                "矢印で移動、スペースで開く、X で旗、I で残り地雷と時間。",
+                "화살표로 이동, 스페이스로 열기, X로 깃발, I로 남은 지뢰와 시간.",
+                "Flechas para moverte, Espacio abre, X pone bandera, I lee las minas y el tiempo.",
+                "Setas movem, Espaço abre, X marca bandeira, I lê as minas e o tempo.",
+                "Flèches pour bouger, Espace ouvre, X pose un drapeau, I lit les mines et le temps.",
+                "Pfeile bewegen, Leertaste öffnet, X setzt eine Flagge, I liest Minen und Zeit vor.",
+                "Стрелки двигают, пробел открывает, X ставит флажок, I читает мины и время.",
+                "方向鍵移動，空白鍵翻開，X 插旗，I 讀出剩餘地雷和用時。"));
+  return (i32)(p - a11y_buf);
+}
+
+/* the main action (a = 0) or the flag (a = 1) on a square, said as it lands */
+WG_EXPORT(wg_a11y_act) void wg_a11y_act(i32 x, i32 y, i32 a) {
+  if (S.phase != PLAY || !on_board(x, y)) return;
+  i32 opened = S.opened, st = S.st[y][x];
+  wg_a11y_focus(x, y);
+  S.clicks++;
+  if (a) toggle_flag(x, y);
+  else act(x, y);
+  char *p = a11y_said;
+  if (S.phase == LOST) put(p, tr("Mine! Game over.", "踩雷了！游戏结束。", "地雷！ゲームオーバー。", "지뢰! 게임 오버.", "¡Mina! Fin de la partida.", "Mina! Fim de jogo.", "Mine ! Partie terminée.", "Mine! Spiel vorbei.", "Мина! Игра окончена.", "踩雷了！遊戲結束。"));
+  else if (S.phase == WON) put(p, tr("Board cleared!", "扫雷成功！", "クリア！", "클리어!", "¡Tablero despejado!", "Tabuleiro limpo!", "Grille déminée !", "Feld geräumt!", "Поле разминировано!", "掃雷成功！"));
+  else if (S.opened - opened > 1 || (S.opened > opened && st == OPEN))
+    put_n(p, tr("Squares opened: #", "翻开 # 格", "# マス開いた", "# 칸 열림", "Casillas abiertas: #", "Casas abertas: #", "Cases ouvertes : #", "Felder geöffnet: #", "Открыто клеток: #", "翻開 # 格"), S.opened - opened);
+  else if (S.opened > opened || S.st[y][x] != st) cell_label(x, y, p);
+  else if (a) put(p, tr("Already open", "已经翻开", "開いています", "이미 열림", "Ya abierta", "Já aberta", "Déjà ouverte", "Schon offen", "Уже открыта", "已經翻開"));
+  else if (st == FLAG) put(p, tr("Flagged, X removes the flag", "已插旗，按 X 取下", "旗あり、X で外す", "깃발 있음, X로 제거", "Con bandera, X la quita", "Com bandeira, X tira", "Drapeau, X l'enlève", "Flagge, X nimmt sie weg", "Флажок, X снимает", "已插旗，按 X 取下"));
+  else if (flags_around(x, y) >= S.adj[y][x]) cell_label(x, y, p);
+  else put(p, tr("Not enough flags around", "周围旗子不够", "周りの旗が足りません", "주변 깃발이 부족합니다", "Faltan banderas alrededor", "Faltam bandeiras em volta", "Pas assez de drapeaux autour", "Zu wenige Flaggen ringsum", "Вокруг мало флажков", "周圍旗子不夠"));
 }
