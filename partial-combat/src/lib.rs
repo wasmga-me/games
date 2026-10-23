@@ -1,11 +1,9 @@
 //! Partial Combat: Clickbait Tactics - an original wasmga.me game. MIT licensed.
-//! A squad of green plastic soldiers holds its place on a pier over the sea,
-//! firing ahead on its own, as gates, barrels and the tan army come on to it.
-//! Steer it into the gate that grows it most, shoot barrels for more soldiers
-//! and crates for better guns, keep out of shell fire, outnumber the tan
-//! army, and beat the boss that comes with the last of it. Twenty levels, or
-//! one endless pier. In the rules the squad runs along the pier all the
-//! same; the scene is drawn round it (scene.rs build).
+//! A squad of green plastic soldiers runs down a pier over the sea, firing
+//! ahead on its own. Steer it through the gate that grows it most, shoot
+//! barrels for more soldiers and crates for better guns, keep out of shell
+//! fire, outnumber the tan army, and beat the boss waiting among the last of
+//! it. Twenty levels, or one endless pier.
 //!
 //! Runs on the wg engine, drawn in 3D: every frame the page reads the scene
 //! from wg3d_scene (scene.rs) and draws it, and lays this module's own
@@ -47,9 +45,8 @@ pub const MAX_COUNT: i32 = 9_999_999;
 /// barrels' and crates' sizes
 pub const BARREL: f32 = 1.0;
 pub const CRATE: f32 = 2.6;
-/// how far a ship's cannon stands out from its middle, towards the pier: the
-/// model's half beam, as drawn
-const SHIP_GUN: f32 = 2.4 * scene::SHIP_SCALE;
+/// how far from a ship's middle, towards the pier, its shells leave it
+const SHIP_GUN: f32 = 1.7 * scene::SHIP_SCALE;
 /// room each soldier takes in the squad
 const SPACING: f32 = 0.34;
 /// bullets of the squad's in the air at most; past that each carries the
@@ -284,8 +281,7 @@ pub struct Enemy {
     /// the squad's fire (damage a second) its hp was set for; a squad that
     /// comes near firing less weakens it to match, and this is then 0
     pub meant: f32,
-    /// how far it has walked over the pier, which holds still round the
-    /// squad: its walk plays by it
+    /// how far it has walked: its walk plays by it
     pub walk: f32,
 }
 
@@ -594,11 +590,6 @@ impl Boss {
     pub fn body(&self) -> &'static Body {
         &BODIES[self.kind as usize]
     }
-    /// its walk carried on over a step of the deck (backwards when negative)
-    fn stride(&mut self, step: f32) {
-        let m = self.body();
-        self.walk = (self.walk + step / (m.stride * m.scale)).rem_euclid(m.walk);
-    }
     /// how tall it stands (m)
     pub fn tall(&self) -> f32 {
         let m = self.body();
@@ -860,7 +851,7 @@ impl Save {
             self.level as f32
         }
     }
-    /// The pier is still coming on to the squad: it hasn't stopped to fight the boss.
+    /// The squad is still running: it hasn't stopped to fight the boss.
     pub fn marching(&self) -> bool {
         (self.phase == P_RUN || self.phase == P_BOSS)
             && (self.stop_d == 0.0 || self.d < self.stop_d)
@@ -957,7 +948,8 @@ pub struct Combat {
     /// what happened this frame, for the page's effects and sounds (scene.rs)
     pub fx: Vec<scene::Fx>,
     pub scene: scene::Scene,
-    /// the camera (eye, then what it looks at) as it stands to the squad, eased
+    /// the camera (eye, then what it looks at), eased after the squad; along
+    /// the pier as far ahead of it (z + d), as it keeps up with the run
     pub cam: [f32; 6],
     pub cam_set: bool,
     /// seconds shown, for the sea and things bobbing on it; the screen's shape
@@ -965,8 +957,6 @@ pub struct Combat {
     pub aspect: f32,
     /// the boss stepped this frame: its walk plays
     pub boss_walked: bool,
-    /// how far the squad went on along the pier this step
-    pub moved: f32,
 }
 
 impl Combat {
@@ -974,9 +964,7 @@ impl Combat {
         if self.fx.len() < 256 {
             self.fx.push(scene::Fx {
                 kind,
-                // where it is to the squad as it happens, which is how the
-                // scene is drawn (scene.rs build)
-                pos: [x, y, self.s.d - d],
+                pos: [x, y, -d],
                 a,
                 b,
                 c,
@@ -1144,33 +1132,12 @@ impl Combat {
         }
         self.s.time_ms += (dt * 1000.0) as i32;
         self.steer(input, dt);
-        self.moved = 0.0;
         if self.s.marching() {
-            let d0 = self.s.d;
             self.s.d += self.s.pace() * dt;
             if self.s.stop_d > 0.0 {
                 self.s.d = self.s.d.min(self.s.stop_d);
             }
-            let moved = self.s.d - d0;
-            self.moved = moved;
-            // the boss comes on with its crowd, feet in step with the pier;
-            // one going down lies where it falls
-            let b = &mut self.s.boss;
-            if b.state == 3 {
-                b.d += moved;
-            } else if b.state > 0 {
-                b.stride(moved);
-            }
-            // the knocked out lie where they fell on the pier, which holds
-            // still round the squad
-            let (ns, ne) = (self.s.nsol as usize, self.s.nen as usize);
-            for q in self.s.sol[..ns].iter_mut().filter(|q| q.state == S_DOWN) {
-                q.d += moved;
-            }
-            for e in self.s.en[..ne].iter_mut().filter(|e| e.state == ES_DOWN) {
-                e.d += moved;
-            }
-            // the fight starts as the boss's crowd comes on
+            // the fight starts as the squad nears the boss's crowd
             if self.s.phase == P_RUN && self.s.stop_d > 0.0 && self.s.d >= self.s.stop_d - BOSS_LEAD
             {
                 self.s.phase = P_BOSS;
@@ -1825,8 +1792,7 @@ impl Combat {
                 }
                 _ => {}
             }
-            // over the pier as it stands round the squad
-            e.walk += (e.x - x0).hypot(e.d - d0 - self.moved);
+            e.walk += (e.x - x0).hypot(e.d - d0);
             let gone = e.state == ES_DOWN && e.t > 1.8;
             if !gone {
                 self.s.en[w] = e;
@@ -2285,8 +2251,7 @@ impl Combat {
             }
             2 => {
                 // in the air between lift and land, onto where it aimed
-                let u = ((t - m.lift) / (m.land - m.lift)).clamp(0.0, 1.0);
-                let u = u * u * (3.0 - 2.0 * u);
+                let u = smooth(((t - m.lift) / (m.land - m.lift)).clamp(0.0, 1.0));
                 b.x = b.from[0] + (tx - b.from[0]) * u;
                 b.d = b.from[1] + (td + 0.8 - b.from[1]) * u;
                 if crossed(t, dt, m.land) {
@@ -2398,9 +2363,10 @@ impl Combat {
         let step = (b.speed() * dt).min(far);
         b.x += dx / far * step;
         b.d += dd / far * step;
-        let before = b.walk;
-        b.stride(if back { -step } else { step });
         let m = b.body();
+        let before = b.walk;
+        let clip = step / (m.stride * m.scale);
+        b.walk = (b.walk + if back { -clip } else { clip }).rem_euclid(m.walk);
         // a footfall each half of the walk's loop
         let half = m.walk * 0.5;
         let (k0, k1) = ((before / half).floor(), (b.walk / half).floor());
@@ -2550,6 +2516,11 @@ pub fn half_size(kind: i32) -> f32 {
     }
 }
 
+/// Eases u (0 to 1) in and out.
+fn smooth(u: f32) -> f32 {
+    u * u * (3.0 - 2.0 * u)
+}
+
 /// True when a clock at t, dt on from the last step, has just passed `at`.
 fn crossed(t: f32, dt: f32, at: f32) -> bool {
     t >= at && t - dt < at
@@ -2583,7 +2554,6 @@ impl Game for Combat {
             clock: 0.0,
             aspect: 1.0,
             boss_walked: false,
-            moved: 0.0,
         }
     }
     fn save(&mut self) -> &mut Save {

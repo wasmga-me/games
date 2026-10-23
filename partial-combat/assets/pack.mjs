@@ -7,7 +7,7 @@
 // into glTF by FBX2glTF. Every model is named under a prefix (man., giant.,
 // mech., gun., pier., boat., snow., nature.), after its pack's own name but for
 // the soldiers, which are kinds of one mannequin; the game asks for them by
-// those names.
+// those names. The gates' poles are made here (gate.pole).
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -239,7 +239,7 @@ function smoothNormals(doc, prim) {
     const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1;
     for (let e = 0; e < 3; e++) n[i + e] /= l;
   }
-  prim.setAttribute("NORMAL", doc.createAccessor().setType("VEC3").setArray(n).setBuffer(prim.getAttribute("POSITION").getBuffer()));
+  prim.setAttribute("NORMAL", accessor(doc, "VEC3", n));
 }
 
 /** The middle and half sizes of the part of `prim` that moves with joint `j` most. */
@@ -334,17 +334,20 @@ function headgear(doc, kind, { c, h }, j, material) {
     const o = at(0, 0.32, -0.04), r = size(1.09, 1, 1.07);
     band(ring(o, r, -0.12), ring(o, r, 0.12));
   }
-  const buffer = doc.getRoot().listBuffers()[0];
   const n = pos.length / 3;
-  const acc = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
   return doc
     .createPrimitive()
-    .setAttribute("POSITION", acc("VEC3", new Float32Array(pos)))
-    .setAttribute("NORMAL", acc("VEC3", new Float32Array(nor)))
-    .setAttribute("JOINTS_0", acc("VEC4", new Uint16Array(n * 4).map((_, i) => (i % 4 ? 0 : j))))
-    .setAttribute("WEIGHTS_0", acc("VEC4", new Float32Array(n * 4).map((_, i) => (i % 4 ? 0 : 1))))
-    .setIndices(acc("SCALAR", new Uint16Array(ix)))
+    .setAttribute("POSITION", accessor(doc, "VEC3", new Float32Array(pos)))
+    .setAttribute("NORMAL", accessor(doc, "VEC3", new Float32Array(nor)))
+    .setAttribute("JOINTS_0", accessor(doc, "VEC4", new Uint16Array(n * 4).map((_, i) => (i % 4 ? 0 : j))))
+    .setAttribute("WEIGHTS_0", accessor(doc, "VEC4", new Float32Array(n * 4).map((_, i) => (i % 4 ? 0 : 1))))
+    .setIndices(accessor(doc, "SCALAR", new Uint16Array(ix)))
     .setMaterial(material);
+}
+
+/** An accessor of `array` in the document's one buffer. */
+function accessor(doc, type, array) {
+  return doc.createAccessor().setType(type).setArray(array).setBuffer(doc.getRoot().listBuffers()[0]);
 }
 
 // ---------- giants: Quaternius' Ultimate Animated Character Pack ----------
@@ -549,7 +552,7 @@ const PIRATE = [
   "patch-sand-foliage", "patch-grass-foliage", "ship-pirate-large", "ship-pirate-medium", "ship-wreck",
   "tower-watch",
 ];
-const WATERCRAFT = ["gate", "buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "ship-cargo-a"];
+const WATERCRAFT = ["buoy-flag", "boat-speed-a", "boat-sail-a", "boat-fishing-small", "boat-tug-a", "ship-cargo-a"];
 // the other shores: snow from Kenney's Holiday Kit; desert and autumn lake from Kenney's Nature Kit
 const SNOW = ["tree-snow-a", "tree-snow-b", "tree-snow-c", "snowman-hat", "snow-flat-large", "rocks-large", "rocks-medium", "reindeer", "sled"];
 const NATURE = [
@@ -558,7 +561,7 @@ const NATURE = [
   "tree_oak_fall", "tree_detailed_fall", "tree_default_fall", "tree_fat_fall",
 ];
 
-async function kit(packName, names, prefix, file) {
+async function kit(packName, names, prefix, file, made) {
   // each kit keeps its .glb files in one of its Models folders
   const dir = join(pack(packName), "Models");
   const doc = new Document();
@@ -573,7 +576,46 @@ async function kit(packName, names, prefix, file) {
     roots[0].setName(`${prefix}.${name}`);
     await mergeInto(doc, k);
   }
+  made?.(doc);
   await finish(doc, file);
+}
+
+/**
+ * A pole a gate's light curtain shines across to the next (gate.pole), 3 m
+ * tall on its foot: a chamfered post with a lamp and a cap on top, in one
+ * plain material the game tints the gate's colour.
+ */
+function pole(doc) {
+  const pos = [], ix = [];
+  // a flat face, its corners turned to face away from `mid`
+  const face = (pts, mid) => {
+    const first = pos.length / 3;
+    for (const p of pts) pos.push(...p);
+    const f = faceNormal(pos, first, first + 1, first + 2);
+    const out = [0, 1, 2].reduce((s, e) => s + f[e] * (pts[0][e] - mid[e]), 0) >= 0;
+    for (let k = 1; k + 1 < pts.length; k++) ix.push(...(out ? [first, first + k, first + k + 1] : [first, first + k + 1, first + k]));
+  };
+  // upright square prisms, half w across with their corners cut by c, from
+  // height y0 to y1: the foot, the post, the lamp and the cap
+  for (const [w, c, y0, y1] of [[0.2, 0.05, 0, 0.06], [0.09, 0.03, 0.06, 2.9], [0.105, 0.035, 2.9, 3.02], [0.12, 0.035, 3.02, 3.08]]) {
+    const ring = [[w, w - c], [w - c, w], [c - w, w], [-w, w - c], [-w, c - w], [c - w, -w], [w - c, -w], [w, c - w]];
+    const mid = [0, (y0 + y1) / 2, 0];
+    ring.forEach(([a, b], k) => {
+      const [e, f] = ring[(k + 1) % ring.length];
+      face([[a, y0, b], [e, y0, f], [e, y1, f], [a, y1, b]], mid);
+    });
+    face(ring.map(([a, b]) => [a, y1, b]), mid);
+    face(ring.map(([a, b]) => [a, y0, b]), mid);
+  }
+  const material = doc.createMaterial("pole").setBaseColorFactor([0.7, 0.7, 0.7, 1]).setMetallicFactor(0).setRoughnessFactor(0.5);
+  const prim = doc
+    .createPrimitive()
+    .setAttribute("POSITION", accessor(doc, "VEC3", new Float32Array(pos)))
+    .setIndices(accessor(doc, "SCALAR", new Uint16Array(ix)))
+    .setMaterial(material);
+  // each face has corners of its own, so this gives it its flat normal
+  smoothNormals(doc, prim);
+  doc.getRoot().listScenes()[0].addChild(doc.createNode("gate.pole").setMesh(doc.createMesh("pole").addPrimitive(prim)));
 }
 
 // ---------- effects: Kenney's Particle Pack, as one picture ----------
@@ -611,7 +653,7 @@ const jobs = {
   mechs,
   guns,
   pier: () => kit("pirate", PIRATE, "pier", "pier.glb"),
-  boats: () => kit("watercraft", WATERCRAFT, "boat", "boats.glb"),
+  boats: () => kit("watercraft", WATERCRAFT, "boat", "boats.glb", pole),
   snow: () => kit("holiday", SNOW, "snow", "snow.glb"),
   nature: () => kit("nature", NATURE, "nature", "nature.glb"),
   effects,

@@ -22,8 +22,8 @@ const GATE_X: f32 = HALF * 0.5;
 const GATE_W: f32 = HALF - 0.6;
 /// where crates and things on one side stand
 const SIDE_X: f32 = HALF * 0.5;
-/// how far out a ship sails, in water scene.rs put_decor() leaves clear
-const SHIP_X: f32 = HALF + 5.0;
+/// how far out a ship stands off the pier, in water scene.rs put_decor() leaves clear
+const SHIP_X: f32 = HALF + 8.0;
 /// how far apart the boss's crowd stands, across and along the pier, and
 /// the least room it leaves round the boss
 const CROWD_X: f32 = 0.95;
