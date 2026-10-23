@@ -17,8 +17,9 @@ mod track;
 use wg::{Game, Input, Pointer, Rng, Screen};
 
 /// 1: the first; 3: a pier twice as wide, each gun its own shots, bosses that walk, jump and bring an army;
-/// 4: lanes and holes laid in 5 m tiles, bigger crates
-const VERSION: u32 = 4;
+/// 4: lanes and holes laid in 5 m tiles, bigger crates;
+/// 5: heavies and grenadiers, each tan soldier with its own hp_max and size
+const VERSION: u32 = 5;
 
 /// options, in catalog order: mode, level to start at
 pub const O_MODE: usize = 0;
@@ -62,19 +63,25 @@ pub const P_BOSS: i32 = 1;
 pub const P_CLEAR: i32 = 2;
 pub const P_DEAD: i32 = 3;
 pub const P_WON: i32 = 4;
+/// chunks laid ahead whose plan is kept: more than fit in AHEAD (track.rs)
+pub const PLANS: usize = 8;
 /// how long a cleared level shows before the next, ms
 const CLEAR_MS: i32 = 3200;
 
-// soldiers
+// soldiers; each keeps its place in the squad, slot(its index)
 pub const S_OK: i32 = 0;
 pub const S_FALL: i32 = 1;
 pub const S_DOWN: i32 = 2;
+/// seconds a knocked out soldier's place stays empty before one from further out steps in
+const STEP_UP: f32 = 0.35;
 
 // enemies
 pub const E_GRUNT: i32 = 0;
 pub const E_RUNNER: i32 = 1;
 pub const E_RIFLE: i32 = 2;
 pub const E_BRUTE: i32 = 3;
+pub const E_HEAVY: i32 = 4;
+pub const E_GRENADIER: i32 = 5;
 pub const ES_WAIT: i32 = 0;
 pub const ES_CHARGE: i32 = 1;
 pub const ES_DOWN: i32 = 2;
@@ -87,7 +94,6 @@ pub const K_TNT: i32 = 3;
 pub const K_CRATE: i32 = 4;
 pub const K_HOLE: i32 = 5;
 pub const K_SHIP: i32 = 6;
-pub const K_GROUP: i32 = 7;
 pub const K_ARENA: i32 = 8;
 
 // gate sums
@@ -95,8 +101,6 @@ pub const OP_ADD: i32 = 0;
 pub const OP_SUB: i32 = 1;
 pub const OP_MUL: i32 = 2;
 pub const OP_DIV: i32 = 3;
-/// damage that counts a gate one point, in a save from before gates were laid with their own
-const GATE_DMG: i32 = 3;
 /// how far ahead of the squad TNT has to be for its fire to turn on it, so it doesn't go off in its face
 const TNT_NEAR: f32 = 8.0;
 
@@ -266,21 +270,33 @@ pub struct Enemy {
     pub x: f32,
     pub d: f32,
     pub hp: i32,
-    /// its group's thing, for the number over the group
-    pub group: i32,
+    pub hp_max: i32,
     pub t: f32,
     /// till its next shot, or its next blow in a fight
     pub cool: f32,
     pub flash: f32,
     pub yaw: f32,
+    /// how big it stands, against a grunt: its kind's size, a little more the tougher it is
+    pub size: f32,
+    /// the squad's fire (damage a second) its hp was set for; a squad that
+    /// comes near firing less weakens it to match, and this is then 0
+    pub meant: f32,
+}
+
+impl Enemy {
+    /// What a blow takes off it: all of it, or a share for each soldier it is worth.
+    pub fn blow(&self) -> i32 {
+        let w = worth(self.kind);
+        (self.hp_max + w - 1) / w
+    }
 }
 
 /// A thing on the pier. Gates: value, op in a, the other gate of the pair
 /// in b, the damage a point in hp, points left to count in hp_max, damage
 /// towards the next in c, state 1 taken and 2 passed by. Barrels and
 /// crates: hp of hp_max, soldiers or the gun inside in value. Holes: x..x+w
-/// by d..d+len. Ships: time to the next shell in cool. Groups: how many it
-/// had in value. The arena: where the boss stands.
+/// by d..d+len. Ships: time to the next shell in cool. The arena: where the
+/// boss stands.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Thing {
@@ -342,9 +358,13 @@ pub struct Shell {
     pub r: f32,
     pub t: f32,
     pub t_max: f32,
-    /// 0 a ship's cannonball, 1 a boss's shell
+    /// SH_*; only a cannonball hurts the tan army too
     pub kind: i32,
 }
+/// a ship's cannonball, a boss's shell, a grenadier's grenade
+pub const SH_BALL: i32 = 0;
+pub const SH_BOSS: i32 = 1;
+pub const SH_GRENADE: i32 = 2;
 impl Shell {
     /// Where it is on its way, x y d (high up the arc, so it is seen coming).
     pub fn at(&self) -> (f32, f32, f32) {
@@ -557,6 +577,8 @@ pub struct Boss {
     /// a flinch under way (s), and the hp below which it flinches next
     pub hurt: f32,
     pub flinch_at: i32,
+    /// the squad's fire its hp was set for, as Enemy.meant (0 once the fight is on)
+    pub meant: f32,
 }
 impl Boss {
     /// where it will come down, once it has picked the spot (it stays put)
@@ -636,6 +658,8 @@ pub struct Save {
     pub chunk: i32,
     pub expect: f32,
     pub expect_gun: i32,
+    /// where each of the last chunks laid ends (0 for none) and the size expected past it
+    pub plan_at: [[f32; 2]; PLANS],
     /// where this level's boss fight starts (0 till it is laid)
     pub arena_d: f32,
     pub banner: i32,
@@ -677,11 +701,13 @@ const NO_ENEMY: Enemy = Enemy {
     x: 0.0,
     d: 0.0,
     hp: 0,
-    group: -1,
+    hp_max: 0,
     t: 0.0,
     cool: 0.0,
     flash: 0.0,
     yaw: 0.0,
+    size: 1.0,
+    meant: 0.0,
 };
 pub const NO_THING: Thing = Thing {
     kind: K_NONE,
@@ -742,6 +768,7 @@ pub const NO_BOSS: Boss = Boss {
     walk: 0.0,
     hurt: 0.0,
     flinch_at: 0,
+    meant: 0.0,
 };
 
 impl Save {
@@ -774,6 +801,7 @@ impl Save {
             chunk: 0,
             expect: 0.0,
             expect_gun: 0,
+            plan_at: [[0.0; 2]; PLANS],
             arena_d: 0.0,
             banner: B_NONE,
             banner_ms: 0,
@@ -809,6 +837,10 @@ impl Save {
     }
     fn frand(&mut self, a: f32, b: f32) -> f32 {
         a + (b - a) * self.rng.float()
+    }
+    /// Damage a second the squad puts into what it aims at, as it is now.
+    pub fn fire(&self) -> f32 {
+        squad_dps(self.count as f32, self.weapon)
     }
     /// How hard the pier is where the squad is.
     pub fn hardness(&self) -> f32 {
@@ -868,8 +900,38 @@ pub fn squad_dps(n: f32, w: i32) -> f32 {
 pub fn enemy_hp(kind: i32, hard: f32) -> i32 {
     match kind {
         E_BRUTE => 6 + (hard * 0.6) as i32,
-        E_RIFLE => 2 + (hard / 6.0) as i32,
+        E_HEAVY => 3 + (hard / 4.0) as i32,
+        E_RIFLE | E_GRENADIER => 2 + (hard / 6.0) as i32,
         _ => 1 + (hard / 10.0) as i32,
+    }
+}
+
+/// How big a tan soldier of kind stands, against a grunt: a runner small, a heavy big, a brute bigger.
+pub fn kind_size(kind: i32) -> f32 {
+    match kind {
+        E_RUNNER => 0.82,
+        E_HEAVY => 1.3,
+        E_BRUTE => 1.65,
+        _ => 1.0,
+    }
+}
+
+/// How much bigger than its kind a tan soldier tough times its kind's hp stands.
+fn bulk(tough: f32) -> f32 {
+    (1.0 + tough.log2() * 0.06).clamp(1.0, 1.3)
+}
+
+/// Whether a tan soldier of kind stands back and fires rather than charging at once.
+fn stands(kind: i32) -> bool {
+    kind == E_RIFLE || kind == E_GRENADIER
+}
+
+/// How many soldiers a tan soldier of kind knocks out hand to hand before it falls.
+pub fn worth(kind: i32) -> i32 {
+    match kind {
+        E_BRUTE => 6,
+        E_HEAVY => 3,
+        _ => 1,
     }
 }
 
@@ -941,6 +1003,7 @@ impl Combat {
         s.chunk = 0;
         s.expect = s.count as f32;
         s.expect_gun = 0;
+        s.plan_at = [[0.0; 2]; PLANS];
         s.arena_d = 0.0;
         s.nsol = 0;
         s.nen = 0;
@@ -967,12 +1030,15 @@ impl Combat {
         self.lay_track();
     }
 
-    /// Shows as many soldiers as the squad has, up to MAXV: new ones join at the back.
+    /// Shows as many soldiers as the squad has, up to MAXV: new ones join at the edge.
     fn fill_squad(&mut self) {
         let s = &mut self.s;
         let want = shooters(s.count as f32) as usize;
-        while (s.nsol as usize) < want {
+        let mut alive = s.alive();
+        while alive < want && (s.nsol as usize) < MAXV {
             let i = s.nsol as usize;
+            s.nsol += 1;
+            alive += 1;
             let (ox, oz) = slot(i);
             let t = s.rng.float() * 3.0;
             s.sol[i] = Sol {
@@ -984,10 +1050,8 @@ impl Combat {
                 t,
                 flash: 0.6,
             };
-            s.nsol += 1;
         }
         // fewer: the last ones go
-        let mut alive = s.alive();
         let mut i = s.nsol as usize;
         while alive > want && i > 0 {
             i -= 1;
@@ -1031,7 +1095,7 @@ impl Combat {
         e.state = ES_DOWN;
         e.t = 0.0;
         let (x, d, kind) = (e.x, e.d, e.kind);
-        let points = [10, 15, 15, 40][kind as usize];
+        let points = [10, 15, 15, 40, 25, 20][kind as usize];
         self.s.kills += 1;
         self.add_score(points);
         self.fx(scene::FX_PUFF, x, DECK, d, 0.0, 0.0, 0.0, scene::TAN);
@@ -1102,11 +1166,20 @@ impl Combat {
                 self.banner(B_BOSS, 0);
                 self.s.boss.state = 2;
                 self.s.boss.cool = 1.2;
-                // its army charges as one; riflemen hold and fire
+                // a squad that comes firing less than planned meets a weaker
+                // boss, but not by as much: the fight is longer
+                let fire = self.s.fire();
+                let b = &mut self.s.boss;
+                if b.meant > 0.0 {
+                    let k = (fire / b.meant).min(1.0).sqrt();
+                    b.hp = ((b.hp as f32 * k).round() as i32).max(30);
+                    (b.hp_max, b.flinch_at, b.meant) = (b.hp, b.hp * 3 / 4, 0.0);
+                }
+                // its army charges as one; riflemen and grenadiers hold and fire
                 let n = self.s.nen as usize;
                 for e in self.s.en[..n]
                     .iter_mut()
-                    .filter(|e| e.state == ES_WAIT && e.kind != E_RIFLE)
+                    .filter(|e| e.state == ES_WAIT && !stands(e.kind))
                 {
                     e.state = ES_CHARGE;
                 }
@@ -1155,10 +1228,11 @@ impl Combat {
     /// Soldiers keep their places in the squad, squeezed to fit the pier; off its edge they fall.
     fn move_soldiers(&mut self, dt: f32) {
         let ease = 1.0 - (-9.0 * dt).exp();
+        self.step_up();
         let n = self.s.nsol as usize;
-        let alive = self.s.alive();
-        // the deck under the squad, front to back; it squeezes in to fit
-        let r = radius(alive as i32);
+        // as wide as the places held; the deck under it, front to back, and it squeezes in to fit
+        let held = self.s.soldiers().iter().rposition(|q| q.state == S_OK);
+        let r = radius(held.map_or(0, |i| i as i32 + 1));
         let (mut lo, mut hi) = (-HALF, HALF);
         for k in -2..=2 {
             let (l, h) = self.s.deck_span(self.s.cx, self.s.d + k as f32 * r * 0.5);
@@ -1177,15 +1251,13 @@ impl Combat {
             .cx
             .clamp(lo + EDGE + used, (hi - EDGE - used).max(lo + EDGE + used));
         let cheer = self.s.phase == P_CLEAR || self.s.phase == P_WON;
-        let mut k = 0;
         for i in 0..n {
             let q = &mut self.s.sol[i];
             q.t += dt;
             q.flash = (q.flash - dt * 3.0).max(0.0);
             match q.state {
                 S_OK => {
-                    let (ox, oz) = slot(k);
-                    k += 1;
+                    let (ox, oz) = slot(i);
                     let gx = if cheer { q.x } else { mid + ox * squeeze };
                     let gd = self.s.d + oz;
                     q.x += (gx - q.x) * ease;
@@ -1205,20 +1277,57 @@ impl Combat {
                 self.lose(i, true);
             }
         }
-        // splashes, and the gone dropped
+        // splashes, and the gone are dropped: step_up has moved them out past
+        // everyone standing by then, so nobody's place changes
         let mut w = 0;
         for i in 0..self.s.nsol as usize {
             let q = self.s.sol[i];
             if q.state == S_FALL && q.y < 0.2 && q.y - q.vy * dt >= 0.2 {
                 self.fx(scene::FX_SPLASH, q.x, 0.0, q.d, 0.6, 0.0, 0.0, 0);
             }
-            let gone = (q.state == S_FALL && q.y < -2.0) || (q.state == S_DOWN && q.t > 1.6);
-            if !gone {
+            if !((q.state == S_FALL && q.y < -2.0) || (q.state == S_DOWN && q.t > 1.6)) {
                 self.s.sol[w] = q;
                 w += 1;
             }
         }
-        self.s.nsol = w as i32;
+        if w != self.s.nsol as usize {
+            self.s.nsol = w as i32;
+            // a big squad's reserves take the places freed
+            self.fill_squad();
+        }
+    }
+
+    /// A moment after a soldier is knocked out, the one nearest its place from
+    /// further out steps into it, and one into that one's, out to the edge: so
+    /// the gap shows where the hit was and the rest of the squad stays put.
+    fn step_up(&mut self) {
+        let s = &mut self.s;
+        let n = s.nsol as usize;
+        let open = |q: &Sol| q.state != S_OK && q.t >= STEP_UP;
+        // only a gap with someone standing further out is filled
+        let Some(last) = s.sol[..n].iter().rposition(|q| q.state == S_OK) else {
+            return;
+        };
+        if !s.sol[..last].iter().any(open) {
+            return;
+        }
+        let mut at = [(0.0, 0.0); MAXV];
+        for (i, a) in at[..n].iter_mut().enumerate() {
+            *a = slot(i);
+        }
+        for f in 0..last {
+            if !open(&s.sol[f]) {
+                continue;
+            }
+            let (fx, fz) = at[f];
+            let far = |m: usize| (at[m].0 - fx).powi(2) + (at[m].1 - fz).powi(2);
+            let near = (f + 1..n)
+                .filter(|&m| s.sol[m].state == S_OK)
+                .min_by(|&a, &b| far(a).total_cmp(&far(b)));
+            if let Some(m) = near {
+                s.sol.swap(f, m);
+            }
+        }
     }
 
     /// The squad fires ahead, each of its shooters() at its gun's rate. Past
@@ -1370,7 +1479,7 @@ impl Combat {
             if e.state == ES_DOWN {
                 continue;
             }
-            let r = if e.kind == E_BRUTE { 0.6 } else { 0.38 };
+            let r = 0.38 * e.size;
             if (e.x - b.x).abs() < r
                 && e.d >= lo - r
                 && e.d <= hi + r
@@ -1442,7 +1551,8 @@ impl Combat {
                     b.x,
                     y,
                     boss.d - deep,
-                    b.dmg as f32,
+                    // a shot's damage, not all the bullet carries
+                    WEAPONS[b.gun as usize].dmg as f32,
                     0.0,
                     0.0,
                     CLANG,
@@ -1506,21 +1616,24 @@ impl Combat {
         }
         match t.kind {
             K_GATE => {
-                // shooting a gate counts it up, a point for every hp of damage
-                // and at most hp_max points; a minus one counts down and at
-                // nought turns plus
+                // shooting a gate counts it a point for every hp of damage: a
+                // minus one down to nought, where it turns plus, and a plus
+                // one up, at most hp_max points
                 if t.a == OP_ADD || t.a == OP_SUB {
                     t.c += dmg;
-                    let n = (t.c / t.hp).min(t.hp_max);
+                    let mut n = t.c / t.hp;
                     t.c %= t.hp;
-                    t.hp_max -= n;
+                    if t.a == OP_SUB {
+                        let down = n.min(t.value);
+                        (t.value, n) = (t.value - down, n - down);
+                        if t.value == 0 {
+                            t.a = OP_ADD;
+                        }
+                    }
                     if t.a == OP_ADD {
-                        t.value = (t.value + n).min(MAX_COUNT);
-                    } else if t.value > n {
-                        t.value -= n;
-                    } else {
-                        t.a = OP_ADD;
-                        t.value = n - t.value;
+                        let up = n.min(t.hp_max);
+                        t.hp_max -= up;
+                        t.value = (t.value + up).min(MAX_COUNT);
                     }
                 }
                 let (x, d) = (t.x, t.d);
@@ -1595,7 +1708,8 @@ impl Combat {
         for k in 0..self.s.nen as usize {
             let e = self.s.en[k];
             if how & BLAST_FOE == 0 && e.state != ES_DOWN && (e.x - x).hypot(e.d - d) < r {
-                self.s.en[k].hp -= 6;
+                // it knocks out a grunt, but a heavy or a brute only takes a blow or so
+                self.s.en[k].hp -= e.blow().max(6);
                 if self.s.en[k].hp <= 0 {
                     self.enemy_down(k);
                 }
@@ -1621,6 +1735,7 @@ impl Combat {
         let (cx, sd) = (self.s.cx, self.s.d);
         let hard = self.s.hardness();
         let edge = radius(self.s.alive() as i32) + 2.0;
+        let fire = self.s.fire();
         let mut w = 0;
         for k in 0..self.s.nen as usize {
             let mut e = self.s.en[k];
@@ -1630,8 +1745,31 @@ impl Combat {
             match e.state {
                 ES_WAIT => {
                     let near = e.d - sd;
-                    if near < if e.kind == E_RIFLE { 26.0 } else { 20.0 } {
-                        if e.kind == E_RIFLE {
+                    if e.meant > 0.0 && near < 42.0 {
+                        // a squad smaller than planned isn't swept away: a
+                        // little less in it than its fire falls short
+                        let k = (fire / e.meant).min(1.0).powf(1.5);
+                        let base = enemy_hp(e.kind, self.s.hardness_at(e.d)) as f32;
+                        let was = bulk(e.hp_max as f32 / base);
+                        e.hp = ((e.hp as f32 * k).round() as i32).max(1);
+                        e.hp_max = ((e.hp_max as f32 * k).round() as i32).max(1);
+                        e.size *= bulk(e.hp_max as f32 / base) / was;
+                        e.meant = 0.0;
+                    }
+                    if near < if stands(e.kind) { 26.0 } else { 20.0 } {
+                        if e.kind == E_GRENADIER {
+                            // lobs a grenade where the squad will be
+                            if e.cool <= 0.0 && near > 4.0 {
+                                e.cool = (3.4 - hard * 0.05).max(2.0) + self.s.rng.float();
+                                e.t = 0.0;
+                                let flight = 1.3;
+                                let (x, d) = self.ahead(flight, 1.2, 0.5);
+                                self.lob(e.x, DECK + 1.6, e.d, x, d, 1.4, flight, SH_GRENADE);
+                            }
+                            if near < 6.0 {
+                                e.state = ES_CHARGE;
+                            }
+                        } else if e.kind == E_RIFLE {
                             // stands and fires
                             if e.cool <= 0.0 && near > 2.0 && self.s.nbul < MAXB as i32 {
                                 e.cool = (2.2 - hard * 0.04).max(1.1) + self.s.rng.float();
@@ -1687,6 +1825,7 @@ impl Combat {
                     let speed = match e.kind {
                         E_RUNNER => 6.5,
                         E_BRUTE => 2.6,
+                        E_HEAVY => 3.0,
                         _ => 3.6,
                     } + (hard * 0.05).min(1.0);
                     if len > REACH * 0.8 {
@@ -1705,10 +1844,11 @@ impl Combat {
             }
         }
         self.s.nen = w as i32;
-        // hand to hand: an enemy and a soldier in reach knock each other out (a brute takes several)
+        // hand to hand: an enemy and a soldier in reach knock each other out;
+        // a heavy or a brute takes worth() soldiers, a blow at a time
         for k in 0..self.s.nen as usize {
             let e = self.s.en[k];
-            if e.state == ES_DOWN || (e.cool > 0.0 && e.kind == E_BRUTE) {
+            if e.state == ES_DOWN || (e.cool > 0.0 && worth(e.kind) > 1) {
                 continue;
             }
             if (e.d - sd).abs() > 8.0 {
@@ -1721,7 +1861,7 @@ impl Combat {
                 }
                 self.lose(i, false);
                 let en = &mut self.s.en[k];
-                en.hp = if en.kind == E_BRUTE { en.hp - 1 } else { 0 };
+                en.hp -= en.blow();
                 en.cool = 0.18;
                 if en.hp <= 0 {
                     self.enemy_down(k);
@@ -1777,10 +1917,11 @@ impl Combat {
                 }
                 _ if t.breakable() && (t.d - sd).abs() < 4.0 => {
                     // soldiers running into it: as many as a barrel holds
-                    // break it unshot, so it is no gain, and a crate takes
-                    // more on later levels
+                    // (all but one of a squad smaller than that) break it
+                    // unshot, so it is no gain, and a crate takes more on
+                    // later levels
                     let ram = if t.kind == K_BARREL {
-                        t.value.max(1)
+                        t.value.min(self.s.alive() as i32 - 1).max(1)
                     } else {
                         4 + (self.s.hardness() / 4.0) as i32
                     };
@@ -1818,11 +1959,9 @@ impl Combat {
                             let hard = self.s.hardness();
                             self.s.thing[k].cool = (2.6 - hard * 0.05).max(1.5);
                             let flight = 1.9;
-                            let lead = self.s.speed * flight;
-                            let x = (cx + self.s.frand(-1.5, 1.5)).clamp(-HALF + 0.8, HALF - 0.8);
+                            let (x, d) = self.ahead(flight, 1.5, 1.0);
                             let dir = if t.x < 0.0 { 1.0 } else { -1.0 };
-                            let d = sd + lead + self.s.frand(-1.0, 1.0);
-                            self.lob(t.x + dir * 2.2, 2.2, t.d, x, d, 1.8, flight, 0);
+                            self.lob(t.x + dir * 2.2, 2.2, t.d, x, d, 1.8, flight, SH_BALL);
                             self.fx(
                                 scene::FX_CANNON,
                                 t.x + dir * 2.2,
@@ -1848,6 +1987,13 @@ impl Combat {
             self.s.nshell = 0;
             self.fx(scene::FX_INCOMING, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0);
         }
+    }
+
+    /// Where the squad will be in `flight` seconds, give or take wide across and long along.
+    fn ahead(&mut self, flight: f32, wide: f32, long: f32) -> (f32, f32) {
+        let x = (self.s.cx + self.s.frand(-wide, wide)).clamp(-HALF + 0.8, HALF - 0.8);
+        let d = self.s.d + self.s.speed * flight + self.s.frand(-long, long);
+        (x, d)
     }
 
     pub fn lob(
@@ -1891,7 +2037,12 @@ impl Combat {
             if sh.t >= sh.t_max {
                 self.s.nshell -= 1;
                 self.s.shell[i] = self.s.shell[self.s.nshell as usize];
-                self.blast(sh.x, sh.d, sh.r, if sh.kind == 1 { BLAST_FOE } else { 0 });
+                self.blast(
+                    sh.x,
+                    sh.d,
+                    sh.r,
+                    if sh.kind == SH_BALL { 0 } else { BLAST_FOE },
+                );
                 continue;
             }
             // a trail of smoke behind it
@@ -2069,7 +2220,7 @@ impl Combat {
                             (cx + a.cos() * far, sd + a.sin() * far)
                         };
                         let tx = tx.clamp(-HALF + 1.0, HALF - 1.0);
-                        self.lob(x, y, d, tx, td, blast, flight + k as f32 * 0.18, 1);
+                        self.lob(x, y, d, tx, td, blast, flight + k as f32 * 0.18, SH_BOSS);
                     }
                     self.fx(scene::FX_CANNON, x, y + 0.5, d - 0.5, 0.0, 1.0, 1.6, 0);
                 }
@@ -2083,6 +2234,7 @@ impl Combat {
                 if crossed(t, dt, at) {
                     let n = (6 + (hard * 0.8) as i32).min(24);
                     let (bx, bd) = (self.s.boss.x, self.s.boss.d);
+                    let first = self.s.nen as usize;
                     for k in 0..n {
                         let (ox, oz) = slot(k as usize);
                         let kind = if hard >= 4.0 && k % 4 == 3 {
@@ -2094,10 +2246,11 @@ impl Combat {
                             kind,
                             (bx + ox * 1.8).clamp(-HALF + 0.4, HALF - 0.4),
                             bd + 1.5 + oz,
-                            -1,
                             ES_CHARGE,
                         );
                     }
+                    // tough enough that the squad takes a second or so to cut them down
+                    self.toughen(first, self.s.fire());
                 }
                 if t > self.s.boss.body().hello {
                     self.boss_rest(hard, enraged);
@@ -2125,7 +2278,7 @@ impl Combat {
         match stage {
             0 => {
                 // straight up to the squad's front, keeping pace as it walks on to the arena
-                let front = self.s.d + radius(self.s.alive() as i32) * 0.6;
+                let front = self.squad_front();
                 if self.boss_walk(tx, front + JUMP_REACH, dt) || t > 6.0 {
                     // where the squad is now, as far as one leap goes
                     let b = &mut self.s.boss;
@@ -2161,8 +2314,8 @@ impl Combat {
                     }
                 }
                 if t > m.land + 0.6 {
-                    // and back to its spot, facing the squad
-                    let back = (self.s.boss.x, self.s.arena_d + BOSS_HOME);
+                    // and steps back out of the squad, only as far as it jumps from
+                    let back = (self.s.boss.x, self.squad_front() + JUMP_REACH);
                     self.boss_start(A_MOVE);
                     (self.s.boss.tx, self.s.boss.td) = back;
                 }
@@ -2190,18 +2343,26 @@ impl Combat {
         };
         self.boss_start(atk);
         if atk == A_MOVE {
-            // another spot, well along the arena
-            let x = self.s.boss.x;
+            // a step aside, as far from the squad as it is, give or take
+            let (x, d) = (self.s.boss.x, self.s.boss.d);
             let mut tx = self.s.frand(-HALF + 3.0, HALF - 3.0);
             if (tx - x).abs() < 3.0 {
                 tx = if x > 0.0 { x - 4.0 } else { x + 4.0 };
             }
-            let td = self.s.arena_d + BOSS_HOME + self.s.frand(-1.5, 1.5);
+            let near = self.squad_front() + JUMP_REACH;
+            let td = (d + self.s.frand(-1.5, 1.5))
+                .min(self.s.arena_d + BOSS_HOME)
+                .max(near);
             (self.s.boss.tx, self.s.boss.td) = (tx, td);
         } else if atk == A_JUMP {
             // it walks straight up to the squad, in line with where it is now (boss_jump)
             self.s.boss.tx = jump_x(self.s.cx);
         }
+    }
+
+    /// The front of the squad, where the boss stops to jump on it.
+    fn squad_front(&self) -> f32 {
+        self.s.d + radius(self.s.alive() as i32) * 0.6
     }
 
     /// The boss starts on an attack (A_*), or A_NONE to stand.
@@ -2270,25 +2431,42 @@ impl Combat {
         far - step < 0.05
     }
 
-    pub fn spawn_enemy(&mut self, kind: i32, x: f32, d: f32, group: i32, state: i32) {
+    /// A tan soldier of kind, with its kind's hp (toughen() can raise it).
+    pub fn spawn_enemy(&mut self, kind: i32, x: f32, d: f32, state: i32) {
         if self.s.nen as usize >= MAXE {
             return;
         }
         let hp = enemy_hp(kind, self.s.hardness_at(d));
         let t = self.s.rng.float() * 2.0;
+        let size = kind_size(kind) * self.s.frand(0.93, 1.07);
         self.s.en[self.s.nen as usize] = Enemy {
             kind,
             state,
             x,
             d,
             hp,
-            group,
+            hp_max: hp,
             t,
             cool: self.s.rng.float() * 1.5,
             flash: 0.0,
             yaw: 0.0,
+            size,
+            meant: 0.0,
         };
         self.s.nen += 1;
+    }
+
+    /// Makes the tan soldiers from first on tough enough that it takes
+    /// `damage` to cut them all down, and a little bigger for it.
+    pub fn toughen(&mut self, first: usize, damage: f32) {
+        let army = &mut self.s.en[first..self.s.nen as usize];
+        let hp = army.iter().map(|e| e.hp).sum::<i32>().max(1);
+        let tough = (damage / hp as f32).max(1.0);
+        for e in army {
+            e.hp = ((e.hp as f32 * tough).round() as i32).max(1);
+            e.hp_max = e.hp;
+            e.size *= bulk(tough);
+        }
     }
 
     fn boss_down(&mut self) {
@@ -2342,8 +2520,6 @@ impl Combat {
     fn drop_behind(&mut self) {
         let sd = self.s.d;
         let mut w = 0;
-        // where each thing kept went, for the enemies' groups
-        let mut moved = [-1; MAXO];
         for k in 0..self.s.nthing as usize {
             let t = self.s.thing[k];
             // ships stay while their hulls show, arenas while the shore
@@ -2357,19 +2533,12 @@ impl Combat {
                 };
             if end > sd - 16.0 {
                 self.s.thing[w] = t;
-                moved[k] = w as i32;
                 w += 1;
             }
         }
         if w != self.s.nthing as usize {
             self.s.nthing = w as i32;
             self.relink_gates();
-            for k in 0..self.s.nen as usize {
-                let g = &mut self.s.en[k].group;
-                if *g >= 0 {
-                    *g = moved.get(*g as usize).copied().unwrap_or(-1);
-                }
-            }
         }
     }
 
@@ -2534,25 +2703,21 @@ impl Game for Combat {
             && (0..=4).contains(&s.weapon)
             && (0..=MAX_COUNT).contains(&s.count)
             && s.things().iter().all(|t| {
-                (t.kind != K_GATE || (0..s.nthing).contains(&t.b))
+                (t.kind != K_GATE || ((0..s.nthing).contains(&t.b) && t.hp > 0))
                     && (t.kind != K_CRATE || (0..=4).contains(&t.value))
             })
             && s.enemies().iter().all(|e| {
-                (E_GRUNT..=E_BRUTE).contains(&e.kind) && (-1..s.nthing).contains(&e.group)
+                (E_GRUNT..=E_GRENADIER).contains(&e.kind)
+                    && e.hp_max > 0
+                    && e.size > 0.0
+                    && e.size < 4.0
+                    && e.meant.is_finite()
             })
             && (0..BODIES.len() as i32).contains(&s.boss.kind)
+            && s.plan_at.iter().flatten().all(|v| v.is_finite())
+            && s.boss.meant.is_finite()
             && s.d.is_finite()
             && s.cx.is_finite();
-        if ok {
-            // a gate from before gates counted damage, with every hit so far
-            // in c: GATE_DMG a point, up to about twice what it shows
-            let n = self.s.nthing as usize;
-            for t in &mut self.s.thing[..n] {
-                if t.kind == K_GATE && t.hp <= 0 {
-                    (t.hp, t.hp_max, t.c) = (GATE_DMG, t.value.max(5) * 2, t.c % GATE_DMG);
-                }
-            }
-        }
         self.fx.clear();
         self.cam_set = false;
         ok

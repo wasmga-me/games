@@ -56,17 +56,18 @@ pub const TAN: u32 = rgba(0xb17732, 240);
 const RUNNER: u32 = rgba(0x943513, 235);
 const RIFLE: u32 = rgba(0x714b1c, 240);
 const BRUTE: u32 = rgba(0x5f5749, 225);
+const HEAVY: u32 = rgba(0x6f6a2e, 240);
+const GRENADIER: u32 = rgba(0xc9a05a, 240);
 const BARREL_BLUE: u32 = rgba(0x3b7fd5, 190);
 const TNT_RED: u32 = rgba(0xd13a28, 210);
 const GOOD: u32 = rgba(0x0647ff, 255);
 const BAD: u32 = rgba(0xff0a0a, 255);
 
 /// The models the game names, by index, as the page finds them in its files.
-pub const MODELS: [&str; 72] = [
-    "fig.soldier",
-    "fig.beret",
-    "fig.viking",
-    "fig.ninja",
+pub const MODELS: [&str; 71] = [
+    "man.soldier",
+    "man.rifle",
+    "man.runner",
     "gun.pistol",
     "gun.smg",
     "gun.rifle",
@@ -153,10 +154,9 @@ pub const fn model(name: &str) -> u16 {
     }
     panic!("not in MODELS");
 }
-const M_SOLDIER: u16 = model("fig.soldier");
-const M_BERET: u16 = model("fig.beret");
-const M_VIKING: u16 = model("fig.viking");
-const M_NINJA: u16 = model("fig.ninja");
+const M_SOLDIER: u16 = model("man.soldier");
+const M_RIFLE: u16 = model("man.rifle");
+const M_RUNNER: u16 = model("man.runner");
 const M_GUN: u16 = model("gun.pistol");
 const M_DECK: u16 = model("pier.structure-platform");
 const M_DOCK: u16 = model("pier.structure-platform-dock");
@@ -380,7 +380,7 @@ fn shore(stage: i32) -> (&'static Place, u32) {
     (place, place.looks[k / n % place.looks.len()])
 }
 
-pub const CLIPS: [&str; 12] = [
+pub const CLIPS: [&str; 13] = [
     "idle",
     "walk",
     "shoot_onehanded",
@@ -393,6 +393,7 @@ pub const CLIPS: [&str; 12] = [
     "jump",
     "hello",
     "hitrecieve_1",
+    "hold",
 ];
 const C_IDLE: u16 = 0;
 const C_WALK: u16 = 1;
@@ -406,16 +407,17 @@ const C_DEATH: u16 = 8;
 const C_JUMP: u16 = 9;
 const C_WAVE: u16 = 10;
 const C_REEL: u16 = 11;
+const C_HOLD: u16 = 12;
 
-/// soldiers' size: the models are about 1.9 m tall
-const FIG: f32 = 0.55;
+/// soldiers' size: the mannequin is about 1.83 m tall
+const FIG: f32 = 0.6;
 /// a gate's arch's size, before it is widened to the gate, and the model's width
 const GATE_ARCH: f32 = 0.95;
 const ARCH_W: f32 = 6.2;
 /// the deck model is 2.5 m square and DECK high: scaled to a tile
 const DECK_SCALE: f32 = TILE / 2.5;
 /// how fast the walk plays, for a squad that runs
-const STRIDE: f32 = 2.3;
+const STRIDE: f32 = 1.25;
 const PI: f32 = core::f32::consts::PI;
 
 #[repr(C)]
@@ -951,7 +953,7 @@ impl Combat {
     fn put_things(&self, sc: &mut Scene) {
         let s = &self.s;
         let t = self.clock;
-        for (k, th) in s.things().iter().enumerate() {
+        for th in s.things() {
             if th.d > s.d + 85.0 {
                 continue;
             }
@@ -1140,29 +1142,6 @@ impl Combat {
                     );
                     sc.last().roll = bob * 0.03;
                 }
-                K_GROUP => {
-                    let (mut n, mut x, mut d) = (0, 0.0, 0.0);
-                    for e in s.enemies() {
-                        if e.group == k as i32 && e.state != ES_DOWN {
-                            n += 1;
-                            x += e.x;
-                            d += e.d;
-                        }
-                    }
-                    if n > 0 {
-                        sc.label(
-                            LABEL_PILL,
-                            0,
-                            x / n as f32,
-                            DECK + 2.3,
-                            d / n as f32 + 0.6,
-                            1.05,
-                            n,
-                            rgba(0xc0392b, 255),
-                            1.0,
-                        );
-                    }
-                }
                 _ => {}
             }
         }
@@ -1218,21 +1197,31 @@ impl Combat {
             if e.d > s.d + 85.0 {
                 continue;
             }
-            let (model, tint, scale, gun) = match e.kind {
-                E_RUNNER => (M_NINJA, RUNNER, FIG, -1),
-                E_RIFLE => (M_BERET, RIFLE, FIG, 2),
-                E_BRUTE => (M_VIKING, BRUTE, FIG * 1.65, -1),
-                _ => (M_SOLDIER, TAN, FIG, 0),
+            let (model, tint, gun) = match e.kind {
+                E_RUNNER => (M_RUNNER, RUNNER, -1),
+                E_RIFLE => (M_RIFLE, RIFLE, 2),
+                E_BRUTE => (M_SOLDIER, BRUTE, -1),
+                E_HEAVY => (M_SOLDIER, HEAVY, 3),
+                E_GRENADIER => (M_RUNNER, GRENADIER, -1),
+                _ => (M_SOLDIER, TAN, 0),
             };
+            let scale = FIG * e.size;
             let (clip, t, fade, flags) = match e.state {
                 ES_WAIT if e.kind == E_RIFLE => (C_AIM, e.t, 1.0, INST_LOOP),
+                // a throw as each grenade goes (its clock starts again then)
+                ES_WAIT if e.kind == E_GRENADIER && e.t < 0.6 => (C_PUNCH, e.t * 1.5, 1.0, 0),
+                // the rest with a gun hold it ready; those without stand easy
+                ES_WAIT if gun >= 0 => (C_HOLD, e.t, 1.0, INST_LOOP),
                 ES_WAIT => (C_IDLE, e.t, 1.0, INST_LOOP),
-                ES_CHARGE => (
-                    if e.kind == E_BRUTE { C_PUNCH } else { C_WALK },
-                    e.t * if e.kind == E_RUNNER { 3.2 } else { 2.4 },
-                    1.0,
-                    INST_LOOP,
-                ),
+                ES_CHARGE => {
+                    let (clip, rate) = match e.kind {
+                        E_BRUTE => (C_PUNCH, 2.8),
+                        E_RUNNER => (C_WALK, 1.75),
+                        E_HEAVY => (C_WALK, 1.05),
+                        _ => (C_WALK, 1.3),
+                    };
+                    (clip, e.t * rate, 1.0, INST_LOOP)
+                }
                 _ => (C_DOWN, e.t * 1.5, (1.8 - e.t).clamp(0.0, 1.0), 0),
             };
             let at = sc.put(model, clip, t, e.x, DECK, e.d, e.yaw, scale, tint);
@@ -1243,15 +1232,15 @@ impl Combat {
             if gun >= 0 {
                 sc.gun(gun, at, fade);
             }
-            if e.kind == E_BRUTE && e.state != ES_DOWN {
+            if worth(e.kind) > 1 && e.state != ES_DOWN {
                 sc.label(
                     LABEL_BAR,
                     4,
                     e.x,
-                    DECK + 2.1,
+                    DECK + 1.3 * e.size,
                     e.d,
                     0.16,
-                    (e.hp * 1000 / enemy_hp(E_BRUTE, s.hardness()).max(1)).min(1000),
+                    (e.hp * 1000 / e.hp_max.max(1)).clamp(0, 1000),
                     rgba(0xe04030, 255),
                     1.0,
                 );
@@ -1368,8 +1357,9 @@ impl Combat {
             let blink = 0.7 + 0.3 * (self.clock * (8.0 + 10.0 * u)).sin();
             warning(sc, sh.x, sh.d, sh.r, u, blink);
             let (x, y, d) = sh.at();
-            if sh.kind == 0 {
-                sc.put(M_BALL, 0, 0.0, x, y, d, 0.0, 1.8, 0);
+            if sh.kind != SH_BOSS {
+                let size = if sh.kind == SH_BALL { 1.8 } else { 0.9 };
+                sc.put(M_BALL, 0, 0.0, x, y, d, 0.0, size, 0);
                 sc.last().flags |= INST_NO_SHADOW;
             } else {
                 sc.sprite(
