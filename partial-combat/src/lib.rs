@@ -1,9 +1,11 @@
 //! Partial Combat: Clickbait Tactics - an original wasmga.me game. MIT licensed.
-//! A squad of green plastic soldiers runs down a pier over the sea, firing
-//! ahead on its own. Steer it through the gate that grows it most, shoot
-//! barrels for more soldiers and crates for better guns, keep out of holes
-//! and shell fire, outnumber the tan army, and beat the boss at the end.
-//! Twenty levels, or one endless pier.
+//! A squad of green plastic soldiers holds its place on a pier over the sea,
+//! firing ahead on its own, as gates, barrels and the tan army come on to it.
+//! Steer it into the gate that grows it most, shoot barrels for more soldiers
+//! and crates for better guns, keep out of shell fire, outnumber the tan
+//! army, and beat the boss that comes with the last of it. Twenty levels, or
+//! one endless pier. In the rules the squad runs along the pier all the
+//! same; the scene is drawn round it (scene.rs build).
 //!
 //! Runs on the wg engine, drawn in 3D: every frame the page reads the scene
 //! from wg3d_scene (scene.rs) and draws it, and lays this module's own
@@ -18,8 +20,9 @@ use wg::{Game, Input, Pointer, Rng, Screen};
 
 /// 1: the first; 3: a pier twice as wide, each gun its own shots, bosses that walk, jump and bring an army;
 /// 4: lanes and holes laid in 5 m tiles, bigger crates;
-/// 5: heavies and grenadiers, each tan soldier with its own hp_max and size
-const VERSION: u32 = 5;
+/// 5: heavies and grenadiers, each tan soldier with its own hp_max and size;
+/// 6: no holes or arenas, nobody falling
+const VERSION: u32 = 6;
 
 /// options, in catalog order: mode, level to start at
 pub const O_MODE: usize = 0;
@@ -44,6 +47,9 @@ pub const MAX_COUNT: i32 = 9_999_999;
 /// barrels' and crates' sizes
 pub const BARREL: f32 = 1.0;
 pub const CRATE: f32 = 2.6;
+/// how far a ship's cannon stands out from its middle, towards the pier: the
+/// model's half beam, as drawn
+const SHIP_GUN: f32 = 2.4 * scene::SHIP_SCALE;
 /// room each soldier takes in the squad
 const SPACING: f32 = 0.34;
 /// bullets of the squad's in the air at most; past that each carries the
@@ -70,8 +76,7 @@ const CLEAR_MS: i32 = 3200;
 
 // soldiers; each keeps its place in the squad, slot(its index)
 pub const S_OK: i32 = 0;
-pub const S_FALL: i32 = 1;
-pub const S_DOWN: i32 = 2;
+pub const S_DOWN: i32 = 1;
 /// seconds a knocked out soldier's place stays empty before one from further out steps in
 const STEP_UP: f32 = 0.35;
 
@@ -85,6 +90,8 @@ pub const E_GRENADIER: i32 = 5;
 pub const ES_WAIT: i32 = 0;
 pub const ES_CHARGE: i32 = 1;
 pub const ES_DOWN: i32 = 2;
+/// how near the squad riflemen and grenadiers start firing
+pub const STAND_RANGE: f32 = 26.0;
 
 // things on the pier
 pub const K_NONE: i32 = 0;
@@ -92,9 +99,7 @@ pub const K_GATE: i32 = 1;
 pub const K_BARREL: i32 = 2;
 pub const K_TNT: i32 = 3;
 pub const K_CRATE: i32 = 4;
-pub const K_HOLE: i32 = 5;
 pub const K_SHIP: i32 = 6;
-pub const K_ARENA: i32 = 8;
 
 // gate sums
 pub const OP_ADD: i32 = 0;
@@ -254,8 +259,6 @@ pub fn gun_dps(w: i32) -> f32 {
 pub struct Sol {
     pub x: f32,
     pub d: f32,
-    pub y: f32,
-    pub vy: f32,
     pub state: i32,
     /// seconds into its animation, so the squad doesn't move as one
     pub t: f32,
@@ -281,6 +284,9 @@ pub struct Enemy {
     /// the squad's fire (damage a second) its hp was set for; a squad that
     /// comes near firing less weakens it to match, and this is then 0
     pub meant: f32,
+    /// how far it has walked over the pier, which holds still round the
+    /// squad: its walk plays by it
+    pub walk: f32,
 }
 
 impl Enemy {
@@ -294,9 +300,8 @@ impl Enemy {
 /// A thing on the pier. Gates: value, op in a, the other gate of the pair
 /// in b, the damage a point in hp, points left to count in hp_max, damage
 /// towards the next in c, state 1 taken and 2 passed by. Barrels and
-/// crates: hp of hp_max, soldiers or the gun inside in value. Holes: x..x+w
-/// by d..d+len. Ships: time to the next shell in cool. The arena: where the
-/// boss stands.
+/// crates: hp of hp_max, soldiers or the gun inside in value. Ships: time to
+/// the next shell in cool.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Thing {
@@ -305,7 +310,6 @@ pub struct Thing {
     pub x: f32,
     pub d: f32,
     pub w: f32,
-    pub len: f32,
     pub value: i32,
     pub hp: i32,
     pub hp_max: i32,
@@ -534,10 +538,12 @@ pub fn boss_kind(level: i32) -> i32 {
 }
 /// when a giant going down starts to tip over, and when it hits the deck (s)
 pub const TOPPLE: [f32; 2] = [0.25, 1.15];
-/// How far short of the arena the boss fight starts.
+/// How far short of where it stops the squad starts to fight the boss, and
+/// how far short it starts to slow down.
 pub const BOSS_LEAD: f32 = 12.0;
-/// where the boss stands between attacks, past the arena's start
-pub const BOSS_HOME: f32 = 15.0;
+const STOP: f32 = 5.0;
+/// how far past where the squad stops the boss stands between attacks
+pub const BOSS_HOME: f32 = 12.0;
 /// the ping of a round off the boss's armour
 const CLANG: u32 = 0xff_70d0ff;
 /// blast(): a TNT barrel's, meant for the enemy; the boss's, which spares its troops
@@ -587,6 +593,11 @@ impl Boss {
     }
     pub fn body(&self) -> &'static Body {
         &BODIES[self.kind as usize]
+    }
+    /// its walk carried on over a step of the deck (backwards when negative)
+    fn stride(&mut self, step: f32) {
+        let m = self.body();
+        self.walk = (self.walk + step / (m.stride * m.scale)).rem_euclid(m.walk);
     }
     /// how tall it stands (m)
     pub fn tall(&self) -> f32 {
@@ -660,8 +671,8 @@ pub struct Save {
     pub expect_gun: i32,
     /// where each of the last chunks laid ends (0 for none) and the size expected past it
     pub plan_at: [[f32; 2]; PLANS],
-    /// where this level's boss fight starts (0 till it is laid)
-    pub arena_d: f32,
+    /// where the squad stops to fight this level's boss (0 till it is laid)
+    pub stop_d: f32,
     pub banner: i32,
     pub banner_ms: i32,
     pub banner_v: i32,
@@ -689,8 +700,6 @@ unsafe impl wg::Plain for Save {}
 const NO_SOL: Sol = Sol {
     x: 0.0,
     d: 0.0,
-    y: DECK,
-    vy: 0.0,
     state: S_OK,
     t: 0.0,
     flash: 0.0,
@@ -708,6 +717,7 @@ const NO_ENEMY: Enemy = Enemy {
     yaw: 0.0,
     size: 1.0,
     meant: 0.0,
+    walk: 0.0,
 };
 pub const NO_THING: Thing = Thing {
     kind: K_NONE,
@@ -715,7 +725,6 @@ pub const NO_THING: Thing = Thing {
     x: 0.0,
     d: 0.0,
     w: 0.0,
-    len: 0.0,
     value: 0,
     hp: 0,
     hp_max: 0,
@@ -802,7 +811,7 @@ impl Save {
             expect: 0.0,
             expect_gun: 0,
             plan_at: [[0.0; 2]; PLANS],
-            arena_d: 0.0,
+            stop_d: 0.0,
             banner: B_NONE,
             banner_ms: 0,
             banner_v: 0,
@@ -825,9 +834,6 @@ impl Save {
     }
     pub fn things(&self) -> &[Thing] {
         &self.thing[..self.nthing as usize]
-    }
-    pub fn arenas(&self) -> impl Iterator<Item = &Thing> {
-        self.things().iter().filter(|t| t.kind == K_ARENA)
     }
     pub fn enemies(&self) -> &[Enemy] {
         &self.en[..self.nen as usize]
@@ -854,35 +860,24 @@ impl Save {
             self.level as f32
         }
     }
+    /// The pier is still coming on to the squad: it hasn't stopped to fight the boss.
+    pub fn marching(&self) -> bool {
+        (self.phase == P_RUN || self.phase == P_BOSS)
+            && (self.stop_d == 0.0 || self.d < self.stop_d)
+    }
+    /// How fast the squad goes on (m/s), easing to a stop where it meets the boss's crowd.
+    pub fn pace(&self) -> f32 {
+        if !self.marching() {
+            0.0
+        } else if self.stop_d > 0.0 {
+            self.speed * ((self.stop_d - self.d) / STOP).clamp(0.0, 1.0).sqrt()
+        } else {
+            self.speed
+        }
+    }
     /// How many soldiers are still standing.
     pub fn alive(&self) -> usize {
         self.soldiers().iter().filter(|q| q.state == S_OK).count()
-    }
-    /// The pier is there to stand on at x, d.
-    pub fn deck(&self, x: f32, d: f32) -> bool {
-        if x.abs() > HALF - 0.05 {
-            return false;
-        }
-        !self
-            .things()
-            .iter()
-            .any(|t| t.kind == K_HOLE && x >= t.x && x < t.x + t.w && d >= t.d && d < t.d + t.len)
-    }
-    /// How wide the pier is at d, as the lane edges either side of x.
-    pub fn deck_span(&self, x: f32, d: f32) -> (f32, f32) {
-        let mut lo = -HALF;
-        let mut hi = HALF;
-        for t in self.things() {
-            if t.kind != K_HOLE || d < t.d || d >= t.d + t.len {
-                continue;
-            }
-            if t.x + t.w <= x {
-                lo = lo.max(t.x + t.w);
-            } else if t.x >= x {
-                hi = hi.min(t.x);
-            }
-        }
-        (lo, hi)
     }
 }
 
@@ -962,7 +957,7 @@ pub struct Combat {
     /// what happened this frame, for the page's effects and sounds (scene.rs)
     pub fx: Vec<scene::Fx>,
     pub scene: scene::Scene,
-    /// the camera (eye, then what it looks at), eased after the squad
+    /// the camera (eye, then what it looks at) as it stands to the squad, eased
     pub cam: [f32; 6],
     pub cam_set: bool,
     /// seconds shown, for the sea and things bobbing on it; the screen's shape
@@ -970,6 +965,8 @@ pub struct Combat {
     pub aspect: f32,
     /// the boss stepped this frame: its walk plays
     pub boss_walked: bool,
+    /// how far the squad went on along the pier this step
+    pub moved: f32,
 }
 
 impl Combat {
@@ -977,7 +974,9 @@ impl Combat {
         if self.fx.len() < 256 {
             self.fx.push(scene::Fx {
                 kind,
-                pos: [x, y, -d],
+                // where it is to the squad as it happens, which is how the
+                // scene is drawn (scene.rs build)
+                pos: [x, y, self.s.d - d],
                 a,
                 b,
                 c,
@@ -1004,7 +1003,7 @@ impl Combat {
         s.expect = s.count as f32;
         s.expect_gun = 0;
         s.plan_at = [[0.0; 2]; PLANS];
-        s.arena_d = 0.0;
+        s.stop_d = 0.0;
         s.nsol = 0;
         s.nen = 0;
         s.nthing = 0;
@@ -1044,8 +1043,6 @@ impl Combat {
             s.sol[i] = Sol {
                 x: s.cx + ox * 0.4,
                 d: s.d + oz * 0.4 - 0.6,
-                y: DECK,
-                vy: 0.0,
                 state: S_OK,
                 t,
                 flash: 0.6,
@@ -1057,7 +1054,6 @@ impl Combat {
             i -= 1;
             if s.sol[i].state == S_OK {
                 s.sol[i].state = S_DOWN;
-                s.sol[i].vy = 0.0;
                 s.sol[i].t = 0.0;
                 alive -= 1;
             }
@@ -1065,8 +1061,8 @@ impl Combat {
         s.biggest = s.biggest.max(s.count);
     }
 
-    /// A soldier is knocked out (or falls in): the squad is that much smaller.
-    fn lose(&mut self, i: usize, fall: bool) {
+    /// A soldier is knocked out: the squad is that much smaller.
+    fn lose(&mut self, i: usize) {
         let s = &mut self.s;
         if s.sol[i].state != S_OK {
             return;
@@ -1076,13 +1072,10 @@ impl Combat {
         let share = ((s.count + alive - 1) / alive).max(1);
         s.count = (s.count - share).max(0);
         let q = &mut s.sol[i];
-        q.state = if fall { S_FALL } else { S_DOWN };
+        q.state = S_DOWN;
         q.t = 0.0;
-        q.vy = if fall { 1.0 } else { 0.0 };
         let (x, d) = (q.x, q.d);
-        if !fall {
-            self.fx(scene::FX_PUFF, x, DECK, d, 0.0, 0.0, 0.0, scene::GREEN);
-        }
+        self.fx(scene::FX_PUFF, x, DECK, d, 0.0, 0.0, 0.0, scene::GREEN);
         // a big squad's reserves step in
         self.fill_squad();
     }
@@ -1137,7 +1130,7 @@ impl Combat {
                         // on down the pier
                         self.s.phase = P_RUN;
                         self.s.phase_ms = 0;
-                        self.s.arena_d = 0.0;
+                        self.s.stop_d = 0.0;
                         self.s.boss = NO_BOSS;
                         self.s.level += 1;
                     } else {
@@ -1151,15 +1144,34 @@ impl Combat {
         }
         self.s.time_ms += (dt * 1000.0) as i32;
         self.steer(input, dt);
-        if self.s.phase == P_RUN || self.s.phase == P_BOSS {
-            self.s.d += self.s.speed * dt;
-            if self.s.arena_d > 0.0 {
-                self.s.d = self.s.d.min(self.s.arena_d);
+        self.moved = 0.0;
+        if self.s.marching() {
+            let d0 = self.s.d;
+            self.s.d += self.s.pace() * dt;
+            if self.s.stop_d > 0.0 {
+                self.s.d = self.s.d.min(self.s.stop_d);
             }
-            // the fight starts as the boss's army comes on, and the squad walks on to the arena
-            if self.s.phase == P_RUN
-                && self.s.arena_d > 0.0
-                && self.s.d >= self.s.arena_d - BOSS_LEAD
+            let moved = self.s.d - d0;
+            self.moved = moved;
+            // the boss comes on with its crowd, feet in step with the pier;
+            // one going down lies where it falls
+            let b = &mut self.s.boss;
+            if b.state == 3 {
+                b.d += moved;
+            } else if b.state > 0 {
+                b.stride(moved);
+            }
+            // the knocked out lie where they fell on the pier, which holds
+            // still round the squad
+            let (ns, ne) = (self.s.nsol as usize, self.s.nen as usize);
+            for q in self.s.sol[..ns].iter_mut().filter(|q| q.state == S_DOWN) {
+                q.d += moved;
+            }
+            for e in self.s.en[..ne].iter_mut().filter(|e| e.state == ES_DOWN) {
+                e.d += moved;
+            }
+            // the fight starts as the boss's crowd comes on
+            if self.s.phase == P_RUN && self.s.stop_d > 0.0 && self.s.d >= self.s.stop_d - BOSS_LEAD
             {
                 self.s.phase = P_BOSS;
                 self.s.phase_ms = 0;
@@ -1225,67 +1237,41 @@ impl Combat {
         s.cx = want.clamp(s.cx - step, s.cx + step);
     }
 
-    /// Soldiers keep their places in the squad, squeezed to fit the pier; off its edge they fall.
+    /// Soldiers keep their places in the squad, squeezed to fit the pier.
     fn move_soldiers(&mut self, dt: f32) {
         let ease = 1.0 - (-9.0 * dt).exp();
         self.step_up();
         let n = self.s.nsol as usize;
-        // as wide as the places held; the deck under it, front to back, and it squeezes in to fit
+        // as wide as the places held, squeezed in to fit the deck
         let held = self.s.soldiers().iter().rposition(|q| q.state == S_OK);
         let r = radius(held.map_or(0, |i| i as i32 + 1));
-        let (mut lo, mut hi) = (-HALF, HALF);
-        for k in -2..=2 {
-            let (l, h) = self.s.deck_span(self.s.cx, self.s.d + k as f32 * r * 0.5);
-            lo = lo.max(l);
-            hi = hi.min(h);
-        }
         const EDGE: f32 = 0.3;
         let spread = (r - 0.3).max(0.01);
-        let room = ((hi - lo) * 0.5 - EDGE).max(0.2);
+        let room = HALF - EDGE;
         // steered against an edge it squeezes up, to half its width
-        let off = (self.s.cx - lo).min(hi - self.s.cx) - EDGE;
+        let off = room - self.s.cx.abs();
         let squeeze = (room / spread).min((off / spread).max(0.5)).min(1.0);
-        let used = spread * squeeze;
-        let mid = self
-            .s
-            .cx
-            .clamp(lo + EDGE + used, (hi - EDGE - used).max(lo + EDGE + used));
+        let used = (spread * squeeze).min(room);
+        let mid = self.s.cx.clamp(used - room, room - used);
         let cheer = self.s.phase == P_CLEAR || self.s.phase == P_WON;
         for i in 0..n {
             let q = &mut self.s.sol[i];
             q.t += dt;
             q.flash = (q.flash - dt * 3.0).max(0.0);
-            match q.state {
-                S_OK => {
-                    let (ox, oz) = slot(i);
-                    let gx = if cheer { q.x } else { mid + ox * squeeze };
-                    let gd = self.s.d + oz;
-                    q.x += (gx - q.x) * ease;
-                    q.d += (gd - q.d) * ease;
-                }
-                S_FALL => {
-                    q.vy -= 18.0 * dt;
-                    q.y += q.vy * dt;
-                }
-                _ => {}
+            if q.state == S_OK {
+                let (ox, oz) = slot(i);
+                let gx = if cheer { q.x } else { mid + ox * squeeze };
+                let gd = self.s.d + oz;
+                q.x += (gx - q.x) * ease;
+                q.d += (gd - q.d) * ease;
             }
         }
-        // off the deck they fall
-        for i in 0..n {
-            let q = self.s.sol[i];
-            if !cheer && q.state == S_OK && !self.s.deck(q.x, q.d) {
-                self.lose(i, true);
-            }
-        }
-        // splashes, and the gone are dropped: step_up has moved them out past
-        // everyone standing by then, so nobody's place changes
+        // the gone are dropped: step_up has moved them out past everyone
+        // standing by then, so nobody's place changes
         let mut w = 0;
         for i in 0..self.s.nsol as usize {
             let q = self.s.sol[i];
-            if q.state == S_FALL && q.y < 0.2 && q.y - q.vy * dt >= 0.2 {
-                self.fx(scene::FX_SPLASH, q.x, 0.0, q.d, 0.6, 0.0, 0.0, 0);
-            }
-            if !((q.state == S_FALL && q.y < -2.0) || (q.state == S_DOWN && q.t > 1.6)) {
+            if !(q.state == S_DOWN && q.t > 1.6) {
                 self.s.sol[w] = q;
                 w += 1;
             }
@@ -1604,7 +1590,7 @@ impl Combat {
             let (x, d) = (self.s.sol[i].x, self.s.sol[i].d);
             self.blast(x, d, 0.9, BLAST_FOE);
         } else {
-            self.lose(i, false);
+            self.lose(i);
         }
         true
     }
@@ -1720,7 +1706,7 @@ impl Combat {
         for i in 0..self.s.nsol as usize {
             let q = self.s.sol[i];
             if q.state == S_OK && (q.x - x).hypot(q.d - d) < reach {
-                self.lose(i, false);
+                self.lose(i);
             }
         }
         for k in 0..self.s.nthing as usize {
@@ -1739,6 +1725,7 @@ impl Combat {
         let mut w = 0;
         for k in 0..self.s.nen as usize {
             let mut e = self.s.en[k];
+            let (x0, d0) = (e.x, e.d);
             e.t += dt;
             e.flash = (e.flash - dt * 4.0).max(0.0);
             e.cool -= dt;
@@ -1747,8 +1734,9 @@ impl Combat {
                     let near = e.d - sd;
                     if e.meant > 0.0 && near < 42.0 {
                         // a squad smaller than planned isn't swept away: a
-                        // little less in it than its fire falls short
-                        let k = (fire / e.meant).min(1.0).powf(1.5);
+                        // little less in it than its fire falls short, less
+                        // so on later levels
+                        let k = (fire / e.meant).min(1.0).powf((1.5 - hard * 0.05).max(0.6));
                         let base = enemy_hp(e.kind, self.s.hardness_at(e.d)) as f32;
                         let was = bulk(e.hp_max as f32 / base);
                         e.hp = ((e.hp as f32 * k).round() as i32).max(1);
@@ -1756,7 +1744,7 @@ impl Combat {
                         e.size *= bulk(e.hp_max as f32 / base) / was;
                         e.meant = 0.0;
                     }
-                    if near < if stands(e.kind) { 26.0 } else { 20.0 } {
+                    if near < if stands(e.kind) { STAND_RANGE } else { 20.0 } {
                         if e.kind == E_GRENADIER {
                             // lobs a grenade where the squad will be
                             if e.cool <= 0.0 && near > 4.0 {
@@ -1837,6 +1825,8 @@ impl Combat {
                 }
                 _ => {}
             }
+            // over the pier as it stands round the squad
+            e.walk += (e.x - x0).hypot(e.d - d0 - self.moved);
             let gone = e.state == ES_DOWN && e.t > 1.8;
             if !gone {
                 self.s.en[w] = e;
@@ -1859,7 +1849,7 @@ impl Combat {
                 if q.state != S_OK || (q.x - e.x).abs() > REACH || (q.d - e.d).abs() > REACH {
                     continue;
                 }
-                self.lose(i, false);
+                self.lose(i);
                 let en = &mut self.s.en[k];
                 en.hp -= en.blow();
                 en.cool = 0.18;
@@ -1869,10 +1859,10 @@ impl Combat {
                 break;
             }
         }
-        // an enemy that falls behind the squad or off the pier is gone
+        // an enemy that falls behind the squad is gone
         for k in 0..self.s.nen as usize {
             let e = self.s.en[k];
-            if e.state != ES_DOWN && (e.d < sd - 6.0 || !self.s.deck(e.x, e.d)) {
+            if e.state != ES_DOWN && e.d < sd - 6.0 {
                 self.s.en[k].state = ES_DOWN;
                 self.s.en[k].t = 0.0;
             }
@@ -1937,7 +1927,7 @@ impl Combat {
                             self.break_thing(k);
                             break;
                         }
-                        self.lose(i, false);
+                        self.lose(i);
                         // what is left of it takes its share of ram soldiers
                         let th = &mut self.s.thing[k];
                         let full = th.hp_max.max(th.hp);
@@ -1961,17 +1951,9 @@ impl Combat {
                             let flight = 1.9;
                             let (x, d) = self.ahead(flight, 1.5, 1.0);
                             let dir = if t.x < 0.0 { 1.0 } else { -1.0 };
-                            self.lob(t.x + dir * 2.2, 2.2, t.d, x, d, 1.8, flight, SH_BALL);
-                            self.fx(
-                                scene::FX_CANNON,
-                                t.x + dir * 2.2,
-                                2.2,
-                                t.d,
-                                dir,
-                                0.0,
-                                0.0,
-                                0,
-                            );
+                            let gx = t.x + dir * SHIP_GUN;
+                            self.lob(gx, 2.2, t.d, x, d, 1.8, flight, SH_BALL);
+                            self.fx(scene::FX_CANNON, gx, 2.2, t.d, dir, 0.0, 0.0, 0);
                         }
                     }
                 }
@@ -1992,7 +1974,11 @@ impl Combat {
     /// Where the squad will be in `flight` seconds, give or take wide across and long along.
     fn ahead(&mut self, flight: f32, wide: f32, long: f32) -> (f32, f32) {
         let x = (self.s.cx + self.s.frand(-wide, wide)).clamp(-HALF + 0.8, HALF - 0.8);
-        let d = self.s.d + self.s.speed * flight + self.s.frand(-long, long);
+        let mut d = self.s.d + self.s.pace() * flight;
+        if self.s.stop_d > 0.0 {
+            d = d.min(self.s.stop_d);
+        }
+        let d = d + self.s.frand(-long, long);
         (x, d)
     }
 
@@ -2277,7 +2263,7 @@ impl Combat {
         let (tx, td) = (b.tx, b.td);
         match stage {
             0 => {
-                // straight up to the squad's front, keeping pace as it walks on to the arena
+                // straight up to the squad's front, keeping pace as it comes to a stop
                 let front = self.squad_front();
                 if self.boss_walk(tx, front + JUMP_REACH, dt) || t > 6.0 {
                     // where the squad is now, as far as one leap goes
@@ -2309,7 +2295,7 @@ impl Combat {
                     for k in 0..self.s.nsol as usize {
                         let q = self.s.sol[k];
                         if q.state == S_OK && (q.x - tx).hypot(q.d - td) < JUMP_R {
-                            self.lose(k, false);
+                            self.lose(k);
                         }
                     }
                 }
@@ -2351,7 +2337,7 @@ impl Combat {
             }
             let near = self.squad_front() + JUMP_REACH;
             let td = (d + self.s.frand(-1.5, 1.5))
-                .min(self.s.arena_d + BOSS_HOME)
+                .min(self.s.stop_d + BOSS_HOME)
                 .max(near);
             (self.s.boss.tx, self.s.boss.td) = (tx, td);
         } else if atk == A_JUMP {
@@ -2412,10 +2398,9 @@ impl Combat {
         let step = (b.speed() * dt).min(far);
         b.x += dx / far * step;
         b.d += dd / far * step;
-        let m = b.body();
         let before = b.walk;
-        let clip = step / (m.stride * m.scale);
-        b.walk = (b.walk + if back { -clip } else { clip }).rem_euclid(m.walk);
+        b.stride(if back { -step } else { step });
+        let m = b.body();
         // a footfall each half of the walk's loop
         let half = m.walk * 0.5;
         let (k0, k1) = ((before / half).floor(), (b.walk / half).floor());
@@ -2452,6 +2437,7 @@ impl Combat {
             yaw: 0.0,
             size,
             meant: 0.0,
+            walk: t * 4.0,
         };
         self.s.nen += 1;
     }
@@ -2522,15 +2508,8 @@ impl Combat {
         let mut w = 0;
         for k in 0..self.s.nthing as usize {
             let t = self.s.thing[k];
-            // ships stay while their hulls show, arenas while the shore
-            // behind them is drawn (scene.rs put_decor)
-            let end = t.d
-                + t.len.max(0.0)
-                + match t.kind {
-                    K_SHIP => 12.0,
-                    K_ARENA => 20.0,
-                    _ => 0.0,
-                };
+            // ships stay while their hulls show
+            let end = t.d + if t.kind == K_SHIP { 12.0 } else { 0.0 };
             if end > sd - 16.0 {
                 self.s.thing[w] = t;
                 w += 1;
@@ -2604,6 +2583,7 @@ impl Game for Combat {
             clock: 0.0,
             aspect: 1.0,
             boss_walked: false,
+            moved: 0.0,
         }
     }
     fn save(&mut self) -> &mut Save {
