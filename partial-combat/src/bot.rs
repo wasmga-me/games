@@ -1,7 +1,7 @@
 //! Bots that play every level and the endless pier, for balancing:
 //!   cargo test --release -- --nocapture
 //! A sharp player picks the better gate, shoots barrels and crates open and
-//! keeps out of holes and shell fire; a good one now and then misses a gate
+//! keeps out of shell fire; a good one now and then misses a gate
 //! or a shell; a casual one gets gates wrong more often, doesn't steer at
 //! barrels and crates and dodges half the shells. The asserts hold the
 //! balance aimed for: every level can be lost, a sharp player clears each
@@ -166,40 +166,6 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
             .map_or(0.0, |e| e.x.clamp(-4.0, 4.0));
     }
     want = want.clamp(-HALF + 0.8, HALF - 0.8);
-    // the places across the pier it weighs, a quarter metre apart
-    let places = || (-36..=36).map(|i| i as f32 * 0.25);
-    // keep to the deck: how far ahead x stays clear, and whether the squad gets there without crossing a hole
-    let w = r.min(1.2);
-    let ahead = |x: f32| {
-        (0..12)
-            .take_while(|&i| {
-                let d = s.d + i as f32;
-                s.deck(x, d) && s.deck(x - w, d) && s.deck(x + w, d)
-            })
-            .count()
-    };
-    // on the way across the squad runs on about a metre for every two it moves, front to back
-    let reach = |x: f32| {
-        (0..=20).all(|i| {
-            let f = i as f32 / 20.0;
-            let x = s.cx + (x - s.cx) * f;
-            let d = s.d + (x - s.cx).abs() * f * 0.5;
-            (-2..=2).all(|k| s.deck(x, d + k as f32 * r * 0.5 + 0.5))
-        })
-    };
-    let clear = |x: f32| ahead(x) >= 12 && reach(x);
-    if !clear(want) {
-        // the most deck ahead, near where it wanted to go; crossing a hole's edge only when staying is worse
-        let score = |x: f32| {
-            ahead(x) as f32 * 100.0 - (x - want).abs() * 4.0 - if reach(x) { 0.0 } else { 400.0 }
-        };
-        if let Some((x, _)) = places()
-            .map(|x| (x, score(x)))
-            .max_by(|a, b| a.1.total_cmp(&b.1))
-        {
-            want = x;
-        }
-    }
     // shells about to land, and the boss about to jump: where they catch the fewest
     let jump = s.boss.landing().map(|(x, d)| (x, d, JUMP_R));
     let hit = |x: f32| {
@@ -220,8 +186,9 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
     let seen = hash01(threat, salt ^ 7) < sk.dodge;
     if (s.nshell > 0 || jump.is_some()) && hit(want) > 0.0 && seen {
         let score = |x: f32| hit(x) * 10.0 + (x - s.cx).abs();
-        if let Some((x, _)) = places()
-            .filter(|&x| clear(x))
+        // weighing places across the pier a quarter metre apart
+        if let Some((x, _)) = (-36..=36)
+            .map(|i| i as f32 * 0.25)
             .map(|x| (x, score(x)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
         {
@@ -251,8 +218,6 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
             let s = &p.s;
             cause = if phase == P_BOSS {
                 "boss"
-            } else if s.soldiers().iter().any(|q| q.state == S_FALL) {
-                "fell"
             } else if s
                 .enemies()
                 .iter()
@@ -414,24 +379,14 @@ fn trace() {
                 .iter()
                 .filter(|t| t.d - s.d > -3.0 && t.d - s.d < 20.0)
                 .map(|t| {
-                    if t.kind == K_HOLE {
-                        format!(
-                            "hole@{:.0}..{:.0}x{:.1}..{:.1}",
-                            t.d - s.d,
-                            t.d + t.len - s.d,
-                            t.x,
-                            t.x + t.w
-                        )
-                    } else {
-                        format!(
-                            "{}@{:.0}x{:.1}v{}h{}",
-                            t.kind,
-                            t.d - s.d,
-                            t.x,
-                            t.value,
-                            t.hp
-                        )
-                    }
+                    format!(
+                        "{}@{:.0}x{:.1}v{}h{}",
+                        t.kind,
+                        t.d - s.d,
+                        t.x,
+                        t.value,
+                        t.hp
+                    )
                 })
                 .collect();
             let en = s.enemies().iter().filter(|e| e.state != ES_DOWN).count();

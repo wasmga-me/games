@@ -68,9 +68,9 @@ fn progress(s: &Save) -> f32 {
     if s.phase != P_RUN {
         return 1.0;
     }
-    // before the arena is laid, the pier laid so far is most of the way
-    let end = if s.arena_d > 0.0 {
-        s.arena_d
+    // before the boss is laid, the pier laid so far is most of the way
+    let end = if s.stop_d > 0.0 {
+        s.stop_d
     } else {
         s.next_d + 40.0
     };
