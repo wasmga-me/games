@@ -163,9 +163,7 @@ async function finish(doc, file, { simplify: ratio, error = 0.02, volume = "mesh
 const SOLDIERS = { soldier: "helmet", runner: "band", rifle: "beret" };
 const SOLDIER_CLIPS = {
   Idle_Loop: "idle",
-  Pistol_Idle_Loop: "hold",
   Sprint_Loop: "walk",
-  Pistol_Shoot: "shoot_onehanded",
   Death01: "defeat",
   Dance_Loop: "victory",
   Punch_Jab: "punch",
@@ -547,7 +545,7 @@ async function guns() {
 
 // ---------- pier and shore: Kenney's Pirate Kit, boats: Kenney's Watercraft Kit ----------
 const PIRATE = [
-  "structure-platform", "structure-platform-dock", "barrel", "crate", "cannon-ball",
+  "structure-platform", "structure-platform-dock", "cannon-ball",
   "palm-detailed-bend", "palm-detailed-straight", "rocks-a", "rocks-b", "rocks-c", "rocks-sand-a",
   "patch-sand-foliage", "patch-grass-foliage", "ship-pirate-large", "ship-pirate-medium", "ship-wreck",
   "tower-watch",
