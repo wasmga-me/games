@@ -75,8 +75,21 @@ pub struct Ledge {
 const LONG_AGO: i32 = 10_000;
 
 /// the most a gap between ledges grows to on each pace, inside a bounce
-const GAP_CAP: [f32; N_PACES as usize] = [118.0, 138.0, 152.0];
+const GAP_CAP: [f32; N_PACES as usize] = [118.0, 142.0, 156.0];
 const _: () = assert!(GAP_CAP[2] < BOUNCE - 20.0);
+/// the height at which each pace is at its hardest
+const HARDEST: [f32; N_PACES as usize] = [20_000.0, 16_000.0, 9_000.0];
+/// how fast the screen rises on its own (plan units a second) on each pace,
+/// at first and at its hardest, and from what height
+const RISE: [(f32, f32, f32); N_PACES as usize] = [(0.0, 0.0, 0.0), (25.0, 70.0, 2_000.0), (45.0, 105.0, 300.0)];
+/// birds: from what height, and how many more than on Normal
+const BIRDS: [(f32, f32); N_PACES as usize] = [(4_000.0, 0.7), (1_500.0, 1.2), (500.0, 1.8)];
+/// how much more often ledges slide and how much faster than on Normal,
+/// and how often a ledge on the way up crumbles at the hardest
+const SLIDES: [(f32, f32); N_PACES as usize] = [(0.6, 1.0), (1.1, 1.0), (1.6, 1.3)];
+const CRUMBLES: [f32; N_PACES as usize] = [0.0, 0.12, 0.3];
+/// how much the ledges narrow by at the hardest
+const NARROW: [f32; N_PACES as usize] = [0.0, 0.1, 0.25];
 
 impl Ledge {
     pub fn new(x: f32, alt: f32, w: f32, vx: f32, kind: i32, spring: f32) -> Ledge {
@@ -189,9 +202,14 @@ impl State {
         (self.best_alt / 10.0) as i32
     }
 
-    /// 0 at the ground to 1 at 2,000 m and above
+    /// the pace chosen, 0 Gentle to 2 Wild
+    fn pace(&self) -> usize {
+        self.opt[O_PACE].clamp(0, N_PACES - 1) as usize
+    }
+
+    /// 0 at the ground, 1 at the pace's hardest
     fn progress(&self) -> f32 {
-        (self.top / 20_000.0).min(1.0)
+        (self.top / HARDEST[self.pace()]).min(1.0)
     }
 
     fn free(items: &mut [Thing]) -> Option<&mut Thing> {
@@ -200,7 +218,7 @@ impl State {
 
     /// Lays ledges, gems, birds and gusts up to a screen above the top.
     fn lay(&mut self) {
-        let pace = self.opt[O_PACE].clamp(0, N_PACES - 1) as usize;
+        let pace = self.pace();
         while self.top < self.cam + PH * 1.6 {
             let p = self.progress();
             // the gap to the next ledge grows with height
@@ -208,15 +226,22 @@ impl State {
             let lo = 28.0 + 50.0 * p;
             let hi = 72.0 + (cap - 72.0) * p;
             let gap = lo + (hi - lo) * self.rng.float();
+            // after a crumbling ledge on the way up, a still one
+            let after_crumble = self.ledges.iter().any(|l| l.w > 0.0 && l.alt == self.top && l.kind == CRUMBLE);
             self.top += gap;
-            let x = self.rng.float() * (PW - LEDGE_W);
-            let sliding = self.rng.float() < (0.04 + 0.4 * p) * [0.6, 1.0, 1.3][pace];
-            let spring = if self.rng.float() < 0.06 { 8.0 + self.rng.float() * (LEDGE_W - 16.0) } else { -1.0 };
-            let vx = if sliding { (40.0 + 90.0 * p) * if self.rng.below(2) == 0 { 1.0 } else { -1.0 } } else { 0.0 };
+            let w = LEDGE_W * (1.0 - NARROW[pace] * p);
+            let x = self.rng.float() * (PW - w);
+            let (more, faster) = SLIDES[pace];
+            let sliding = !after_crumble && self.rng.float() < (0.04 + 0.4 * p) * more;
+            // one bounce on it, then on up: crumbling ledges on the way
+            let crumbles = !sliding && !after_crumble && self.rng.float() < CRUMBLES[pace] * p;
+            let spring = if !crumbles && self.rng.float() < 0.06 { 8.0 + self.rng.float() * (w - 16.0) } else { -1.0 };
+            let vx = if sliding { (40.0 + 90.0 * p) * faster * if self.rng.below(2) == 0 { 1.0 } else { -1.0 } } else { 0.0 };
             let alt = self.top;
-            self.put_ledge(Ledge::new(x, alt, LEDGE_W, vx, if sliding { SLIDING } else { PLAIN }, spring));
+            let kind = if sliding { SLIDING } else if crumbles { CRUMBLE } else { PLAIN };
+            self.put_ledge(Ledge::new(x, alt, w, vx, kind, spring));
             if self.rng.float() < 0.28 {
-                let gx = x + LEDGE_W / 2.0;
+                let gx = x + w / 2.0;
                 let galt = alt + 40.0 + self.rng.float() * 50.0;
                 if let Some(g) = Self::free(&mut self.gems) {
                     *g = Thing { x: gx, alt: galt, vx: 0.0, alive: 1 };
@@ -228,8 +253,8 @@ impl State {
                 let calt = alt - gap * 0.5;
                 self.put_ledge(Ledge::new(cx, calt, LEDGE_W, 0.0, CRUMBLE, -1.0));
             }
-            let birds_from = [4000.0, 2500.0, 1500.0][pace];
-            if alt > birds_from && self.rng.float() < (0.03 + 0.07 * p) * [0.7, 1.0, 1.4][pace] {
+            let (birds_from, more) = BIRDS[pace];
+            if alt > birds_from && self.rng.float() < (0.03 + 0.07 * p) * more {
                 let left = self.rng.below(2) == 0;
                 let v = (60.0 + 80.0 * p + 30.0 * self.rng.float()) * if left { 1.0 } else { -1.0 };
                 let balt = alt + gap * 0.5;
@@ -239,7 +264,7 @@ impl State {
             }
             if alt > 1500.0 && self.rng.float() < 0.012 {
                 if let Some(g) = Self::free(&mut self.gusts) {
-                    *g = Thing { x: x + LEDGE_W / 2.0, alt: alt + 45.0, vx: 0.0, alive: 1 };
+                    *g = Thing { x: x + w / 2.0, alt: alt + 45.0, vx: 0.0, alive: 1 };
                 }
             }
         }
@@ -395,8 +420,13 @@ impl State {
             }
         }
 
-        // the screen follows on the way up, never down
+        // the screen follows on the way up, never down, and on the faster
+        // paces it rises on its own once the climb is under way
         self.cam = self.cam.max(self.alt - (PH - CAM_LEAD));
+        let (slow, fast, from) = RISE[self.pace()];
+        if fast > 0.0 && self.cam > from && self.phase == PLAY {
+            self.cam += (slow + (fast - slow) * self.progress()) * t;
+        }
         for b in self.birds.iter_mut() {
             if b.alive != 0 && b.alt < self.cam - 60.0 {
                 b.alive = 0;

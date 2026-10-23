@@ -21,8 +21,8 @@ pub fn steer(s: &State) -> f32 {
         if wrap_dx(s.x, mid).abs() > reach {
             continue;
         }
-        // a crumbling ledge only when nothing else will do
-        let score = l.alt - if l.kind == CRUMBLE { 400.0 } else { 0.0 };
+        // a crumbling ledge only when nothing as high will do
+        let score = l.alt - if l.kind == CRUMBLE { 20.0 } else { 0.0 };
         if best.is_none_or(|b| score > b.0) {
             best = Some((score, mid));
         }
