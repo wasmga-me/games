@@ -771,6 +771,7 @@ impl World {
         let mut no_edit = false;
         let mut fixup: Option<String> = None;
         let mut allow_empty = false;
+        let mut allow_empty_message = false;
         let mut quiet = false;
         let mut paths = vec![];
         let mut i = 0;
@@ -794,7 +795,7 @@ impl World {
                     }
                 }
                 "--allow-empty" => allow_empty = true,
-                "--allow-empty-message" => {}
+                "--allow-empty-message" => allow_empty_message = true,
                 "-q" | "--quiet" => quiet = true,
                 "-v" | "--verbose" | "-s" | "--signoff" | "--" => {}
                 "-e" | "--edit" => {}
@@ -858,7 +859,7 @@ impl World {
             return Err(String::new());
         };
         msg = clean_message(&msg);
-        if msg.is_empty() {
+        if msg.is_empty() && !allow_empty_message {
             return Err("Aborting commit due to empty commit message.".into());
         }
         let author = if amend {
