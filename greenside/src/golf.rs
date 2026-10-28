@@ -240,23 +240,17 @@ impl State {
     }
 
     /// Mouse or touch: press anywhere, pull back, let go to putt. A pull
-    /// let go off the screen (or cancelled) is called off.
+    /// goes on off the screen, and putts when let go there too; a pull
+    /// the page cancels (the pointer gone) is called off.
     pub fn pointer(&mut self, d: &mut Drag, x: f32, y: f32, inside: bool, pressed: bool, released: bool) -> u32 {
-        if self.phase != AIM {
+        if self.phase != AIM || !inside {
             d.on = false;
             return 0;
         }
-        if pressed && inside {
+        if pressed {
             *d = Drag { on: true, x0: x, y0: y, x, y };
         }
         if !d.on {
-            return 0;
-        }
-        if !inside {
-            // x, y are -1 off the screen: the pull stays where it was
-            if released {
-                d.on = false;
-            }
             return 0;
         }
         (d.x, d.y) = (x, y);
