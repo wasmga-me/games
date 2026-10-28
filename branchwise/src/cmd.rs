@@ -144,6 +144,13 @@ pub(crate) fn walk(g: &G, from: &[Oid], hide: &[Oid]) -> Vec<lg::Commit> {
     v
 }
 
+/// The git commands past init, clone, config, help and version.
+pub(crate) const KNOWN: &[&str] = &[
+            "status", "add", "rm", "mv", "restore", "commit", "log", "show", "diff", "branch", "switch", "checkout", "merge",
+            "rebase", "cherry-pick", "revert", "reset", "tag", "describe", "reflog", "stash", "bisect", "worktree", "fetch",
+            "pull", "push", "remote", "rev-parse", "cat-file", "ls-files", "ls-tree", "clean",
+];
+
 impl World {
     pub(crate) fn here(&self) -> R<G> {
         lg::discover(&self.cwd).ok_or_else(|| NOT_REPO.to_string())
@@ -206,11 +213,6 @@ impl World {
             "config" => return self.config(rest),
             _ => {}
         }
-        let known = [
-            "status", "add", "rm", "mv", "restore", "commit", "log", "show", "diff", "branch", "switch", "checkout", "merge",
-            "rebase", "cherry-pick", "revert", "reset", "tag", "describe", "reflog", "stash", "bisect", "worktree", "fetch",
-            "pull", "push", "remote", "rev-parse", "cat-file", "ls-files", "ls-tree", "clean",
-        ];
         let unsupported = [
             "blame", "grep", "shortlog", "notes", "submodule", "sparse-checkout", "am", "apply", "format-patch", "archive",
             "gc", "fsck", "prune", "maintenance", "bundle", "filter-branch", "replace", "range-diff", "whatchanged", "mergetool",
@@ -219,8 +221,8 @@ impl World {
         if unsupported.contains(&sub) {
             return Err(format!("git {sub} isn't part of these lessons."));
         }
-        if !known.contains(&sub) {
-            let near: Vec<&&str> = known.iter().filter(|k| distance(k, sub) <= 2).collect();
+        if !KNOWN.contains(&sub) {
+            let near: Vec<&&str> = KNOWN.iter().filter(|k| distance(k, sub) <= 2).collect();
             if near.is_empty() {
                 return Err(format!("git: '{sub}' is not a git command. See 'git --help'."));
             }

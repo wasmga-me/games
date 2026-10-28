@@ -5,6 +5,7 @@
 #[cfg(feature = "selfcheck")]
 mod check;
 mod cmd;
+mod complete;
 mod flow;
 mod git;
 mod glyphs;
@@ -15,7 +16,7 @@ mod play;
 mod shell;
 mod vfs;
 
-use git::{Snap, World, CMD, ERR, FAIL, GOOD, HINT};
+use git::{Snap, World, CMD, ERR, FAIL, GOOD, HINT, OUT};
 use graph::{Area, Motion, Spot, Theme, THEMES};
 use levels::LEVELS;
 use wg::{hex, tr, Game, Input, KeyRepeat, Pointer, Screen};
@@ -100,6 +101,8 @@ struct Branchwise {
     animating: bool,
     show_goal: bool,
     rep: KeyRepeat,
+    /// the line whose completions were last listed, so a second Tab doesn't list them again
+    listed: Option<String>,
 }
 
 fn fresh() -> Save {
@@ -339,10 +342,41 @@ impl Branchwise {
         }
     }
 
+    /// Tab: finishes the word before the caret, as far as its matches agree;
+    /// when they part ways, lists them.
+    fn complete(&mut self) {
+        let before: String = self.input[..self.cursor].iter().collect();
+        if self.listed.as_ref() == Some(&before) {
+            return;
+        }
+        let (typed, found) = self.world.complete(&before);
+        let Some(first) = found.first() else { return };
+        let mut n = first.len();
+        for w in &found[1..] {
+            n = n.min(first.bytes().zip(w.bytes()).take_while(|(a, b)| a == b).count());
+        }
+        while !first.is_char_boundary(n) {
+            n -= 1;
+        }
+        let mut add = first[typed..n].to_string();
+        if found.len() == 1 && !add.ends_with('/') && self.input.get(self.cursor) != Some(&' ') {
+            add.push(' ');
+        }
+        if add.is_empty() {
+            self.say(CMD, before.trim().to_string());
+            self.say(OUT, found.join("  "));
+            self.listed = Some(before);
+        }
+        for ch in add.chars() {
+            self.key(ch as i32);
+        }
+    }
+
     fn submit(&mut self) {
         let line: String = self.input.iter().collect::<String>().trim().to_string();
         self.input.clear();
         self.cursor = 0;
+        self.listed = None;
         if line.is_empty() {
             return;
         }
@@ -595,6 +629,7 @@ impl Game for Branchwise {
             animating: false,
             show_goal: false,
             rep: KeyRepeat(0),
+            listed: None,
         }
     }
     fn save(&mut self) -> &mut Save {
@@ -679,9 +714,11 @@ impl Game for Branchwise {
             return false;
         }
         if self.world.todo.is_some() {
-            return self.todo_key(code);
+            // Tab moves on from the to-do list
+            return code != 9 && self.todo_key(code);
         }
         match code {
+            9 => self.complete(),
             13 => {
                 if self.input.iter().all(|c| *c == ' ') {
                     return false;

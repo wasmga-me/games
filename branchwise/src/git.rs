@@ -333,8 +333,7 @@ impl World {
             quiet: false,
             in_repo: false,
         };
-        let mut fs = std::mem::take(&mut w.fs);
-        vfs::enter(&mut fs, || {
+        w.with_fs(|w| {
             lg::init();
             let f = vfs::cur();
             f.mkdir_all(APP).unwrap();
@@ -348,7 +347,6 @@ impl World {
             }
             w.refresh();
         });
-        w.fs = fs;
         w
     }
 
@@ -359,8 +357,7 @@ impl World {
 
     /// After a level's setup: every line in it is known from now on.
     pub fn freeze(&mut self) {
-        let mut fs = std::mem::take(&mut self.fs);
-        vfs::enter(&mut fs, || {
+        self.with_fs(|w| {
             let mut known = HashSet::new();
             let mut add = |b: &[u8]| {
                 for l in String::from_utf8_lossy(b).lines() {
@@ -381,11 +378,10 @@ impl World {
             for (_, b) in vfs::cur().files_under(HOME) {
                 add(&b);
             }
-            self.known = Some(known);
-            self.sigs.clear();
-            self.refresh();
+            w.known = Some(known);
+            w.sigs.clear();
+            w.refresh();
         });
-        self.fs = fs;
         self.out.clear();
     }
 
@@ -409,24 +405,29 @@ impl World {
     /// Runs a typed line; true when it changed anything (and so is kept
     /// for the save and undo).
     pub fn run(&mut self, line: &str) -> bool {
-        let mut fs = std::mem::take(&mut self.fs);
-        let changed = vfs::enter(&mut fs, || {
-            let before = self.fingerprint();
+        self.with_fs(|w| {
+            let before = w.fingerprint();
             for words in split(line) {
-                let r = self.exec(&words);
+                let r = w.exec(&words);
                 if let Err(e) = r {
                     if !e.is_empty() {
-                        self.err(e);
+                        w.err(e);
                     }
                     break;
                 }
             }
-            let changed = self.fingerprint() != before;
-            self.refresh();
+            let changed = w.fingerprint() != before;
+            w.refresh();
             changed
-        });
+        })
+    }
+
+    /// Runs `f` with the world's files as the file system libgit2 sees.
+    pub(crate) fn with_fs<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let mut fs = std::mem::take(&mut self.fs);
+        let r = vfs::enter(&mut fs, || f(self));
         self.fs = fs;
-        changed
+        r
     }
 
     /// Changes whenever the state does (not the output).
