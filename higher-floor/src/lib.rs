@@ -1,7 +1,6 @@
 //! Higher Floor - an original wasmga.me game. MIT licensed; the hero,
-//! monsters, potion, chest, trap and decorations are Kenney's Mini Dungeon
-//! and Graveyard Kit, the trees the Nature Kit (CC0), rendered by
-//! games-src/tools/render3d.
+//! monsters, items and trees are cartoons drawn by art/draw.py with
+//! games-src/tools/cartoon.
 //! A tower of monsters stands next to the hero's. Tap a room the hero can
 //! reach (the ground floor, or next to a room taken) and he jumps in: he
 //! beats a weaker monster and takes its power, and loses to one as strong
