@@ -123,8 +123,14 @@ pub struct Level {
     pub need: usize,
 }
 
-/// a grain's radius, plan units
+/// a coin's radius, plan units
 pub const GRAIN_R: f32 = 4.0;
+/// how far apart drops of water and lava sit at rest, and the size of
+/// each one (and of a stone made from one) against walls and coins
+pub const SPACING: f32 = 5.0;
+pub const DROP_R: f32 = 2.5;
+/// how far apart rows of drops start: packed as tight as they go
+pub const ROW_RISE: f32 = SPACING * 0.866;
 
 /// Level n: the layouts in turn, then mirrored, then as first with more
 /// gold needed.
@@ -140,18 +146,19 @@ pub fn level(n: i32) -> Level {
     let mut grains = Vec::new();
     let mut gold = 0;
     for &(kind, x0, y0, x1, y1) in l.fills {
-        // packed in rows, every other row shifted half a grain
-        let step = 2.0 * GRAIN_R;
-        let mut y = y1 - GRAIN_R;
+        // packed in rows, every other row shifted half a coin or drop
+        let (step, rise, shift) = if kind == GOLD { (2.0 * GRAIN_R, 1.8 * GRAIN_R, GRAIN_R * 0.5) } else { (SPACING, ROW_RISE, SPACING / 2.0) };
+        let r = step / 2.0;
+        let mut y = y1 - r;
         let mut row = 0;
-        while y >= y0 + GRAIN_R - 0.01 {
-            let mut x = x0 + GRAIN_R + if row % 2 == 1 { GRAIN_R * 0.5 } else { 0.0 };
-            while x <= x1 - GRAIN_R + 0.01 {
+        while y >= y0 + r - 0.01 {
+            let mut x = x0 + r + if row % 2 == 1 { shift } else { 0.0 };
+            while x <= x1 - r + 0.01 {
                 grains.push((fx(x), y, kind));
                 gold += (kind == GOLD) as usize;
                 x += step;
             }
-            y -= step * 0.9;
+            y -= rise;
             row += 1;
         }
     }
