@@ -7,19 +7,30 @@ setup, pause and game over screens around it.
 | Game | Play | Source | Written in |
 | --- | --- | --- | --- |
 | 2048 | [wasmga.me/games/2048](https://wasmga.me/games/2048) | [2048.c](2048.c) | C |
+| Bankshot | [wasmga.me/games/bankshot](https://wasmga.me/games/bankshot) | [bankshot/](bankshot) | Rust |
+| Boarding | [wasmga.me/games/boarding](https://wasmga.me/games/boarding) | [boarding/](boarding) | Rust |
 | Branchwise | [wasmga.me/games/branchwise](https://wasmga.me/games/branchwise) | [branchwise/](branchwise) | Rust |
 | Breakwall | [wasmga.me/games/breakwall](https://wasmga.me/games/breakwall) | [breakwall/](breakwall) | Rust |
+| Decant | [wasmga.me/games/decant](https://wasmga.me/games/decant) | [decant/](decant) | Rust |
 | Facets | [wasmga.me/games/facets](https://wasmga.me/games/facets) | [facets/](facets) | Rust |
 | Flipside | [wasmga.me/games/flipside](https://wasmga.me/games/flipside) | [flipside.c](flipside.c) | C |
+| Flowline | [wasmga.me/games/flowline](https://wasmga.me/games/flowline) | [flowline/](flowline) | Rust |
 | Greenside | [wasmga.me/games/greenside](https://wasmga.me/games/greenside) | [greenside/](greenside) | Rust |
+| Hexpile | [wasmga.me/games/hexpile](https://wasmga.me/games/hexpile) | [hexpile/](hexpile) | Rust |
+| Higher Floor | [wasmga.me/games/higher-floor](https://wasmga.me/games/higher-floor) | [higher-floor/](higher-floor) | Rust |
+| Hive Guard | [wasmga.me/games/hive-guard](https://wasmga.me/games/hive-guard) | [hive-guard/](hive-guard) | Rust |
+| Offgrid | [wasmga.me/games/offgrid](https://wasmga.me/games/offgrid) | [offgrid/](offgrid) | Rust |
 | Pantry Solitaire | [wasmga.me/games/pantry](https://wasmga.me/games/pantry) | [pantry/](pantry) | Rust |
 | Partial Combat: Clickbait Tactics | [wasmga.me/games/partial-combat](https://wasmga.me/games/partial-combat) | [partial-combat/](partial-combat) | Rust |
+| Pinwork | [wasmga.me/games/pinwork](https://wasmga.me/games/pinwork) | [pinwork/](pinwork) | Rust |
 | Sapper | [wasmga.me/games/sapper](https://wasmga.me/games/sapper) | [sapper.c](sapper.c) | C |
 | Slider | [wasmga.me/games/slider](https://wasmga.me/games/slider) | [slider/](slider) | Rust |
 | Snake | [wasmga.me/games/snake](https://wasmga.me/games/snake) | [snake.c](snake.c) | C |
 | Sourdough Solitaire | [wasmga.me/games/sourdough](https://wasmga.me/games/sourdough) | [sourdough.c](sourdough.c) | C |
 | Sudoku | [wasmga.me/games/sudoku](https://wasmga.me/games/sudoku) | [sudoku/](sudoku) | Rust |
 | Tilestack | [wasmga.me/games/tilestack](https://wasmga.me/games/tilestack) | [tilestack/](tilestack) | Rust |
+| Unbolt | [wasmga.me/games/unbolt](https://wasmga.me/games/unbolt) | [unbolt/](unbolt) | Rust |
+| Unpark | [wasmga.me/games/unpark](https://wasmga.me/games/unpark) | [unpark/](unpark) | Rust |
 | Updraft | [wasmga.me/games/updraft](https://wasmga.me/games/updraft) | [updraft/](updraft) | Rust |
 | Zork I, II and III (Infocom's) | [wasmga.me/games/zork1](https://wasmga.me/games/zork1) | [zmachine/](zmachine), [zork1/](zork1), [zork2/](zork2), [zork3/](zork3) | Rust |
 
@@ -50,6 +61,11 @@ gets.
 (public domain, CC0); the flowers, seasons and white dragon in
 `tilestack/art/extra/` are ours. `node tilestack/art/build.mjs` (needs sharp)
 renders them all into `tilestack/src/art.bin`, which the module embeds.
+
+`bankshot/`, `boarding/`, `higher-floor/`, `hive-guard/`, `pinwork/` and
+`unpark/` draw art rendered from [Kenney](https://kenney.nl)'s CC0 3D models:
+each `art/jobs.py` lists the renders, made with `tools/render3d/` (see its
+README.md) into the game's `src/art.png`.
 
 `wgdemo/` is the smallest whole game on the Rust engine, to copy for a new one.
 

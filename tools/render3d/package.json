@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Renders 3D models into sprite sheets for the native games",
+  "dependencies": {
+    "three": "0.170.0"
+  }
+}

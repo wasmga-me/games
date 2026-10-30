@@ -1,0 +1,234 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>render3d</title>
+<body style="margin:0">
+<script type="importmap">{"imports": {"three": "./three/build/three.module.js", "three/addons/": "./three/examples/jsm/"}}</script>
+<script type="module">
+// Renders one job (see README.md) into a PNG data URL: window.render(job).
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+const loader = new GLTFLoader();
+const files = {};
+async function gltf(url) {
+  files[url] ??= loader.loadAsync(url);
+  return files[url];
+}
+
+/** A copy of a model, posed at time t of its animation `anim` if given. */
+async function model(url, anim, t) {
+  const g = await gltf(url);
+  const o = SkeletonUtils.clone(g.scene);
+  if (anim) {
+    const clip = g.animations.find(a => a.name === anim);
+    if (!clip) throw new Error(`${url} has no animation ${anim}`);
+    const mixer = new THREE.AnimationMixer(o);
+    mixer.clipAction(clip).play();
+    mixer.update(t || 0);
+  }
+  return o;
+}
+
+const flat = (c, rough = 0.55) => new THREE.MeshStandardMaterial({ color: c, roughness: rough, metalness: 0, flatShading: true });
+
+/** A box w x h x d with rounded edges, standing on y = 0. */
+function roundedBox([w, h, d], r) {
+  // the bevel adds b on every side
+  const b = r * 0.5;
+  w -= 2 * b;
+  d -= 2 * b;
+  r = Math.min(r, w / 2, d / 2);
+  const s = new THREE.Shape();
+  const x = -w / 2, y = -d / 2;
+  s.moveTo(x + r, y);
+  s.lineTo(x + w - r, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + d - r);
+  s.quadraticCurveTo(x + w, y + d, x + w - r, y + d);
+  s.lineTo(x + r, y + d);
+  s.quadraticCurveTo(x, y + d, x, y + d - r);
+  s.lineTo(x, y + r);
+  s.quadraticCurveTo(x, y, x + r, y);
+  const g = new THREE.ExtrudeGeometry(s, { depth: h - 2 * b, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 3, curveSegments: 6 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, b, 0);
+  return g;
+}
+
+/** A low-poly bus L long, in the Car Kit's style, front toward +z. */
+async function bus(color, L, wheelUrl) {
+  const g = new THREE.Group();
+  const W = 1.5, H = 1.75, base = 0.32;
+  const c = new THREE.Color(color);
+  const body = flat(c), roofCol = flat(c.clone().lerp(new THREE.Color(0xffffff), 0.18));
+  const dark = flat(0x3b4150, 0.8), glass = flat(0x2a3346, 0.25), white = flat(0xf2f2ee), light = flat(0xfff3c4, 0.3), red = flat(0xd8343a, 0.4);
+  const box = (w, h, d, m, x, y, z, r) => {
+    const o = new THREE.Mesh(r ? roundedBox([w, h, d], r) : new THREE.BoxGeometry(w, h, d), m);
+    o.position.set(x, r ? y - h / 2 : y, z);
+    g.add(o);
+  };
+  const bh = H - 0.45, by = base + 0.2 + bh / 2;
+  box(W * 0.96, 0.3, L * 0.98, dark, 0, base + 0.05, 0);
+  box(W, bh, L, body, 0, by, 0, 0.12);
+  // windows down both sides, front and back
+  const wy = base + 0.2 + bh * 0.62;
+  box(W + 0.02, 0.48, L * 0.84, glass, 0, wy, -L * 0.04);
+  box(W * 0.84, 0.58, 0.04, glass, 0, wy + 0.03, L / 2 + 0.005);
+  box(W * 0.8, 0.42, 0.04, glass, 0, wy + 0.03, -L / 2 - 0.005);
+  for (let i = 1; i < 6; i++) box(W + 0.04, 0.5, 0.07, body, 0, wy, -L * 0.46 + i * (L * 0.84 / 6));
+  box(W * 0.9, 0.1, L * 0.9, roofCol, 0, base + H - 0.22, 0, 0.04);
+  box(W * 0.5, 0.12, L * 0.28, white, 0, base + H - 0.12, -L * 0.15, 0.04);
+  for (const sx of [-1, 1]) {
+    box(0.26, 0.14, 0.04, light, sx * W * 0.34, base + 0.42, L / 2 + 0.02);
+    box(0.2, 0.14, 0.04, red, sx * W * 0.36, base + 0.42, -L / 2 - 0.02);
+  }
+  const wheel = (await gltf(wheelUrl)).scene;
+  for (const z of [L * 0.32, -L * 0.3]) {
+    for (const sx of [-1, 1]) {
+      const w = wheel.clone(true);
+      w.position.set(sx * (W / 2 - 0.12), 0.3, z);
+      g.add(w);
+    }
+  }
+  return g;
+}
+
+/** A straw beehive (a skep) of coiled rings, its doorway toward +z. */
+function hive() {
+  const g = new THREE.Group();
+  const straw = flat(0xd9a441, 0.9), dark = flat(0xb7832c, 0.9), hole = flat(0x2a1a0c, 1);
+  const rings = 8, R = 0.62, H = 1.25;
+  for (let i = 0; i < rings; i++) {
+    const y = 0.08 + (i / rings) * H;
+    // a dome: wide at the foot, round at the top
+    const r = R * Math.sqrt(Math.max(0.04, 1 - Math.pow((y - 0.05) / (H + 0.12), 2.2)));
+    const o = new THREE.Mesh(new THREE.TorusGeometry(r, 0.085, 6, 18), i % 2 ? dark : straw);
+    o.rotation.x = Math.PI / 2;
+    o.position.y = y;
+    g.add(o);
+  }
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(R * 0.36, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), straw);
+  cap.position.y = H - 0.02;
+  g.add(cap);
+  const fill = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.55, R * 0.95, H, 14), straw);
+  fill.position.y = H / 2;
+  g.add(fill);
+  // the doorway: a dark arch at the foot, in front of the coils
+  const door = new THREE.Mesh(new THREE.CircleGeometry(0.17, 14, 0, Math.PI), hole);
+  door.position.set(0, 0.02, R + 0.1);
+  g.add(door);
+  return g;
+}
+
+/** Recolours meshes: `colors` maps a material name or a '#rrggbb' colour to a new colour. */
+function recolour(o, colors) {
+  o.traverse(m => {
+    if (!m.isMesh) return;
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    m.material = mats.map(mat => {
+      const to = colors[mat.name] ?? colors['#' + mat.color.getHexString()];
+      if (to === undefined) return mat;
+      const c = mat.clone();
+      c.color.set(to);
+      // a texture would tint the new colour, and metal shows dark with
+      // nothing to reflect: plain paint
+      c.map = null;
+      c.metalness = 0;
+      return c;
+    });
+    if (m.material.length === 1) m.material = m.material[0];
+  });
+}
+
+/** Gives every textured material another texture (the same layout, other colours). */
+async function retexture(o, url) {
+  const tex = await new THREE.TextureLoader().loadAsync(url);
+  tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  o.traverse(m => {
+    if (m.isMesh && m.material.map) {
+      m.material = m.material.clone();
+      m.material.map = tex;
+    }
+  });
+}
+
+window.bbox = async (url) => {
+  const b = new THREE.Box3().setFromObject((await gltf(url)).scene);
+  return [b.min.toArray(), b.max.toArray()];
+};
+window.anims = async (url) => (await gltf(url)).animations.map(a => `${a.name} ${a.duration.toFixed(2)}`);
+
+window.render = async (job) => {
+  const ss = job.ss || 4;
+  const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  r.setSize(job.w * ss, job.h * ss, false);
+  r.setClearColor(0x000000, 0);
+  r.shadowMap.enabled = job.shadow !== false;
+  r.shadowMap.type = THREE.PCFSoftShadowMap;
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene();
+  const root = new THREE.Group();
+  const made = [];
+  for (const p of job.parts) {
+    const o = p.bus ? await bus(p.bus, p.len || 4.4, p.wheel) : p.hive ? hive() : await model(p.url, p.anim, p.t);
+    if (p.colors) recolour(o, p.colors);
+    if (p.texture) await retexture(o, p.texture);
+    o.traverse(m => { if (m.isMesh) m.castShadow = m.receiveShadow = true; });
+    if (p.pos) o.position.set(...p.pos);
+    if (p.rot) o.rotation.set(...p.rot);
+    if (p.scale) o.scale.setScalar(p.scale);
+    // held in an earlier part's node (a hand), posed with it
+    const holder = p.hold && made[p.hold[0]].getObjectByName(p.hold[1]);
+    if (p.hold && !holder) throw new Error(`no node ${p.hold[1]} in part ${p.hold[0]}`);
+    (holder || root).add(o);
+    made.push(o);
+  }
+  // turned about the up axis: 0 leaves the model's front toward +z
+  root.rotation.y = (job.turn || 0) * Math.PI / 180;
+  scene.add(root);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a90a0, job.hemi ?? 1.5));
+  const sun = new THREE.DirectionalLight(0xfff8f0, job.sun ?? 2.4);
+  sun.position.set(...(job.sunPos || [-4, 10, 5]));
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 0.1, far: 50 });
+  sun.shadow.radius = 4;
+  sun.shadow.bias = -0.0005;
+  scene.add(sun);
+  if (job.shadow !== false) {
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: job.shadowOpacity ?? 0.3 }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+  }
+  // orthographic, `ppu` pixels per unit, looking down `pitch` degrees from
+  // level and from `yaw` degrees round from +z
+  const hw = job.w / job.ppu / 2, hh = job.h / job.ppu / 2;
+  const cam = new THREE.OrthographicCamera(-hw, hw, hh, -hh, -100, 100);
+  const yaw = (job.yaw || 0) * Math.PI / 180, pitch = job.pitch * Math.PI / 180;
+  const at = new THREE.Vector3(...(job.center || [0, 0, 0]));
+  cam.position.set(at.x + Math.sin(yaw) * Math.cos(pitch) * 30, at.y + Math.sin(pitch) * 30, at.z + Math.cos(yaw) * Math.cos(pitch) * 30);
+  if (job.pitch >= 89.9) cam.up.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  cam.lookAt(at);
+  r.render(scene, cam);
+  // halve until the size is reached, so every pixel averages its samples
+  let src = r.domElement, w = src.width, h = src.height;
+  while (w / 2 >= job.w) {
+    const t = document.createElement('canvas');
+    t.width = w / 2;
+    t.height = h / 2;
+    const ctx = t.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, t.width, t.height);
+    src = t;
+    w /= 2;
+    h /= 2;
+  }
+  r.dispose();
+  return src.toDataURL('image/png');
+};
+window.ready = true;
+</script>
