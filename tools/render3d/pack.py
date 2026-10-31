@@ -3,7 +3,8 @@
 
     python3 pack.py JOBS.json RENDERED_DIR OUT.png OUT.rs [--colours N]
 
-Each job's PNG (from render.mjs) is cropped to what it draws and packed into
+Each job's PNG (from render.mjs, or ../cartoon/render.mjs with an `origin`
+in pixels) is cropped to what it draws and packed into
 OUT.png. OUT.rs gets the sheet's bytes, an `Art` per sprite (its box in the
 sheet, where the model's origin lands in it, and pixels per model unit) and
 a constant per sprite named after the job. --colours N stores the sheet with
@@ -45,11 +46,16 @@ def main(argv):
         if box is None:
             sys.exit(f"{job['name']} draws nothing")
         crop = im.crop(box)
-        # the render's middle is the job's centre (the origin by default);
-        # find where the origin lands from there
-        ox, oy = project([-c for c in job.get("center", [0, 0, 0])], job)
-        ax = im.width / 2 + ox - box[0]
-        ay = im.height / 2 + oy - box[1]
+        if "origin" in job:
+            # a drawn sprite says where its origin is, in pixels
+            px, py = job["origin"]
+        else:
+            # the render's middle is the job's centre (the origin by
+            # default); find where the origin lands from there
+            ox, oy = project([-c for c in job.get("center", [0, 0, 0])], job)
+            px, py = im.width / 2 + ox, im.height / 2 + oy
+        ax = px - box[0]
+        ay = py - box[1]
         parts.append((job, crop, ax, ay))
     # tallest first, along shelves
     order = sorted(range(len(parts)), key=lambda i: -parts[i][1].height)
