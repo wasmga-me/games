@@ -11,6 +11,7 @@ mod glyphs;
 mod puzzle;
 
 use puzzle::{take, Room, Tower, CHEST, EMPTY, LEVELS, MONSTER, POTION};
+use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
 const VERSION: u32 = 1;
@@ -90,6 +91,7 @@ enum Hit {
     None,
     Room(usize),
     Button,
+    Ctl(Icon),
 }
 
 struct HigherFloor {
@@ -100,6 +102,9 @@ struct HigherFloor {
     walk: Option<Move>,
     /// a room the hero cannot reach yet, shaken when tapped: room and ms
     deny: Option<(usize, f32)>,
+    /// each room taken this level, with power and the hero's room before
+    /// it, for Undo; not saved, so a loaded save starts it empty
+    hist: Vec<(usize, i32, i32)>,
 }
 
 impl HigherFloor {
@@ -150,6 +155,9 @@ impl HigherFloor {
 
     fn hit(&self, x: f32, y: f32) -> Hit {
         let inside = |(bx, by, bw, bh): (f32, f32, f32, f32)| x >= bx && x < bx + bw && y >= by && y < by + bh;
+        if let Some(i) = self.controls().hit(x, y) {
+            return Hit::Ctl(i);
+        }
         match self.s.phase {
             PLAY => (0..self.s.tower.n()).find(|&r| inside(self.room_box(r))).map_or(Hit::None, Hit::Room),
             CLEARED | LOST if inside(self.button()) => Hit::Button,
@@ -157,7 +165,44 @@ impl HigherFloor {
         }
     }
 
+    /// Undo and Restart, in the top bar while a level is on
+    fn controls(&self) -> Row {
+        let row = controls::row(&[Icon::Undo, Icon::Restart], PLAN.0 - 8.0, 20.0);
+        if self.s.phase == PLAY { row } else { row.hidden() }
+    }
+    fn can_use(&self, i: Icon) -> bool {
+        self.s.phase == PLAY && self.walk.is_none() && if i == Icon::Undo { !self.hist.is_empty() } else { self.s.taken != 0 }
+    }
+    /// Takes back the last room; it costs what a retry does.
+    fn undo(&mut self) -> u32 {
+        if !self.can_use(Icon::Undo) {
+            return 0;
+        }
+        let Some((room, power, at)) = self.hist.pop() else { return 0 };
+        let s = &mut self.s;
+        s.taken &= !(1 << room);
+        (s.power, s.at) = (power, at);
+        if s.tower.rooms[room].kind == MONSTER {
+            s.all_beaten -= 1;
+        }
+        s.retries += 1;
+        wg::EV_BLIP
+    }
+    fn restart(&mut self) -> u32 {
+        if !self.can_use(Icon::Restart) {
+            return 0;
+        }
+        self.retry();
+        wg::EV_BLIP
+    }
+    /// The level again, counted as a retry.
+    fn retry(&mut self) {
+        self.s.retries += 1;
+        self.begin(self.s.level);
+    }
+
     fn begin(&mut self, level: i32) {
+        self.hist.clear();
         let s = &mut self.s;
         s.level = level;
         s.phase = PLAY;
@@ -195,6 +240,7 @@ impl HigherFloor {
             s.all_lost += 1;
             return wg::EV_LOSE;
         };
+        self.hist.push((m.to, s.power, s.at));
         s.power = power;
         s.taken |= 1 << m.to;
         s.at = m.to as i32;
@@ -227,10 +273,7 @@ impl HigherFloor {
                 self.s.retries = 0;
                 self.begin(self.s.level + 1);
             }
-            LOST => {
-                self.s.retries += 1;
-                self.begin(self.s.level);
-            }
+            LOST => self.retry(),
             _ => return 0,
         }
         wg::EV_BLIP
@@ -284,7 +327,7 @@ impl Game for HigherFloor {
         wg::add_glyphs(&glyphs::GLYPHS);
         let sheet = Image::png(art::SHEET);
         let sprites = art::ARTS.iter().map(|a| sheet.crop(a.x, a.y, a.w, a.h)).collect();
-        HigherFloor { s: blank(), hover: Hit::None, keys: false, sprites, walk: None, deny: None }
+        HigherFloor { s: blank(), hover: Hit::None, keys: false, sprites, walk: None, deny: None, hist: Vec::new() }
     }
     fn save(&mut self) -> &mut Save {
         &mut self.s
@@ -339,10 +382,17 @@ impl Game for HigherFloor {
                 self.keys = true;
                 ev |= self.enter(self.cursor_room());
             }
+            if input.pressed & wg::B != 0 {
+                ev |= self.undo();
+            }
         } else if input.pressed & wg::A != 0 {
             ev |= self.press_button();
         }
         ev
+    }
+
+    fn key(&mut self, code: i32) -> bool {
+        controls::is_restart_key(code) && self.restart() != 0
     }
 
     fn pointer(&mut self, p: &Pointer) -> u32 {
@@ -364,6 +414,8 @@ impl Game for HigherFloor {
                 self.enter(r)
             }
             Hit::Button => self.press_button(),
+            Hit::Ctl(Icon::Undo) => self.undo(),
+            Hit::Ctl(_) => self.restart(),
             Hit::None => 0,
         }
     }
@@ -373,6 +425,7 @@ impl Game for HigherFloor {
             Hit::None => -1,
             Hit::Room(r) => r as i32,
             Hit::Button => 1000,
+            Hit::Ctl(i) => 1001 + i as i32,
         };
         let shown = [hv, self.keys as i32];
         let mut c = self.s;
@@ -509,7 +562,9 @@ impl Game for HigherFloor {
             }
         };
         shaded(s, &format!("{} {}", level_l, self.s.level + 1), 14.0, 20.0, 17.0, false);
-        shaded(s, &format!("{} {}", left_l, left), w - 14.0, 20.0, 15.0, true);
+        let hover = if let Hit::Ctl(i) = self.hover { Some(i) } else { None };
+        let right = self.controls().draw(s, hover, |i| self.can_use(i), w);
+        shaded(s, &format!("{} {}", left_l, left), right - 14.0, 20.0, 15.0, true);
         if self.s.phase != PLAY {
             self.draw_card(s, w);
         }
@@ -538,6 +593,7 @@ impl Game for HigherFloor {
         }
     }
     fn loaded(&mut self) -> bool {
+        self.hist.clear();
         let s = &self.s;
         let t = &s.tower;
         let ok = s.version == VERSION
@@ -825,22 +881,30 @@ impl wg::Board for HigherFloor {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move between rooms, Space sends the hero into the room, I reads the level, your power and the monsters left.",
-            "方向键在房间间移动，空格让英雄进入房间，I 读出关卡、力量和剩余怪物。",
-            "矢印で部屋を移動、スペースで勇者をその部屋へ、I でレベル、パワー、残りのモンスター。",
-            "화살표로 방 이동, 스페이스로 영웅을 방에 보내기, I로 레벨, 힘, 남은 몬스터 읽기.",
-            "Flechas para moverse entre salas, Espacio envía al héroe a la sala, I lee nivel, poder y monstruos restantes.",
-            "Setas movem entre as salas, Espaço manda o herói para a sala, I lê nível, poder e monstros restantes.",
-            "Flèches pour changer de salle, Espace envoie le héros dans la salle, I lit le niveau, la puissance et les monstres restants.",
-            "Pfeiltasten wechseln den Raum, Leertaste schickt den Helden hinein, I liest Level, Stärke und übrige Monster vor.",
-            "Стрелки переходят между комнатами, пробел отправляет героя в комнату, I читает уровень, силу и сколько монстров осталось.",
-            "方向鍵在房間間移動，空白鍵讓英雄進入房間，I 讀出關卡、力量和剩餘怪物。",
+            "Arrow keys move between rooms, Space enters the selected room, I announces the level, hero power, and remaining monsters. X takes back the last room. R restarts the level.",
+            "方向键在房间间移动，空格让英雄进入房间，I 读出关卡、力量和剩余怪物。X 撤销上一步。R 重新开始本关。",
+            "矢印で部屋を移動、スペースで勇者をその部屋へ、I でレベル、パワー、残りのモンスター。X で一手戻す。R でレベルをやり直し。",
+            "화살표로 방 이동, 스페이스로 영웅을 방에 보내기, I로 레벨, 힘, 남은 몬스터 읽기. X로 한 수 되돌리기. R로 레벨 다시 시작.",
+            "Flechas para moverse entre salas, Espacio envía al héroe a la sala, I lee nivel, poder y monstruos restantes. X deshace el último movimiento. R reinicia el nivel.",
+            "Setas movem entre as salas, Espaço manda o herói para a sala, I lê nível, poder e monstros restantes. X desfaz o último movimento. R reinicia o nível.",
+            "Flèches pour changer de salle, Espace envoie le héros dans la salle, I lit le niveau, la puissance et les monstres restants. X annule le dernier coup. R recommence le niveau.",
+            "Pfeiltasten wechseln den Raum, Leertaste schickt den Helden hinein, I liest Level, Stärke und übrige Monster vor. X macht den letzten Zug rückgängig. R startet das Level neu.",
+            "Стрелки переходят между комнатами, пробел отправляет героя в комнату, I читает уровень, силу и сколько монстров осталось. X отменяет последний ход. R начинает уровень заново.",
+            "方向鍵在房間間移動，空白鍵讓英雄進入房間，I 讀出關卡、力量和剩餘怪物。X 復原上一步。R 重新開始本關。",
         ])
     }
-    fn act(&mut self, x: i32, y: i32, _a: i32, said: &mut String) -> u32 {
+    fn act(&mut self, x: i32, y: i32, a: i32, said: &mut String) -> u32 {
         if self.s.phase != PLAY {
             let ev = self.press_button();
             self.status(said);
+            return ev;
+        }
+        // X takes back the last room, as on the pad
+        if a == 1 {
+            let ev = self.undo();
+            if ev != 0 {
+                self.status(said);
+            }
             return ev;
         }
         self.focus(x, y);
@@ -851,9 +915,9 @@ impl wg::Board for HigherFloor {
             if let Some(m) = self.walk.take() {
                 let ev = self.arrive(m);
                 if self.s.phase == LOST {
-                    said.push_str(tr(&["The monster was stronger. Space to try again.", "怪物更强。按空格再试一次。", "モンスターの方が強かった。スペースでもう一度。", "몬스터가 더 강했습니다. 스페이스로 다시.", "El monstruo era más fuerte. Espacio para reintentar.", "O monstro era mais forte. Espaço para tentar de novo.", "Le monstre était plus fort. Espace pour réessayer.", "Das Monster war stärker. Leertaste für nochmal.", "Монстр оказался сильнее. Пробел, чтобы повторить.", "怪物更強。按空白鍵再試一次。"]));
+                    said.push_str(tr(&["Defeated by a stronger monster. Press Space to retry.", "怪物更强。按空格再试一次。", "モンスターの方が強かった。スペースでもう一度。", "몬스터가 더 강했습니다. 스페이스로 다시.", "El monstruo era más fuerte. Espacio para reintentar.", "O monstro era mais forte. Espaço para tentar de novo.", "Le monstre était plus fort. Espace pour réessayer.", "Das Monster war stärker. Leertaste für nochmal.", "Монстр оказался сильнее. Пробел, чтобы повторить.", "怪物更強。按空白鍵再試一次。"]));
                 } else if self.s.phase != PLAY {
-                    said.push_str(tr(&["Level cleared! Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
+                    said.push_str(tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
                 } else {
                     self.status(said);
                 }

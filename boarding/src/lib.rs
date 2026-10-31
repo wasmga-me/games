@@ -12,6 +12,7 @@ mod glyphs;
 mod puzzle;
 
 use puzzle::{Bus, Lot, Way, DX, DY, LEVELS};
+use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
 const VERSION: u32 = 1;
@@ -151,6 +152,7 @@ enum Hit {
     None,
     Bus(usize),
     Button,
+    Ctl(Icon),
 }
 
 struct Boarding {
@@ -281,7 +283,34 @@ impl Boarding {
         best.map(|b| b.0)
     }
 
+    /// Restart, in the top bar while a level is on
+    fn controls(&self) -> Row {
+        let row = controls::row(&[Icon::Restart], PLAN.0 - 8.0, 20.0);
+        if self.s.phase == PLAY { row } else { row.hidden() }
+    }
+    fn can_restart(&self) -> bool {
+        let lot = &self.s.lot;
+        self.s.phase == PLAY && lot.buses[..lot.n as usize].iter().any(|b| b.out != 0)
+    }
+    /// The lot as dealt; counted as a retry, as getting stuck is.
+    fn restart(&mut self) -> u32 {
+        if !self.can_restart() {
+            return 0;
+        }
+        self.retry();
+        wg::EV_BLIP
+    }
+    /// The level again, counted as a retry.
+    fn retry(&mut self) {
+        self.s.retries += 1;
+        self.s.all_retries += 1;
+        self.begin(self.s.level);
+    }
+
     fn hit(&self, x: f32, y: f32) -> Hit {
+        if let Some(i) = self.controls().hit(x, y) {
+            return Hit::Ctl(i);
+        }
         let inside = |(bx, by, bw, bh): (f32, f32, f32, f32)| x >= bx && x < bx + bw && y >= by && y < by + bh;
         match self.s.phase {
             PLAY => self.bus_at(x, y).map_or(Hit::None, Hit::Bus),
@@ -457,11 +486,7 @@ impl Boarding {
                 self.s.retries = 0;
                 self.begin(self.s.level + 1);
             }
-            STUCK => {
-                self.s.retries += 1;
-                self.s.all_retries += 1;
-                self.begin(self.s.level);
-            }
+            STUCK => self.retry(),
             _ => return 0,
         }
         wg::EV_BLIP
@@ -714,6 +739,10 @@ impl Game for Boarding {
         ev
     }
 
+    fn key(&mut self, code: i32) -> bool {
+        controls::is_restart_key(code) && self.restart() != 0
+    }
+
     fn pointer(&mut self, p: &Pointer) -> u32 {
         if !p.inside {
             self.hover = Hit::None;
@@ -733,6 +762,7 @@ impl Game for Boarding {
                 self.send(i)
             }
             Hit::Button => self.press_button(),
+            Hit::Ctl(_) => self.restart(),
             Hit::None => 0,
         }
     }
@@ -742,6 +772,7 @@ impl Game for Boarding {
             Hit::None => -1,
             Hit::Bus(i) => i as i32,
             Hit::Button => 1000,
+            Hit::Ctl(i) => 1001 + i as i32,
         };
         let shown = [hv, self.keys as i32];
         let mut c = self.s;
@@ -910,7 +941,9 @@ impl Game for Boarding {
             }
         };
         shaded(s, &format!("{} {}", level_l, self.s.level + 1), 14.0, 20.0, 17.0, th.text, false);
-        shaded(s, &format!("{} {}", left_l, waiting), w - 14.0, 20.0, 15.0, th.dim, true);
+        let hover = if let Hit::Ctl(i) = self.hover { Some(i) } else { None };
+        let right = self.controls().draw(s, hover, |_| self.can_restart(), w);
+        shaded(s, &format!("{} {}", left_l, waiting), right - 14.0, 20.0, 15.0, th.dim, true);
         if self.s.phase != PLAY {
             self.draw_card(s, w);
         }
@@ -1190,7 +1223,7 @@ impl Boarding {
         s.rect(px, py, pw, ph, 16.0, hex(th.card), 1.0);
         let stuck = self.s.phase == STUCK;
         let title = if stuck {
-            tr(&["No room at the stop", "车站没位置了", "乗り場が満杯", "정류장이 꽉 찼어요", "La parada está llena", "O ponto está cheio", "L'arrêt est plein", "Die Haltestelle ist voll", "Остановка заполнена", "車站沒位置了"])
+            tr(&["Loading bays full", "车站没位置了", "乗り場が満杯", "정류장이 꽉 찼어요", "La parada está llena", "O ponto está cheio", "L'arrêt est plein", "Die Haltestelle ist voll", "Остановка заполнена", "車站沒位置了"])
         } else {
             tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"])
         };
@@ -1272,7 +1305,7 @@ impl wg::Board for Boarding {
         }
         if lot.way(i) == Way::Out {
             out.push_str(", ");
-            out.push_str(tr(&["clear road ahead", "前方畅通", "前が空いている", "앞길이 비어 있음", "vía libre delante", "caminho livre à frente", "voie libre devant", "vorne frei", "впереди свободно", "前方暢通"]));
+            out.push_str(tr(&["clear path ahead", "前方畅通", "前が空いている", "앞길이 비어 있음", "vía libre delante", "caminho livre à frente", "voie libre devant", "vorne frei", "впереди свободно", "前方暢通"]));
         }
     }
     fn status(&self, out: &mut String) {
@@ -1306,16 +1339,16 @@ impl wg::Board for Boarding {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move between squares, Space drives the bus on that square the way it faces, I reads the level, the queue and the bays.",
-            "方向键在格子间移动，空格让该格的巴士向前开，I 读出关卡、队伍和车位。",
-            "矢印でマスを移動、スペースでそのマスのバスを前へ、I でレベル、列、乗り場を読み上げ。",
-            "화살표로 칸 이동, 스페이스로 그 칸의 버스를 앞으로, I로 레벨, 줄, 승차장 읽기.",
-            "Flechas para moverse entre casillas, Espacio conduce el autobús de esa casilla hacia delante, I lee nivel, fila y andenes.",
-            "Setas movem entre as casas, Espaço dirige o ônibus daquela casa para a frente, I lê nível, fila e vagas.",
-            "Flèches pour changer de case, Espace avance le bus de cette case, I lit le niveau, la file et les quais.",
-            "Pfeiltasten wechseln das Feld, Leertaste fährt den Bus dort vorwärts, I liest Level, Schlange und Buchten vor.",
-            "Стрелки переходят по клеткам, пробел ведёт автобус на клетке вперёд, I читает уровень, очередь и места.",
-            "方向鍵在格子間移動，空白鍵讓該格的巴士向前開，I 讀出關卡、隊伍和車位。",
+            "Arrow keys move between cells, Space dispatches the selected bus forward, I announces the level, passenger queue, and loading bays. R restarts the level.",
+            "方向键在格子间移动，空格让该格的巴士向前开，I 读出关卡、队伍和车位。R 重新开始本关。",
+            "矢印でマスを移動、スペースでそのマスのバスを前へ、I でレベル、列、乗り場を読み上げ。R でレベルをやり直し。",
+            "화살표로 칸 이동, 스페이스로 그 칸의 버스를 앞으로, I로 레벨, 줄, 승차장 읽기. R로 레벨 다시 시작.",
+            "Flechas para moverse entre casillas, Espacio conduce el autobús de esa casilla hacia delante, I lee nivel, fila y andenes. R reinicia el nivel.",
+            "Setas movem entre as casas, Espaço dirige o ônibus daquela casa para a frente, I lê nível, fila e vagas. R reinicia o nível.",
+            "Flèches pour changer de case, Espace avance le bus de cette case, I lit le niveau, la file et les quais. R recommence le niveau.",
+            "Pfeiltasten wechseln das Feld, Leertaste fährt den Bus dort vorwärts, I liest Level, Schlange und Buchten vor. R startet das Level neu.",
+            "Стрелки переходят по клеткам, пробел ведёт автобус на клетке вперёд, I читает уровень, очередь и места. R начинает уровень заново.",
+            "方向鍵在格子間移動，空白鍵讓該格的巴士向前開，I 讀出關卡、隊伍和車位。R 重新開始本關。",
         ])
     }
     fn act(&mut self, x: i32, y: i32, _a: i32, said: &mut String) -> u32 {
@@ -1333,13 +1366,13 @@ impl wg::Board for Boarding {
         let ev = self.send(i);
         match way {
             _ if ev == 0 => said.push_str(tr(&["Wait a moment", "请稍等", "少し待って", "잠시 기다리세요", "Espera un momento", "Espere um pouco", "Un instant", "Einen Moment", "Подождите", "請稍等"])),
-            Way::Out if self.s.lot.buses[i].out == 0 => said.push_str(tr(&["Every bay is taken", "车位全满", "乗り場が全部埋まっている", "승차장이 모두 찼습니다", "Todos los andenes están ocupados", "Todas as vagas estão ocupadas", "Tous les quais sont pris", "Alle Buchten sind belegt", "Все места заняты", "車位全滿"])),
+            Way::Out if self.s.lot.buses[i].out == 0 => said.push_str(tr(&["All loading bays are full", "车位全满", "乗り場が全部埋まっている", "승차장이 모두 찼습니다", "Todos los andenes están ocupados", "Todas as vagas estão ocupadas", "Tous les quais sont pris", "Alle Buchten sind belegt", "Все места заняты", "車位全滿"])),
             Way::Out => {
-                said.push_str(tr(&["Drove to the stop", "开到了车站", "乗り場へ向かった", "정류장으로 출발", "Fue a la parada", "Foi para o ponto", "Part vers l'arrêt", "Zur Haltestelle gefahren", "Поехал к остановке", "開到了車站"]));
+                said.push_str(tr(&["Pulled into loading bay", "开到了车站", "乗り場へ向かった", "정류장으로 출발", "Fue a la parada", "Foi para o ponto", "Part vers l'arrêt", "Zur Haltestelle gefahren", "Поехал к остановке", "開到了車站"]));
                 said.push_str(". ");
                 self.status(said);
             }
-            Way::Blocked { .. } => said.push_str(tr(&["Bumped into a bus", "撞到了巴士", "バスにぶつかった", "버스에 부딪힘", "Chocó con un autobús", "Bateu num ônibus", "Choc contre un bus", "Gegen einen Bus gestoßen", "Врезался в автобус", "撞到了巴士"])),
+            Way::Blocked { .. } => said.push_str(tr(&["Blocked by another bus", "撞到了巴士", "バスにぶつかった", "버스에 부딪힘", "Chocó con un autobús", "Bateu num ônibus", "Choc contre un bus", "Gegen einen Bus gestoßen", "Врезался в автобус", "撞到了巴士"])),
         }
         ev
     }

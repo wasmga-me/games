@@ -9,6 +9,7 @@ mod glyphs;
 mod puzzle;
 
 use puzzle::{Ev, Level, DONE, IN_BOX, IN_SPARE, LEVELS, MAXS, ON_BOARD, PLATE_R, SCREW_R, SPARE};
+use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
 const VERSION: u32 = 1;
@@ -119,6 +120,7 @@ enum Hit {
     None,
     Screw(usize),
     Button,
+    Ctl(Icon),
 }
 
 struct Unbolt {
@@ -193,7 +195,32 @@ impl Unbolt {
     fn flying(&self, i: usize) -> bool {
         self.anims.iter().any(|a| matches!(a, Anim::Fly { screw, .. } if *screw == i))
     }
+    /// Restart, in the top bar while a level is on
+    fn controls(&self) -> Row {
+        let row = controls::row(&[Icon::Restart], self.plan_wh().0 - 8.0, 22.0);
+        if self.s.phase == PLAY { row } else { row.hidden() }
+    }
+    /// Restart costs a try, as getting stuck does, so not on the last one.
+    fn can_restart(&self) -> bool {
+        self.s.phase == PLAY && self.s.taken > 0 && self.s.tries > 1 && self.anims.is_empty()
+    }
+    fn lose_try(&mut self) {
+        self.s.tries -= 1;
+        self.s.lost += 1;
+    }
+    fn restart(&mut self) -> u32 {
+        if !self.can_restart() {
+            return 0;
+        }
+        self.lose_try();
+        self.begin(self.s.level);
+        wg::EV_BLIP
+    }
+
     fn hit(&self, x: f32, y: f32) -> Hit {
+        if let Some(i) = self.controls().hit(x, y) {
+            return Hit::Ctl(i);
+        }
         if self.s.phase == CLEARED || self.s.phase == FAILED {
             let b = self.button_box();
             let on = x >= b.0 && x < b.0 + b.2 && y >= b.1 && y < b.1 + b.3;
@@ -285,8 +312,7 @@ impl Unbolt {
             return ev | self.clear_level();
         }
         if self.s.lv.stuck() {
-            self.s.tries -= 1;
-            self.s.lost += 1;
+            self.lose_try();
             if self.s.tries <= 0 {
                 self.s.phase = LOST;
                 self.s.end_ms = END_MS;
@@ -484,6 +510,10 @@ impl Game for Unbolt {
         ev
     }
 
+    fn key(&mut self, code: i32) -> bool {
+        controls::is_restart_key(code) && self.restart() != 0
+    }
+
     fn pointer(&mut self, p: &Pointer) -> u32 {
         if !p.inside {
             self.hover = Hit::None;
@@ -499,6 +529,7 @@ impl Game for Unbolt {
                     self.tap(i)
                 }
                 Hit::Button => self.button(),
+                Hit::Ctl(_) => self.restart(),
                 Hit::None => 0,
             };
         }
@@ -510,6 +541,7 @@ impl Game for Unbolt {
             Hit::None => -1,
             Hit::Screw(i) => i as i32,
             Hit::Button => 1000,
+            Hit::Ctl(i) => 1001 + i as i32,
         };
         let shown = [hv, self.keys as i32, self.tall as i32, self.anims.is_empty() as i32];
         let mut c = self.s;
@@ -682,8 +714,11 @@ impl Game for Unbolt {
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
         let ty = 22.0;
         s.text(&format!("{} {}", level_l, self.s.level + 1), 14.0, ty, 17.0, hex(th.text), 1.0);
+        let hover = if let Hit::Ctl(i) = self.hover { Some(i) } else { None };
+        let right = self.controls().draw(s, hover, |_| self.can_restart(), w);
+        let right = if self.tall { right - 20.0 } else { 268.0 };
         for i in 0..TRIES {
-            let x = if self.tall { w - 20.0 } else { 268.0 } - (TRIES - 1 - i) as f32 * 16.0;
+            let x = right - (TRIES - 1 - i) as f32 * 16.0;
             if i < self.s.tries {
                 s.disc(x, ty, 5.5, hex(0xe5484d), 1.0);
             } else {
@@ -816,8 +851,8 @@ impl Unbolt {
         out.push_str(", ");
         out.push_str(match sc.state {
             IN_BOX => tr(&["in its box", "在盒子里", "箱の中", "상자 안", "en su caja", "na caixa", "dans sa boîte", "in seiner Box", "в коробке", "在盒子裡"]),
-            IN_SPARE => tr(&["in a spare hole", "在备用孔里", "予備の穴", "예비 구멍 안", "en un hueco de reserva", "num furo reserva", "dans un trou de réserve", "in einem Ersatzloch", "в запасном гнезде", "在備用孔裡"]),
-            DONE => tr(&["put away", "已收走", "片付いた", "정리됨", "guardado", "guardado", "rangée", "weggeräumt", "убран", "已收走"]),
+            IN_SPARE => tr(&["in a spare slot", "在备用孔里", "予備の穴", "예비 구멍 안", "en un hueco de reserva", "num furo reserva", "dans un trou de réserve", "in einem Ersatzloch", "в запасном гнезде", "在備用孔裡"]),
+            DONE => tr(&["cleared", "已收走", "片付いた", "정리됨", "guardado", "guardado", "rangée", "weggeräumt", "убран", "已收走"]),
             _ if lv.blocked(i) => tr(&["covered by a plate", "被板挡住", "板の下", "판에 가려짐", "tapado por una placa", "coberto por uma placa", "sous une plaque", "unter einer Platte", "под пластиной", "被板擋住"]),
             _ => tr(&["free", "可以拧下", "外せる", "뺄 수 있음", "libre", "livre", "libre", "frei", "свободен", "可以擰下"]),
         });
@@ -888,7 +923,7 @@ impl wg::Board for Unbolt {
             }
         }
         out.push_str(". ");
-        out.push_str(&tr(&["Spare holes used: # of 5", "备用孔已用 # / 5", "予備の穴 # / 5", "예비 구멍 # / 5 사용", "Huecos de reserva: # de 5", "Furos reserva: # de 5", "Trous de réserve : # sur 5", "Ersatzlöcher: # von 5", "Запасные гнёзда: # из 5", "備用孔已用 # / 5"]).replace('#', &lv.spare_used().to_string()));
+        out.push_str(&tr(&["Spare slots used: # of 5", "备用孔已用 # / 5", "予備の穴 # / 5", "예비 구멍 # / 5 사용", "Huecos de reserva: # de 5", "Furos reserva: # de 5", "Trous de réserve : # sur 5", "Ersatzlöcher: # von 5", "Запасные гнёзда: # из 5", "備用孔已用 # / 5"]).replace('#', &lv.spare_used().to_string()));
         for &j in lv.spare[..SPARE].iter().filter(|&&j| j != 0) {
             out.push_str(", ");
             out.push_str(colour_name(lv.screw[j as usize - 1].colour));
@@ -896,16 +931,16 @@ impl wg::Board for Unbolt {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move between screws, Space takes a free screw out, I reads the level, tries, open boxes and spare holes.",
-            "方向键在螺丝间移动，空格拧下可以拧下的螺丝，I 读出关卡、剩余次数、盒子和备用孔。",
-            "矢印でねじを移動、スペースで外せるねじを外す、I でレベル、挑戦回数、箱と予備の穴。",
-            "화살표로 나사 사이 이동, 스페이스로 뺄 수 있는 나사 빼기, I로 레벨, 기회, 상자와 예비 구멍.",
-            "Flechas para moverte entre tornillos, Espacio saca un tornillo libre, I lee nivel, intentos, cajas y huecos de reserva.",
-            "Setas movem entre parafusos, Espaço tira um parafuso livre, I lê nível, tentativas, caixas e furos reserva.",
-            "Flèches pour passer d'une vis à l'autre, Espace retire une vis libre, I lit niveau, essais, boîtes et trous de réserve.",
-            "Pfeiltasten wechseln zwischen Schrauben, Leertaste dreht eine freie heraus, I liest Level, Versuche, Boxen und Ersatzlöcher vor.",
-            "Стрелки переходят между винтами, пробел выкручивает свободный винт, I читает уровень, попытки, коробки и запасные гнёзда.",
-            "方向鍵在螺絲間移動，空白鍵擰下可以擰下的螺絲，I 讀出關卡、剩餘次數、盒子和備用孔。",
+            "Arrow keys move between screws, Space removes an exposed screw, I announces the level, remaining tries, open toolboxes, and spare slots. R restarts the level.",
+            "方向键在螺丝间移动，空格拧下可以拧下的螺丝，I 读出关卡、剩余次数、盒子和备用孔。R 重新开始本关。",
+            "矢印でねじを移動、スペースで外せるねじを外す、I でレベル、挑戦回数、箱と予備の穴。R でレベルをやり直し。",
+            "화살표로 나사 사이 이동, 스페이스로 뺄 수 있는 나사 빼기, I로 레벨, 기회, 상자와 예비 구멍. R로 레벨 다시 시작.",
+            "Flechas para moverte entre tornillos, Espacio saca un tornillo libre, I lee nivel, intentos, cajas y huecos de reserva. R reinicia el nivel.",
+            "Setas movem entre parafusos, Espaço tira um parafuso livre, I lê nível, tentativas, caixas e furos reserva. R reinicia o nível.",
+            "Flèches pour passer d'une vis à l'autre, Espace retire une vis libre, I lit niveau, essais, boîtes et trous de réserve. R recommence le niveau.",
+            "Pfeiltasten wechseln zwischen Schrauben, Leertaste dreht eine freie heraus, I liest Level, Versuche, Boxen und Ersatzlöcher vor. R startet das Level neu.",
+            "Стрелки переходят между винтами, пробел выкручивает свободный винт, I читает уровень, попытки, коробки и запасные гнёзда. R начинает уровень заново.",
+            "方向鍵在螺絲間移動，空白鍵擰下可以擰下的螺絲，I 讀出關卡、剩餘次數、盒子和備用孔。R 重新開始本關。",
         ])
     }
     fn act(&mut self, x: i32, y: i32, _a: i32, said: &mut String) -> u32 {
@@ -936,9 +971,9 @@ impl wg::Board for Unbolt {
             said.push_str(&tr(&["Plates fell: #", "掉落 # 块板", "板が # 枚落ちた", "판 # 개 떨어짐", "Placas caídas: #", "Placas caídas: #", "Plaques tombées : #", "Platten gefallen: #", "Упало пластин: #", "掉落 # 塊板"]).replace('#', &fell.to_string()));
         }
         let end = match self.s.phase {
-            CLEARED | DONE_ALL => tr(&["Level cleared! Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]),
-            FAILED => tr(&["No room left. Space to try again.", "没有空位了。按空格再试一次。", "置く場所がありません。スペースでもう一度。", "빈칸이 없습니다. 스페이스로 다시 하기.", "No queda sitio. Espacio para reintentar.", "Não há mais espaço. Espaço para tentar de novo.", "Plus de place. Espace pour réessayer.", "Kein Platz mehr. Leertaste für nochmal.", "Места больше нет. Пробел, чтобы ещё раз.", "沒有空位了。按空白鍵再試一次。"]),
-            LOST => tr(&["No room left, and no tries left. Game over.", "没有空位，也没有次数了。游戏结束。", "置く場所も挑戦も残っていません。ゲームオーバー。", "빈칸도 기회도 없습니다. 게임 오버.", "No queda sitio ni intentos. Fin de la partida.", "Sem espaço e sem tentativas. Fim de jogo.", "Plus de place ni d'essais. Partie terminée.", "Kein Platz und keine Versuche mehr. Spiel vorbei.", "Ни места, ни попыток. Игра окончена.", "沒有空位，也沒有次數了。遊戲結束。"]),
+            CLEARED | DONE_ALL => tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]),
+            FAILED => tr(&["No spare slots left. Press Space to retry.", "没有空位了。按空格再试一次。", "置く場所がありません。スペースでもう一度。", "빈칸이 없습니다. 스페이스로 다시 하기.", "No queda sitio. Espacio para reintentar.", "Não há mais espaço. Espaço para tentar de novo.", "Plus de place. Espace pour réessayer.", "Kein Platz mehr. Leertaste für nochmal.", "Места больше нет. Пробел, чтобы ещё раз.", "沒有空位了。按空白鍵再試一次。"]),
+            LOST => tr(&["No spare slots or tries left. Game over.", "没有空位，也没有次数了。游戏结束。", "置く場所も挑戦も残っていません。ゲームオーバー。", "빈칸도 기회도 없습니다. 게임 오버.", "No queda sitio ni intentos. Fin de la partida.", "Sem espaço e sem tentativas. Fim de jogo.", "Plus de place ni d'essais. Partie terminée.", "Kein Platz und keine Versuche mehr. Spiel vorbei.", "Ни места, ни попыток. Игра окончена.", "沒有空位，也沒有次數了。遊戲結束。"]),
             _ => "",
         };
         if !end.is_empty() {
