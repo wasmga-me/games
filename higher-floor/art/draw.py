@@ -54,7 +54,8 @@ def hero(a, pose, grip, down=False):
     person(a, dict(HERO, hold=sword(grip)), pose, down)
 
 
-# the monsters, weakest first: skeleton, zombie, ghost, orc, vampire
+# the monsters, weakest first: skeleton, zombie, ghost, orc, vampire; then the
+# brute, which grows instead
 def ribs(a):
     for y in (-34, -29, -24):
         a.stroke(f"M-8 {y}Q1 {y + 3} 10 {y}", "#8f8572", LINE * 0.9)
@@ -112,6 +113,27 @@ def collar(a):
     a.flat(circle(1.5, -31, 2.2), "#c42a3c", line=LINE * 0.5)
 
 
+def horns(a, c, r):
+    for dx in (-1, 1):
+        hx = c[0] + dx * r * 0.55
+        a.part(smooth((hx - 4, c[1] - r * 0.75), (hx + dx * 10, c[1] - r * 1.35), (hx + dx * 6, c[1] - r * 1.75), (hx + 4, c[1] - r * 0.8)),
+               "#f3ead2", depth=1.2)
+
+
+def brute_body(a):
+    a.flat(smooth((-9, -16), (-11, -30), (1, -36), (13, -29), (11, -16)), "#f2a66a", line=LINE * 0.7)
+    a.flat(rrect(-14, -20, 29, 6, 2), "#46301e", line=LINE * 0.7)
+    a.flat(rrect(-3, -20, 6, 6, 1.5), "#9aa3b2", line=LINE * 0.5)
+
+
+def spiked_club(a, hand, ang):
+    with a.g(f"translate({fmt(hand[0])} {fmt(hand[1])}) rotate({fmt(150 - ang)})"):
+        for y in (14, 21, 28):
+            for dx in (-1, 1):
+                a.flat(poly((dx * 5, y - 3), (dx * 11, y), (dx * 5, y + 3)), STEEL[0], line=LINE * 0.6)
+        a.part(smooth((-3, 0), (-8, 24), (0, 34), (8, 24), (3, 0)), WOOD[1], depth=1.6)
+
+
 MONSTERS = {
     "skeleton": {"idle": (15, 20), "swing": (70, 95), "skin": "#f1ead8", "top": "#e9e1cc", "legs": "#e9e1cc", "boots": "#cfc6ad", "sleeve": "#e9e1cc", "body": ribs,
                  "face": skull, "ear": False, "blush": False, "eyes": "socket", "mouth": "teeth"},
@@ -119,6 +141,9 @@ MONSTERS = {
                "blush": False, "eyes": "worried", "mouth": "frown"},
     "orc": {"idle": (15, 20), "swing": (60, 150), "skin": "#69bd35", "top": "#69bd35", "legs": "#6b4a2e", "boots": "#46301e", "body": orc_body, "hair": orc_cap,
             "blush": False, "eyes": "angry", "mouth": "tusks", "hold": club},
+    # grows with every room the hero takes
+    "brute": {"idle": (20, 30), "swing": (60, 150), "skin": "#e8833a", "top": "#e8833a", "legs": "#5b4a3a", "boots": "#3a2c20", "body": brute_body, "hair": horns,
+              "blush": False, "eyes": "angry", "mouth": "tusks", "hold": spiked_club},
     "vampire": {"idle": (15, 20), "swing": (70, 95), "skin": "#d9d2f0", "top": "#2b2140", "legs": "#2b2140", "boots": "#151020", "body": collar, "hair": slick_hair,
                 "hair_back": cape_back, "blush": False, "eyes": "angry", "mouth": "fangs"},
 }
@@ -173,6 +198,37 @@ def potion(a):
     a.flat(circle(10, -14, 3), "#ffffff", opacity=0.5)
 
 
+def poison(a):
+    a.shadow(52, 10)
+    a.part(smooth((-20, -2), (-26, -26), (-10, -46), (10, -46), (26, -26), (20, -2)), "#7bc83a", depth=3)
+    a.part(rrect(-7, -62, 14, 18, 3), "#cfe8b0", depth=1.4)
+    a.part(rrect(-9, -70, 18, 10, 3), "#5b4a8a", depth=1.4)
+    # a skull on the label
+    a.flat(circle(0, -26, 9), "#f4f1e6", line=LINE * 0.7)
+    a.flat(rrect(-5, -20, 10, 6, 2), "#f4f1e6", line=LINE * 0.7)
+    for x in (-3.5, 3.5):
+        a.flat(circle(x, -27, 2.4), OUTLINE)
+    a.flat(ellipse(-12, -32, 3.5, 6), "#ffffff", opacity=0.6)
+
+
+def key(a):
+    a.shadow(60, 9)
+    with a.g("rotate(-30)"):
+        a.part(circle(-20, -26, 13), GOLD[0], depth=2)
+        a.flat(circle(-20, -26, 5.5), "#4b4458", line=LINE * 0.7)
+        a.part(rrect(-8, -30, 40, 8, 3), GOLD[0], depth=1.6)
+        for x in (20, 28):
+            a.part(rrect(x, -22, 5, 10, 1.5), GOLD[0], depth=1)
+
+
+def lock(a):
+    a.stroke("M-13 -40V-52Q-13 -66 0 -66Q13 -66 13 -52V-40", OUTLINE, 14)
+    a.stroke("M-13 -40V-52Q-13 -66 0 -66Q13 -66 13 -52V-40", STEEL[0], 8)
+    a.part(rrect(-22, -42, 44, 38, 7), GOLD[0], depth=2.6)
+    a.flat(circle(0, -27, 5), OUTLINE)
+    a.flat(poly((-2.5, -26), (2.5, -26), (3.5, -14), (-3.5, -14)), OUTLINE)
+
+
 def trap(a):
     a.shadow(90, 10)
     for k in range(5):
@@ -200,9 +256,9 @@ HERO_POSES = (("idle", {"arms": (25, 25)}, 130), ("swing-a", {"arms": (25, 150),
               ("swing-b", {"arms": (25, 75), "lean": 10, "eyes": "angry", "mouth": "grin", "legs": (-20, 18)}, 95),
               ("jump", {"arms": (40, 140), "legs": (-30, 40), "lift": 8, "mouth": "grin"}, 170), ("down", {}, 30))
 sprites = [sprite("hero-" + name, lambda a, p=pose, g=grip, n=name: hero(a, p, g, n == "down"), BOX) for name, pose, grip in HERO_POSES]
-# weakest first, as the game counts looks
-for name in ("skeleton", "zombie", "ghost", "orc", "vampire"):
+# weakest first, as the game counts looks, then the brute
+for name in ("skeleton", "zombie", "ghost", "orc", "vampire", "brute"):
     sprites += [sprite(f"{name}-{pose}", lambda a, n=name, p=pose: monster(a, n, p), BOX) for pose in ("idle", "swing", "down")]
-for name, fn in (("potion", potion), ("chest", chest), ("trap", trap), ("banner", banner), ("barrel", barrel)):
+for name, fn in (("potion", potion), ("chest", chest), ("trap", trap), ("banner", banner), ("barrel", barrel), ("poison", poison), ("key", key), ("lock", lock)):
     sprites.append(sprite(name, fn, BOX, w=220, h=220, scale=0.9))
 write(sprites + trees(), sys.argv[1])

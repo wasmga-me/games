@@ -16,36 +16,42 @@ pub struct Art {
 
 pub static SHEET: &[u8] = include_bytes!("art.png");
 
-pub static ARTS: [Art; 29] = [
-    Art { x: 874, y: 0, w: 121, h: 145, ax: 49.0, ay: 138.0, ppu: 160.0 },
-    Art { x: 0, y: 291, w: 83, h: 142, ax: 50.0, ay: 135.0, ppu: 160.0 },
-    Art { x: 548, y: 0, w: 149, h: 146, ax: 49.0, ay: 139.0, ppu: 160.0 },
+pub static ARTS: [Art; 35] = [
+    Art { x: 88, y: 291, w: 121, h: 145, ax: 49.0, ay: 138.0, ppu: 160.0 },
+    Art { x: 210, y: 291, w: 83, h: 142, ax: 50.0, ay: 135.0, ppu: 160.0 },
+    Art { x: 701, y: 0, w: 149, h: 146, ax: 49.0, ay: 139.0, ppu: 160.0 },
     Art { x: 453, y: 0, w: 94, h: 157, ax: 49.0, ay: 151.0, ppu: 160.0 },
-    Art { x: 228, y: 434, w: 161, h: 88, ax: 84.0, ay: 72.0, ppu: 160.0 },
-    Art { x: 422, y: 291, w: 70, h: 126, ax: 38.0, ay: 119.0, ppu: 160.0 },
-    Art { x: 493, y: 291, w: 80, h: 126, ax: 48.0, ay: 119.0, ppu: 160.0 },
-    Art { x: 783, y: 434, w: 124, h: 65, ax: 59.0, ay: 58.0, ppu: 160.0 },
-    Art { x: 84, y: 291, w: 79, h: 133, ax: 47.0, ay: 126.0, ppu: 160.0 },
-    Art { x: 164, y: 291, w: 80, h: 133, ax: 48.0, ay: 126.0, ppu: 160.0 },
-    Art { x: 0, y: 529, w: 130, h: 65, ax: 59.0, ay: 58.0, ppu: 160.0 },
-    Art { x: 794, y: 291, w: 69, h: 121, ax: 37.0, ay: 115.0, ppu: 160.0 },
-    Art { x: 574, y: 291, w: 86, h: 124, ax: 45.0, ay: 118.0, ppu: 160.0 },
-    Art { x: 264, y: 529, w: 79, h: 59, ax: 42.0, ay: 50.0, ppu: 160.0 },
-    Art { x: 698, y: 0, w: 87, h: 146, ax: 48.0, ay: 139.0, ppu: 160.0 },
-    Art { x: 786, y: 0, w: 87, h: 146, ax: 48.0, ay: 139.0, ppu: 160.0 },
-    Art { x: 390, y: 434, w: 144, h: 87, ax: 59.0, ay: 69.0, ppu: 160.0 },
-    Art { x: 245, y: 291, w: 83, h: 130, ax: 39.0, ay: 123.0, ppu: 160.0 },
-    Art { x: 329, y: 291, w: 92, h: 130, ax: 48.0, ay: 123.0, ppu: 160.0 },
-    Art { x: 535, y: 434, w: 128, h: 82, ax: 59.0, ay: 59.0, ppu: 160.0 },
-    Art { x: 864, y: 291, w: 76, h: 111, ax: 38.0, ay: 103.4, ppu: 160.0 },
-    Art { x: 0, y: 434, w: 136, h: 94, ax: 68.0, ay: 85.4, ppu: 160.0 },
-    Art { x: 131, y: 529, w: 132, h: 65, ax: 66.0, ay: 57.4, ppu: 160.0 },
-    Art { x: 661, y: 291, w: 132, h: 122, ax: 66.0, ay: 134.4, ppu: 160.0 },
-    Art { x: 137, y: 434, w: 90, h: 89, ax: 45.0, ay: 81.4, ppu: 160.0 },
+    Art { x: 527, y: 438, w: 161, h: 88, ax: 84.0, ay: 72.0, ppu: 160.0 },
+    Art { x: 632, y: 291, w: 70, h: 126, ax: 38.0, ay: 119.0, ppu: 160.0 },
+    Art { x: 703, y: 291, w: 80, h: 126, ax: 48.0, ay: 119.0, ppu: 160.0 },
+    Art { x: 376, y: 560, w: 124, h: 65, ax: 59.0, ay: 58.0, ppu: 160.0 },
+    Art { x: 294, y: 291, w: 79, h: 133, ax: 47.0, ay: 126.0, ppu: 160.0 },
+    Art { x: 374, y: 291, w: 80, h: 133, ax: 48.0, ay: 126.0, ppu: 160.0 },
+    Art { x: 501, y: 560, w: 130, h: 65, ax: 59.0, ay: 58.0, ppu: 160.0 },
+    Art { x: 0, y: 438, w: 69, h: 121, ax: 37.0, ay: 115.0, ppu: 160.0 },
+    Art { x: 784, y: 291, w: 86, h: 124, ax: 45.0, ay: 118.0, ppu: 160.0 },
+    Art { x: 765, y: 560, w: 79, h: 59, ax: 42.0, ay: 50.0, ppu: 160.0 },
+    Art { x: 851, y: 0, w: 87, h: 146, ax: 48.0, ay: 139.0, ppu: 160.0 },
+    Art { x: 0, y: 291, w: 87, h: 146, ax: 48.0, ay: 139.0, ppu: 160.0 },
+    Art { x: 689, y: 438, w: 144, h: 87, ax: 59.0, ay: 69.0, ppu: 160.0 },
+    Art { x: 455, y: 291, w: 83, h: 130, ax: 39.0, ay: 123.0, ppu: 160.0 },
+    Art { x: 539, y: 291, w: 92, h: 130, ax: 48.0, ay: 123.0, ppu: 160.0 },
+    Art { x: 834, y: 438, w: 128, h: 82, ax: 59.0, ay: 59.0, ppu: 160.0 },
+    Art { x: 548, y: 0, w: 73, h: 150, ax: 41.0, ay: 143.0, ppu: 160.0 },
+    Art { x: 622, y: 0, w: 78, h: 150, ax: 46.0, ay: 143.0, ppu: 160.0 },
+    Art { x: 119, y: 560, w: 147, h: 71, ax: 59.0, ay: 61.0, ppu: 160.0 },
+    Art { x: 70, y: 438, w: 76, h: 111, ax: 38.0, ay: 103.4, ppu: 160.0 },
+    Art { x: 299, y: 438, w: 136, h: 94, ax: 68.0, ay: 85.4, ppu: 160.0 },
+    Art { x: 632, y: 560, w: 132, h: 65, ax: 66.0, ay: 57.4, ppu: 160.0 },
+    Art { x: 871, y: 291, w: 132, h: 122, ax: 66.0, ay: 134.4, ppu: 160.0 },
+    Art { x: 436, y: 438, w: 90, h: 89, ax: 45.0, ay: 81.4, ppu: 160.0 },
+    Art { x: 147, y: 438, w: 82, h: 111, ax: 41.0, ay: 103.4, ppu: 160.0 },
+    Art { x: 267, y: 560, w: 108, h: 68, ax: 65.0, ay: 61.4, ppu: 160.0 },
+    Art { x: 230, y: 438, w: 68, h: 102, ax: 34.0, ay: 105.4, ppu: 160.0 },
     Art { x: 119, y: 0, w: 177, h: 288, ax: 89.0, ay: 287.0, ppu: 64.0 },
     Art { x: 297, y: 0, w: 155, h: 255, ax: 77.0, ay: 254.0, ppu: 64.0 },
     Art { x: 0, y: 0, w: 118, h: 290, ax: 59.0, ay: 289.0, ppu: 64.0 },
-    Art { x: 664, y: 434, w: 118, h: 82, ax: 59.0, ay: 76.0, ppu: 64.0 },
+    Art { x: 0, y: 560, w: 118, h: 82, ax: 59.0, ay: 76.0, ppu: 64.0 },
 ];
 
 pub const HERO_IDLE: usize = 0;
@@ -68,12 +74,18 @@ pub const ORC_DOWN: usize = 16;
 pub const VAMPIRE_IDLE: usize = 17;
 pub const VAMPIRE_SWING: usize = 18;
 pub const VAMPIRE_DOWN: usize = 19;
-pub const POTION: usize = 20;
-pub const CHEST: usize = 21;
-pub const TRAP: usize = 22;
-pub const BANNER: usize = 23;
-pub const BARREL: usize = 24;
-pub const TREE_DEFAULT: usize = 25;
-pub const TREE_OAK: usize = 26;
-pub const TREE_CONE: usize = 27;
-pub const BUSHLARGE: usize = 28;
+pub const BRUTE_IDLE: usize = 20;
+pub const BRUTE_SWING: usize = 21;
+pub const BRUTE_DOWN: usize = 22;
+pub const POTION: usize = 23;
+pub const CHEST: usize = 24;
+pub const TRAP: usize = 25;
+pub const BANNER: usize = 26;
+pub const BARREL: usize = 27;
+pub const POISON: usize = 28;
+pub const KEY: usize = 29;
+pub const LOCK: usize = 30;
+pub const TREE_DEFAULT: usize = 31;
+pub const TREE_OAK: usize = 32;
+pub const TREE_CONE: usize = 33;
+pub const BUSHLARGE: usize = 34;
