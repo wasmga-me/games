@@ -8,6 +8,7 @@ mod glyphs;
 mod room;
 
 use room::{dist, Hit, Path, Room, FLOOR, LEFT, LEVELS, RIGHT, TOP};
+use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen};
 
 /// 2: levels dealt again when shots coming back at the agent began to count
@@ -73,6 +74,8 @@ struct Bankshot {
     /// ms since the agent fired, for the recoil
     since_fire: f32,
     hover_button: bool,
+    /// the level control under the mouse
+    hover_ctl: Option<Icon>,
     /// where the pointer was last
     hover: (f32, f32),
 }
@@ -93,6 +96,28 @@ impl Bankshot {
         matches!(self.s.phase, CLEARED | FAILED) && x >= b.0 && x < b.0 + b.2 && y >= b.1 && y < b.1 + b.3
     }
 
+    /// Restart, in the top bar while a level is on
+    fn controls(&self) -> Row {
+        let row = controls::row(&[Icon::Restart], PLAN.0 - 8.0, 24.0);
+        if matches!(self.s.phase, AIM | FLY) { row } else { row.hidden() }
+    }
+    /// Restart starts over only once a shot was fired, and not mid-flight.
+    fn can_restart(&self) -> bool {
+        self.s.phase == AIM && self.started()
+    }
+    /// a shot was fired this try
+    fn started(&self) -> bool {
+        self.s.shots < self.room.shots
+    }
+
+    fn restart_button(&mut self) -> u32 {
+        if !self.can_restart() {
+            return 0;
+        }
+        self.retry();
+        wg::EV_BLIP
+    }
+
     fn begin(&mut self, level: i32) {
         self.s.level = level;
         self.s.level_ms = 0;
@@ -101,7 +126,7 @@ impl Bankshot {
     }
     /// The same level again, counted as a retry once a shot was fired.
     fn retry(&mut self) {
-        if self.s.shots < self.room.shots || self.s.phase != AIM {
+        if self.started() || self.s.phase != AIM {
             self.s.retries += 1;
         }
         self.restart();
@@ -245,6 +270,7 @@ impl Game for Bankshot {
             aiming: false,
             since_fire: 1e9,
             hover_button: false,
+            hover_ctl: None,
             hover: (-1.0, -1.0),
         };
         g.retry();
@@ -293,13 +319,22 @@ impl Game for Bankshot {
         ev
     }
 
+    fn key(&mut self, code: i32) -> bool {
+        controls::is_restart_key(code) && self.restart_button() != 0
+    }
+
     fn pointer(&mut self, p: &Pointer) -> u32 {
         self.hover_button = !p.touch && p.inside && self.on_button(p.x, p.y);
+        let ctl = self.controls().hit(p.x, p.y);
+        self.hover_ctl = if !p.touch && p.inside { ctl } else { None };
         if p.pressed & wg::M_LEFT != 0 {
             if self.on_button(p.x, p.y) {
                 return self.press_button();
             }
-            if self.s.phase == AIM {
+            if ctl == Some(Icon::Restart) {
+                return self.restart_button();
+            }
+            if self.s.phase == AIM && ctl.is_none() {
                 self.aiming = true;
                 self.aim_to(p.x, p.y);
             }
@@ -313,7 +348,7 @@ impl Game for Bankshot {
             if p.held & wg::M_LEFT == 0 {
                 return self.fire();
             }
-        } else if self.s.phase == AIM && !p.touch && p.inside && (p.x, p.y) != self.hover {
+        } else if self.s.phase == AIM && !p.touch && p.inside && ctl.is_none() && (p.x, p.y) != self.hover {
             // a mouse aims as it moves; the click fires
             self.aim_to(p.x, p.y);
         }
@@ -322,7 +357,7 @@ impl Game for Bankshot {
     }
 
     fn picture(&mut self) -> u32 {
-        let shown = [self.hover_button as i32, self.aiming as i32];
+        let shown = [self.hover_button as i32, self.aiming as i32, self.hover_ctl.map_or(-1, |i| i as i32)];
         let mut c = self.s;
         c.level_ms = 0;
         c.time_ms = 0;
@@ -399,8 +434,9 @@ impl Game for Bankshot {
         for (dy, col, a) in [(1.2, 0x000000, 0.5), (0.0, 0xffffff, 1.0)] {
             s.text(&format!("{} {}", level_l, self.s.level + 1), 12.0, 24.0 + dy, 17.0, hex(col), a);
         }
+        let right = self.controls().draw(s, self.hover_ctl, |_| self.can_restart(), w);
         for k in 0..self.room.shots {
-            let x = w - 18.0 - k as f32 * 15.0;
+            let x = right - 18.0 - k as f32 * 15.0;
             let live = k < self.s.shots;
             bullet(s, x, 24.0, if live { 1.0 } else { 0.25 });
         }
