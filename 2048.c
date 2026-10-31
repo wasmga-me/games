@@ -4,7 +4,9 @@
  * Draws at whatever size the page asks for (wg_resize), so tiles and text
  * stay sharp on any screen. Text comes from signed distance fields of Inter
  * (sdf_font.h). Swipes and taps arrive through wg_mouse. The page shows the
- * setup, pause and game over screens (wg.h), so this file only plays. */
+ * setup, pause and game over screens (wg.h), so this file only plays.
+ * Screen readers and keyboards play on the page's accessible board (the
+ * wg_a11y_* exports at the end). */
 #define WG_OWN_FB
 #include "wg.h"
 #include "sdf_font.h"
@@ -256,6 +258,47 @@ static const Theme THEMES[] = {
 #define VEIL 0.88f
 #define NTHEMES (i32)(sizeof THEMES / sizeof THEMES[0])
 
+/* ---------- words for the accessible board ----------
+ * What a move did is kept in a11y_said for the page to read out
+ * (WG_A11Y_SAID), whichever way the move came: a key, a swipe or the pad. */
+static char a11y_buf[1024];
+static char a11y_said[512];
+
+/* where the next words go: after any the page hasn't read yet (two moves
+ * between frames), or from the start if those grew long */
+static char *said_at(void) {
+  char *p = a11y_said;
+  while (*p) p++;
+  if (p == a11y_said) return p;
+  if (p - a11y_said > 256) p = a11y_said;
+  else *p++ = ' ';
+  *p = 0;
+  return p;
+}
+
+/* s with # replaced by the text t and @ by the square i (C4), into p; returns the end */
+static char *put_ts(char *p, const char *s, const char *t, i32 i) {
+  for (; *s; s++) {
+    if (*s == '#') p = put(p, t);
+    else if (*s == '@') {
+      *p++ = (char)('A' + i % S.n);
+      *p++ = (char)('1' + i / S.n);
+    } else *p++ = *s;
+  }
+  *p = 0;
+  return p;
+}
+
+static const char *keep_label(void) {
+  return tr("Keep going", "继续", "続ける", "계속하기", "Seguir", "Continuar", "Continuer", "Weiter", "Дальше", "繼續");
+}
+static const char *finish_label(void) {
+  return tr("Finish", "结束", "終了", "끝내기", "Terminar", "Encerrar", "Terminer", "Beenden", "Закончить", "結束");
+}
+/* a list's comma and a sentence's end, as each language writes them */
+static const char *comma(void) { return tr(", ", "、", "、", ", ", ", ", ", ", ", ", ", ", ", ", "、"); }
+static const char *stop(void) { return tr(". ", "。", "。", ". ", ". ", ". ", ". ", ". ", ". ", "。"); }
+
 /* ---------- game logic ---------- */
 
 static i32 pending; /* events from taps and swipes, returned by the next wg_frame */
@@ -420,7 +463,15 @@ static i32 slide(i32 dir) {
 }
 
 static i32 undo(void) {
-  if (!S.undo_on || !S.hist_n) return 0;
+  if (!S.undo_on) {
+    put(said_at(), tr("Undo is off.", "撤销已关闭。", "元に戻すはオフです。", "되돌리기가 꺼져 있습니다.", "Deshacer está desactivado.", "Desfazer está desligado.", "Annuler est désactivé.", "Rückgängig ist aus.", "Отмена выключена.", "復原已關閉。"));
+    return 0;
+  }
+  if (!S.hist_n) {
+    put(said_at(), tr("Nothing to undo.", "没有可撤销的。", "戻せる手がありません。", "되돌릴 수 없습니다.", "Nada que deshacer.", "Nada para desfazer.", "Rien à annuler.", "Nichts rückgängig zu machen.", "Нечего отменять.", "沒有可復原的。"));
+    return 0;
+  }
+  put(said_at(), tr("Undone.", "已撤销。", "元に戻しました。", "되돌렸습니다.", "Deshecho.", "Desfeito.", "Annulé.", "Rückgängig gemacht.", "Ход отменён.", "已復原。"));
   Snap *s = &S.hist[--S.hist_n];
   memcpy(S.cell, s->cell, sizeof S.cell);
   S.score = s->score;
@@ -433,6 +484,7 @@ static i32 undo(void) {
 }
 
 static void keep_going(void) {
+  put(put(said_at(), keep_label()), stop());
   S.kept_going = 1;
   S.phase = PLAY;
   A.dirty = 1;
@@ -534,14 +586,20 @@ static void cell_xy(i32 i, float *x, float *y) {
   *y = L.by + L.gap + (i / S.n) * (L.cs + L.gap);
 }
 
+/* a tile's number, 2^v; 2^31 and up as written powers */
+static char *tile_text(i32 v, char *buf) {
+  if (v > 30) { buf[0] = '2'; buf[1] = '^'; itoa10(v, buf + 2); }
+  else itoa10(1 << v, buf);
+  return buf;
+}
+
 static void tile_at(float x, float y, float cs, i32 v, float scale, float alpha) {
   const Theme *t = &THEMES[S.theme];
   i32 k = v - 1 > 12 ? 12 : v - 1;
   float s = cs * scale, o = (cs - s) / 2;
   rrect(x + o, y + o, s, s, cs * TILE_R * scale, t->tile[k], alpha);
   char buf[16];
-  if (v > 30) { buf[0] = '2'; buf[1] = '^'; itoa10(v, buf + 2); }
-  else itoa10(1 << v, buf);
+  tile_text(v, buf);
   i32 digits = 0;
   while (buf[digits]) digits++;
   float size = s * (digits <= 2 ? 0.52f : digits == 3 ? 0.44f : digits == 4 ? 0.36f : digits == 5 ? 0.30f : 0.25f);
@@ -677,8 +735,8 @@ static void draw(void) {
       float cx = L.bx + L.bs / 2, cy = L.by + L.bs * 0.4f, bh = L.bs * 0.12f, bw = L.bs * 0.34f;
       float by = L.by + L.bs * 0.56f;
       text_fit("2048!", cx, cy, L.bs * 0.2f, L.bs * 0.9f, title_colour(), a);
-      button(cx - bw - L.bs * 0.02f, by, bw, bh, tr("Keep going", "继续", "続ける", "계속하기", "Seguir", "Continuar", "Continuer", "Weiter", "Дальше", "繼續"), ACT_KEEP, S.sel == 0, a);
-      button(cx + L.bs * 0.02f, by, bw, bh, tr("Finish", "结束", "終了", "끝내기", "Terminar", "Encerrar", "Terminer", "Beenden", "Закончить", "結束"), ACT_FINISH, S.sel == 1, a);
+      button(cx - bw - L.bs * 0.02f, by, bw, bh, keep_label(), ACT_KEEP, S.sel == 0, a);
+      button(cx + L.bs * 0.02f, by, bw, bh, finish_label(), ACT_FINISH, S.sel == 1, a);
     }
   }
 }
@@ -700,9 +758,34 @@ static i32 act(i32 a) {
   return 0;
 }
 
+/* says what the slide just made: the tiles joined, the new tile, and a win or the end */
+static void say_slide(i32 moved) {
+  char *p = said_at(), num[16];
+  if (!moved) {
+    put(p, tr("Nothing moves that way.", "这个方向动不了。", "その方向には動きません。", "그쪽으로는 움직이지 않습니다.", "Nada se mueve hacia ahí.", "Nada se move para esse lado.", "Rien ne bouge dans ce sens.", "In diese Richtung bewegt sich nichts.", "В эту сторону ничего не сдвигается.", "這個方向動不了。"));
+    return;
+  }
+  i32 joined = 0;
+  for (i32 i = 0; i < S.n * S.n; i++)
+    if (A.merged[i]) {
+      p = put(p, joined++ ? comma() : tr("Joined: ", "合成：", "合体：", "합침: ", "Unidas: ", "Juntou: ", "Fusion : ", "Vereint: ", "Слияние: ", "合成："));
+      p = put(p, tile_text(S.cell[i], num));
+    }
+  if (joined) p = put(p, stop());
+  for (i32 i = 0; i < S.n * S.n; i++)
+    if (A.born[i])
+      p = put_ts(p, tr("New # at @.", "新方块 # 出现在 @。", "@ に # が出現。", "@에 새 # 등장.", "Nuevo # en @.", "Novo # em @.", "Nouveau # en @.", "Neue # auf @.", "Новая # на @.", "新方塊 # 出現在 @。"), tile_text(S.cell[i], num), i);
+  if (S.phase == WON)
+    put(p, tr(" 2048! Left and Right pick Keep going or Finish, Space chooses.", "2048！左右键选择继续或结束，空格确认。", "2048！左右で「続ける」か「終了」を選び、スペースで決定。", " 2048! 좌우로 계속하기나 끝내기를 고르고 스페이스로 결정.", " ¡2048! Izquierda y Derecha eligen Seguir o Terminar, Espacio confirma.", " 2048! Esquerda e Direita escolhem Continuar ou Encerrar, Espaço confirma.", " 2048 ! Gauche et Droite choisissent Continuer ou Terminer, Espace valide.", " 2048! Links und Rechts wählen Weiter oder Beenden, Leertaste bestätigt.", " 2048! Влево и вправо выбирают «Дальше» или «Закончить», пробел подтверждает.", "2048！左右鍵選擇繼續或結束，空白鍵確認。"));
+  else if (S.phase == OVER)
+    put(p, tr(" No moves left.", "无路可走了。", "もう動かせません。", " 더 이상 움직일 수 없습니다.", " No quedan movimientos.", " Não há mais jogadas.", " Plus aucun coup possible.", " Keine Züge mehr.", " Ходов больше нет.", "無路可走了。"));
+}
+
 static i32 move(i32 dir) {
   if (S.phase != PLAY) return 0;
-  return slide(dir);
+  i32 ev = slide(dir);
+  say_slide(ev != 0);
+  return ev;
 }
 
 static struct { i32 down, done; float x, y; } T;
@@ -802,6 +885,25 @@ WG_EXPORT(wg_best) i32 wg_best(i32 v) {
 
 static i32 prev_buttons, drawn;
 
+/* the pad's buttons just pressed: slides, undo, and the win screen's pick */
+static i32 press(i32 pressed) {
+  if (S.phase == PLAY) {
+    if (pressed & B_UP) return move(0);
+    if (pressed & B_RIGHT) return move(1);
+    if (pressed & B_DOWN) return move(2);
+    if (pressed & B_LEFT) return move(3);
+    if (pressed & B_B) return undo();
+  } else if (S.phase == WON) {
+    if (pressed & (B_LEFT | B_RIGHT)) {
+      S.sel = !S.sel;
+      A.dirty = 1;
+      put(said_at(), S.sel ? finish_label() : keep_label());
+    } else if (pressed & B_A) return act(S.sel ? ACT_FINISH : ACT_KEEP);
+    else if (pressed & B_B) return undo();
+  }
+  return 0;
+}
+
 WG_EXPORT(wg_drawn) i32 wg_drawn(void) { return drawn; }
 
 WG_EXPORT(wg_frame) i32 wg_frame(i32 buttons, i32 dt_ms) {
@@ -810,17 +912,7 @@ WG_EXPORT(wg_frame) i32 wg_frame(i32 buttons, i32 dt_ms) {
   pending = 0;
   if (dt_ms > 100) dt_ms = 100;
   if (S.phase == PLAY) S.time_ms += dt_ms;
-  if (S.phase == PLAY) {
-    if (pressed & B_UP) ev |= move(0);
-    else if (pressed & B_RIGHT) ev |= move(1);
-    else if (pressed & B_DOWN) ev |= move(2);
-    else if (pressed & B_LEFT) ev |= move(3);
-    else if (pressed & B_B) ev |= undo();
-  } else if (S.phase == WON) {
-    if (pressed & (B_LEFT | B_RIGHT)) { S.sel = !S.sel; A.dirty = 1; }
-    else if (pressed & B_A) ev |= act(S.sel ? ACT_FINISH : ACT_KEEP);
-    else if (pressed & B_B) ev |= undo();
-  }
+  ev |= press(pressed);
   drawn = animating() || A.dirty || ev;
   if (drawn) {
     A.t += (float)dt_ms;
@@ -865,4 +957,87 @@ WG_EXPORT(wg_state_loaded) i32 wg_state_loaded(void) {
   A.overlay_t = 1000;
   layout();
   return 1;
+}
+
+/* ---------- accessible board ----------
+ * The page lays a grid of squares over the board (wg.h): the arrows stay
+ * the game's slides, Shift with an arrow reads square by square, U undoes
+ * and I reads the score and the whole board, row by row. */
+static i32 cur_x, cur_y;
+
+static char *cell_label(i32 i, char *p) {
+  char num[16];
+  return put(p, S.cell[i] ? tile_text(S.cell[i], num) : tr("empty", "空", "空き", "빈 칸", "vacía", "vazia", "vide", "leer", "пусто", "空"));
+}
+
+WG_EXPORT(wg_a11y_grid) i32 wg_a11y_grid(void) { return S.n << 16 | S.n; }
+WG_EXPORT(wg_a11y_arrows) i32 wg_a11y_arrows(void) { return 1; }
+WG_EXPORT(wg_a11y_cursor) i32 wg_a11y_cursor(void) {
+  /* the board may have shrunk since */
+  if (cur_x >= S.n) cur_x = S.n - 1;
+  if (cur_y >= S.n) cur_y = S.n - 1;
+  return cur_y << 16 | cur_x;
+}
+WG_EXPORT(wg_a11y_focus) void wg_a11y_focus(i32 x, i32 y) {
+  if (x < 0 || y < 0 || x >= S.n || y >= S.n) return;
+  cur_x = x;
+  cur_y = y;
+}
+/* each square is a cell and half the gap either side, so the squares meet */
+WG_EXPORT(wg_a11y_rect) i32 wg_a11y_rect(i32 k) {
+  if (k == 0) return (i32)(L.bx + L.gap / 2);
+  if (k == 1) return (i32)(L.by + L.gap / 2);
+  return (i32)((L.cs + L.gap) * 100);
+}
+WG_EXPORT(wg_a11y_rev) u32 wg_a11y_rev(void) {
+  /* the squares, the score and what the keys and words depend on */
+  i32 v[] = {S.phase, S.n, S.score, S.best[S.n], S.undo_on, wg_lang_i};
+  return hash_bytes(hash_bytes(0, S.cell, sizeof S.cell), v, sizeof v);
+}
+WG_EXPORT(wg_a11y_buf) char *wg_a11y_buf(void) { return a11y_buf; }
+
+WG_EXPORT(wg_a11y_text) i32 wg_a11y_text(i32 kind, i32 x, i32 y) {
+  char *p = a11y_buf;
+  *p = 0;
+  if (kind == WG_A11Y_CELL && x >= 0 && y >= 0 && x < S.n && y < S.n) p = cell_label(y * S.n + x, p);
+  else if (kind == WG_A11Y_STATUS) {
+    p = put_n(p, tr("Score #", "得分 #", "スコア #", "점수 #", "Puntos: #", "Pontos: #", "Score : #", "Punkte: #", "Очки: #", "得分 #"), S.score);
+    p = put_n(p, tr(", best #. ", "，最高分 #。", "、ベスト #。", ", 최고 #. ", ", récord: #. ", ", recorde: #. ", ", record : #. ", ", Rekord: #. ", ", рекорд: #. ", "，最高分 #。"), S.best[S.n]);
+    for (i32 r = 0; r < S.n; r++) {
+      p = put_n(p, tr("Row #: ", "第 # 行：", "# 行目：", "#행: ", "Fila #: ", "Linha #: ", "Ligne # : ", "Reihe #: ", "Ряд #: ", "第 # 列："), r + 1);
+      for (i32 c = 0; c < S.n; c++) {
+        if (c) p = put(p, comma());
+        p = cell_label(r * S.n + c, p);
+      }
+      p = put(p, stop());
+    }
+  } else if (kind == WG_A11Y_SAID) {
+    p = put(p, a11y_said);
+    a11y_said[0] = 0;
+  } else if (kind == WG_A11Y_WAY && x >= 0 && x < 4) {
+    const char *w[] = {
+      tr("Slide up", "向上滑", "上へ", "위로 밀기", "Deslizar arriba", "Deslizar para cima", "Glisser vers le haut", "Nach oben schieben", "Сдвинуть вверх", "向上滑"),
+      tr("Slide right", "向右滑", "右へ", "오른쪽으로 밀기", "Deslizar a la derecha", "Deslizar para a direita", "Glisser vers la droite", "Nach rechts schieben", "Сдвинуть вправо", "向右滑"),
+      tr("Slide down", "向下滑", "下へ", "아래로 밀기", "Deslizar abajo", "Deslizar para baixo", "Glisser vers le bas", "Nach unten schieben", "Сдвинуть вниз", "向下滑"),
+      tr("Slide left", "向左滑", "左へ", "왼쪽으로 밀기", "Deslizar a la izquierda", "Deslizar para a esquerda", "Glisser vers la gauche", "Nach links schieben", "Сдвинуть влево", "向左滑"),
+    };
+    p = put(p, w[x]);
+  } else if (kind == WG_A11Y_KEYS) {
+    p = put(p, tr("Arrow keys slide the tiles, Shift with an arrow moves between squares", "方向键滑动方块，Shift 加方向键在格子间移动", "矢印でタイルを滑らせ、Shift＋矢印でマスを移動", "화살표로 타일을 밀고, Shift+화살표로 칸 이동", "Las flechas deslizan las fichas, Shift con una flecha cambia de casilla", "As setas deslizam as peças, Shift com uma seta muda de casa", "Les flèches font glisser les tuiles, Shift avec une flèche change de case", "Pfeile schieben die Kacheln, Shift mit Pfeil wechselt das Feld", "Стрелки сдвигают плитки, Shift со стрелкой переходит по клеткам", "方向鍵滑動方塊，Shift 加方向鍵在格子間移動"));
+    if (S.undo_on) p = put(p, tr(", U undoes", "，U 撤销", "、U で元に戻す", ", U로 되돌리기", ", U deshace", ", U desfaz", ", U annule", ", U macht rückgängig", ", U отменяет ход", "，U 復原"));
+    p = put(p, tr(", I reads the score and the board.", "，I 读出得分和棋盘。", "、I でスコアと盤面を読み上げ。", ", I로 점수와 판 읽기.", ", I lee los puntos y el tablero.", ", I lê os pontos e o tabuleiro.", ", I lit le score et la grille.", ", I liest Punkte und Spielfeld vor.", ", I читает очки и поле.", "，I 讀出得分和盤面。"));
+  }
+  return (i32)(p - a11y_buf);
+}
+
+/* Space or a click: the win screen's pick, else a reminder of the slides;
+ * X undoes; a 2 to 5 slide up, right, down, left (the page's slide buttons) */
+WG_EXPORT(wg_a11y_act) void wg_a11y_act(i32 x, i32 y, i32 a) {
+  static const i32 way[] = {B_UP, B_RIGHT, B_DOWN, B_LEFT};
+  wg_a11y_focus(x, y);
+  if (a >= 2 && a <= 5) pending |= press(way[a - 2]);
+  else if (a) pending |= undo();
+  else if (S.phase == WON) pending |= act(S.sel ? ACT_FINISH : ACT_KEEP);
+  else if (S.phase == PLAY)
+    put(said_at(), tr("Slide the tiles with the arrow keys or the slide buttons.", "用方向键或滑动按钮滑动方块。", "矢印キーかスライドボタンでタイルを滑らせます。", "화살표 키나 밀기 버튼으로 타일을 미세요.", "Desliza las fichas con las flechas o los botones de deslizar.", "Deslize as peças com as setas ou os botões de deslizar.", "Faites glisser les tuiles avec les flèches ou les boutons de glissement.", "Schiebe die Kacheln mit den Pfeiltasten oder den Schiebe-Knöpfen.", "Сдвигайте плитки стрелками или кнопками сдвига.", "用方向鍵或滑動按鈕滑動方塊。"));
 }
