@@ -1,6 +1,5 @@
-//! Bankshot - an original wasmga.me game. MIT licensed; the people, the
-//! blasters and the crates are Kenney's Mini Characters and Blaster Kit
-//! (CC0), rendered by games-src/tools/render3d.
+//! Bankshot - an original wasmga.me game. MIT licensed; the people and the
+//! crates are cartoons drawn by art/draw.py with games-src/tools/cartoon.
 //! Gunmen hide behind walls and ledges. Aim the agent's shot, and it
 //! bounces off the walls, the floor, the ceiling and steel plates. Hit
 //! every gunman with the shots you have, and never a hostage. 30 levels.
@@ -8,18 +7,21 @@ mod art;
 mod glyphs;
 mod room;
 
-use room::{dist, Path, Room, FLOOR, LEFT, LEVELS, RIGHT, TOP};
+use room::{dist, Hit, Path, Room, FLOOR, LEFT, LEVELS, RIGHT, TOP};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen};
 
-const VERSION: u32 = 1;
+/// 2: levels dealt again when shots coming back at the agent began to count
+const VERSION: u32 = 2;
 
 const AIM: i32 = 0;
 /// a shot on its way
 const FLY: i32 = 1;
 const CLEARED: i32 = 2;
 const DONE: i32 = 3;
-/// a hostage hit, or the shots ran out
+/// a hostage or the agent hit, or the shots ran out
 const FAILED: i32 = 4;
+/// `hurt` when the shot came back into the agent
+const HURT_AGENT: i32 = -2;
 
 const PLAN: (f32, f32) = (300.0, 400.0);
 /// a shot's speed, plan units a second
@@ -39,7 +41,8 @@ struct Save {
     level: i32,
     phase: i32,
     retries: i32,
-    /// shots left, foes down as bits, and the hostage hit (or -1)
+    /// shots left, foes down as bits, and the hostage hit (-1 none,
+    /// HURT_AGENT the agent)
     shots: i32,
     down: u32,
     hurt: i32,
@@ -133,6 +136,13 @@ impl Bankshot {
             return 0;
         }
         self.shot = self.room.trace(self.s.aim);
+        // a shot that downs the last foe ends there: the level is won even
+        // if it would have come back at someone
+        let left = self.room.all_foes() & !self.s.down;
+        if self.shot.hit.is_some() && self.shot.mask() & left == left {
+            let last = self.shot.foes.iter().filter(|&&(i, _)| left & 1 << i != 0).map(|&(_, d)| d).fold(0.0, f32::max);
+            self.shot.cut(last + room::HALF_W);
+        }
         self.flown = 0.0;
         self.since_fire = 0.0;
         self.s.shots -= 1;
@@ -155,8 +165,11 @@ impl Bankshot {
         if self.flown < self.shot.len {
             return ev;
         }
-        if let Some(h) = self.shot.hostage {
-            self.s.hurt = h as i32;
+        if let Some(hit) = self.shot.hit {
+            self.s.hurt = match hit {
+                Hit::Hostage(h) => h as i32,
+                Hit::Agent => HURT_AGENT,
+            };
             self.s.phase = FAILED;
             return ev | wg::EV_LOSE;
         }
@@ -344,6 +357,7 @@ impl Game for Bankshot {
         let left = self.s.aim.cos() < 0.0;
         let agent = match self.s.phase {
             CLEARED | DONE => art::AGENT_CHEER,
+            FAILED if self.s.hurt == HURT_AGENT => art::AGENT_DOWN,
             FAILED => art::AGENT_SAD,
             _ if self.since_fire < 160.0 => art::AGENT_FIRE,
             _ => art::AGENT_AIM,
@@ -591,6 +605,8 @@ impl Bankshot {
         let failed = self.s.phase == FAILED;
         let title = if !failed {
             tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"])
+        } else if self.s.hurt == HURT_AGENT {
+            tr(&["Hit by a ricochet", "被跳弹击中", "跳弾に被弾", "도탄에 맞음", "Alcanzado por rebote", "Atingido pelo ricochete", "Touché par le ricochet", "Vom Querschläger getroffen", "Ранен рикошетом", "被跳彈擊中"])
         } else if self.s.hurt >= 0 {
             tr(&["Hostage hit", "误伤人质", "人質に命中", "인질 명중", "Rehén herido", "Refém atingido", "Otage touché", "Geisel getroffen", "Заложник ранен", "誤傷人質"])
         } else {
@@ -668,7 +684,7 @@ mod tests {
         let gun = g.room.gun();
         // straight at the hostage, if nothing is in the way; else any
         // shot that ends on a hostage
-        let a = (0..1440).map(Room::step_angle).find(|&a| g.room.trace(a).hostage.is_some()).unwrap_or(((h.feet - 18.0) - gun.1).atan2(h.x - gun.0));
+        let a = (0..room::ANGLES).map(Room::step_angle).find(|&a| matches!(g.room.trace(a).hit, Some(Hit::Hostage(_)))).unwrap_or(((h.feet - 18.0) - gun.1).atan2(h.x - gun.0));
         g.aim_at(a);
         g.fire();
         assert!(run(&mut g, 4000) & wg::EV_LOSE != 0);
@@ -679,19 +695,31 @@ mod tests {
     }
 
     #[test]
+    fn a_ricochet_into_the_agent_fails_the_level() {
+        let mut g = Bankshot::new();
+        g.start(1);
+        // into the floor by the agent's feet: it bounces back up
+        g.aim_at(std::f32::consts::FRAC_PI_2 * if g.room.agent.0 < 150.0 { 0.98 } else { 1.02 });
+        g.fire();
+        assert!(run(&mut g, 4000) & wg::EV_LOSE != 0);
+        assert_eq!((g.s.phase, g.s.hurt), (FAILED, HURT_AGENT));
+    }
+
+    #[test]
     fn running_out_of_shots_fails() {
         let mut g = Bankshot::new();
         g.start(1);
-        // into the floor by the agent's feet, every time
-        let down = std::f32::consts::FRAC_PI_2 * if g.room.agent.0 < 150.0 { 0.98 } else { 1.02 };
+        // a shot that hits nobody, every time
+        let miss = (0..room::ANGLES).map(Room::step_angle).find(|&a| {
+            let p = g.room.trace(a);
+            p.foes.is_empty() && p.hit.is_none()
+        });
         for _ in 0..g.room.shots {
-            g.aim_at(down);
+            g.aim_at(miss.expect("no harmless shot"));
             g.fire();
             run(&mut g, 4000);
         }
-        if g.s.down != g.room.all_foes() {
-            assert_eq!(g.s.phase, FAILED);
-            assert!(g.s.hurt < 0);
-        }
+        assert_eq!(g.s.phase, FAILED);
+        assert_eq!(g.s.hurt, -1);
     }
 }

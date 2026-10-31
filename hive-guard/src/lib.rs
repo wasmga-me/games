@@ -1,6 +1,6 @@
-//! Hive Guard - an original wasmga.me game. MIT licensed; the dog, the bees
-//! and the trees are Kenney's Cube Pets and Nature Kit (CC0), rendered by
-//! games-src/tools/render3d with its own straw hive.
+//! Hive Guard - an original wasmga.me game. MIT licensed; the dog, the
+//! bees, the hive and the trees are cartoons drawn by art/draw.py with
+//! games-src/tools/cartoon.
 //! A dog sits near a beehive. Draw one line with the ink you have: when
 //! you let go it drops as a solid bar, and the bees pour out and fly at
 //! the dog. Keep every bee off the dog until the time runs out. 30 levels.

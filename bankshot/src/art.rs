@@ -16,36 +16,38 @@ pub struct Art {
 
 pub static SHEET: &[u8] = include_bytes!("art.png");
 
-pub static ARTS: [Art; 15] = [
-    Art { x: 482, y: 0, w: 159, h: 165, ax: 45.0, ay: 160.2, ppu: 200.0 },
-    Art { x: 318, y: 0, w: 163, h: 166, ax: 51.0, ay: 161.2, ppu: 200.0 },
-    Art { x: 0, y: 0, w: 159, h: 170, ax: 49.0, ay: 162.2, ppu: 200.0 },
-    Art { x: 160, y: 0, w: 157, h: 169, ax: 45.0, ay: 161.2, ppu: 200.0 },
-    Art { x: 0, y: 171, w: 162, h: 147, ax: 42.0, ay: 141.2, ppu: 200.0 },
-    Art { x: 294, y: 319, w: 146, h: 78, ax: 120.0, ay: 63.2, ppu: 200.0 },
-    Art { x: 326, y: 171, w: 160, h: 142, ax: 40.0, ay: 135.2, ppu: 200.0 },
-    Art { x: 147, y: 319, w: 146, h: 85, ax: 120.0, ay: 70.2, ppu: 200.0 },
-    Art { x: 163, y: 171, w: 162, h: 144, ax: 42.0, ay: 138.2, ppu: 200.0 },
-    Art { x: 441, y: 319, w: 146, h: 78, ax: 120.0, ay: 63.2, ppu: 200.0 },
-    Art { x: 642, y: 0, w: 139, h: 155, ax: 48.0, ay: 147.2, ppu: 200.0 },
-    Art { x: 0, y: 319, w: 146, h: 86, ax: 120.0, ay: 71.2, ppu: 200.0 },
-    Art { x: 782, y: 0, w: 153, h: 155, ax: 57.0, ay: 147.2, ppu: 200.0 },
-    Art { x: 487, y: 171, w: 198, h: 104, ax: 85.0, ay: 84.4, ppu: 200.0 },
-    Art { x: 686, y: 171, w: 196, h: 98, ax: 84.0, ay: 82.4, ppu: 200.0 },
+pub static ARTS: [Art; 16] = [
+    Art { x: 172, y: 0, w: 150, h: 193, ax: 47.0, ay: 182.8, ppu: 232.0 },
+    Art { x: 0, y: 0, w: 171, h: 194, ax: 51.0, ay: 183.8, ppu: 232.0 },
+    Art { x: 323, y: 0, w: 117, h: 193, ax: 52.0, ay: 182.8, ppu: 232.0 },
+    Art { x: 822, y: 0, w: 117, h: 191, ax: 47.0, ay: 180.8, ppu: 232.0 },
+    Art { x: 376, y: 386, w: 189, h: 99, ax: 104.0, ay: 88.8, ppu: 232.0 },
+    Art { x: 0, y: 195, w: 150, h: 190, ax: 47.0, ay: 179.8, ppu: 232.0 },
+    Art { x: 189, y: 386, w: 186, h: 111, ax: 101.0, ay: 93.8, ppu: 232.0 },
+    Art { x: 427, y: 195, w: 150, h: 183, ax: 47.0, ay: 172.8, ppu: 232.0 },
+    Art { x: 566, y: 386, w: 179, h: 97, ax: 94.0, ay: 86.8, ppu: 232.0 },
+    Art { x: 441, y: 0, w: 155, h: 192, ax: 52.0, ay: 181.8, ppu: 232.0 },
+    Art { x: 0, y: 386, w: 188, h: 112, ax: 103.0, ay: 89.8, ppu: 232.0 },
+    Art { x: 151, y: 195, w: 137, h: 188, ax: 72.0, ay: 177.8, ppu: 232.0 },
+    Art { x: 811, y: 195, w: 184, h: 130, ax: 99.0, ay: 87.8, ppu: 232.0 },
+    Art { x: 289, y: 195, w: 137, h: 188, ax: 72.0, ay: 177.8, ppu: 232.0 },
+    Art { x: 578, y: 195, w: 232, h: 132, ax: 116.0, ay: 115.0, ppu: 232.0 },
+    Art { x: 597, y: 0, w: 224, h: 192, ax: 112.0, ay: 175.2, ppu: 232.0 },
 ];
 
 pub const AGENT_AIM: usize = 0;
 pub const AGENT_FIRE: usize = 1;
 pub const AGENT_CHEER: usize = 2;
 pub const AGENT_SAD: usize = 3;
-pub const SUIT_AIM: usize = 4;
-pub const SUIT_DOWN: usize = 5;
-pub const BEARD_AIM: usize = 6;
-pub const BEARD_DOWN: usize = 7;
-pub const GREEN_AIM: usize = 8;
-pub const GREEN_DOWN: usize = 9;
-pub const HOSTAGE_SCARED: usize = 10;
-pub const HOSTAGE_DOWN: usize = 11;
-pub const HOSTAGE_CHEER: usize = 12;
-pub const CRATE_WIDE: usize = 13;
-pub const CRATE_MEDIUM: usize = 14;
+pub const AGENT_DOWN: usize = 4;
+pub const SUIT_AIM: usize = 5;
+pub const SUIT_DOWN: usize = 6;
+pub const BEARD_AIM: usize = 7;
+pub const BEARD_DOWN: usize = 8;
+pub const GREEN_AIM: usize = 9;
+pub const GREEN_DOWN: usize = 10;
+pub const HOSTAGE_SCARED: usize = 11;
+pub const HOSTAGE_DOWN: usize = 12;
+pub const HOSTAGE_CHEER: usize = 13;
+pub const CRATE_WIDE: usize = 14;
+pub const CRATE_MEDIUM: usize = 15;
