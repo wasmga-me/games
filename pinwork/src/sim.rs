@@ -1,8 +1,9 @@
 //! The physics: water and lava as a particle fluid (each drop pushed by the
 //! crowding round it, after Clavet, Beaudoin and Poulin's double density
-//! relaxation, and slowed by its neighbours' viscosity), coins and stones
-//! as grains that pile; lava that water turns to stone; and the orc, a heavy
-//! body that falls when what holds it is pulled away.
+//! relaxation, and slowed by its neighbours' viscosity), coins as grains
+//! that pile; lava that water turns to stone, the stones made together one
+//! rigid lump; and the orc, a heavy body that falls when what holds it is
+//! pulled away.
 
 use crate::levels::{Level, DROP_R, GOLD, GRAIN_R, GROUND, LAVA, PIN_R, ROW_RISE, SPACING, STONE, WALL_R, WATER};
 
@@ -10,10 +11,17 @@ use crate::levels::{Level, DROP_R, GOLD, GRAIN_R, GROUND, LAVA, PIN_R, ROW_RISE,
 pub const STEP_MS: f32 = 1000.0 / 120.0;
 const DT: f32 = STEP_MS / 1000.0;
 const GRAVITY: f32 = 700.0;
-/// how long a pin takes to slide out, ms
+/// how long a pin takes to slide out, and shakes when another holds it, ms
 const PULL_MS: f32 = 240.0;
-/// ms a new stone turns the lava it touches to stone too
+pub const JAM_MS: f32 = 260.0;
+/// ms a new stone joins the stones it touches into one lump
 const HEAT_MS: f32 = 220.0;
+/// drops of lava each drop of water sets to stone, and how far from the
+/// water they may be (through the stone it has made)
+const COLD: usize = 3;
+const CHILL: f32 = 12.0 * SPACING;
+/// a drop of water that boiled away
+const GONE: u8 = 255;
 /// ms a puff of steam lasts
 pub const STEAM_MS: f32 = 650.0;
 /// the orc's body: a circle this big, its middle this far above its feet
@@ -28,8 +36,12 @@ const ORC_WALK: f32 = 45.0;
 const TOP_SPEED: f32 = 320.0;
 /// below this speed, plan units a second, a particle is at rest
 const REST: f32 = 14.0;
-/// steps between the marks that tell whether things still move
+/// steps between the marks that tell whether things still move, and how
+/// many drops may shiver in place at rest
 const MARK: u32 = 12;
+const SHIVER: usize = 4;
+/// how near two drops' middles are when they touch
+const TOUCH: f32 = 2.0 * DROP_R + 1.0;
 /// how near lava's middle must come to burn the knight or the orc
 const BURN: f32 = DROP_R + 1.5;
 
@@ -45,10 +57,25 @@ pub struct Grain {
     pub p: (f32, f32),
     prev: (f32, f32),
     pub kind: u8,
-    /// ms left of turning lava to stone, for a stone just made
+    /// ms left of joining other stones, for a stone just made
     heat: f32,
     /// where it was at the last mark (see `World::moved`)
     mark: (f32, f32),
+    /// how low it fell to this step before anything pushed it back, and
+    /// whether something held it up (it is not falling freely)
+    fell: f32,
+    held: bool,
+    /// the lump of stone it belongs to, or `LOOSE`
+    lump: u32,
+}
+
+const LOOSE: u32 = u32::MAX;
+
+/// Stones made together, which keep the shape they were made in: their
+/// grains, and each one's place from the middle when the lump was made.
+struct Lump {
+    of: Vec<u32>,
+    shape: Vec<(f32, f32)>,
 }
 
 fn radius(kind: u8) -> f32 {
@@ -84,21 +111,72 @@ pub struct Pin {
     /// tip and handle where it started
     pub a: (f32, f32),
     pub b: (f32, f32),
-    /// how far out it has slid, 0 to 1, and whether it is sliding
+    /// how far out it has slid, 0 to 1 (out of the dungeon for good), and
+    /// how far the player wants it
     pub out: f32,
-    pub pulled: bool,
+    pub goal: f32,
+    /// ms left of the shake that shows another pin holds it
+    pub jam: f32,
+    /// whether it has moved at all
+    moved: bool,
 }
+
+/// the ring on a pin's handle: its middle this far past the handle end, and
+/// how far round it other pins keep
+pub const RING: f32 = 7.5;
+pub const RING_R: f32 = 10.0;
 
 impl Pin {
     /// where it is now
     pub fn now(&self) -> ((f32, f32), (f32, f32)) {
-        let k = self.out * 1.05;
-        let d = ((self.b.0 - self.a.0) * k, (self.b.1 - self.a.1) * k);
+        self.at(self.out)
+    }
+    /// how far and which way it slides, all the way out
+    pub fn travel(&self) -> (f32, f32) {
+        ((self.b.0 - self.a.0) * 1.05, (self.b.1 - self.a.1) * 1.05)
+    }
+    /// where it is when this far out
+    fn at(&self, out: f32) -> ((f32, f32), (f32, f32)) {
+        let t = self.travel();
+        let d = (t.0 * out, t.1 * out);
         ((self.a.0 + d.0, self.a.1 + d.1), (self.b.0 + d.0, self.b.1 + d.1))
+    }
+    /// its ring's middle when this far out
+    pub fn ring(&self, out: f32) -> (f32, f32) {
+        let (a, b) = self.at(out);
+        let l = dist(a, b).max(1.0);
+        (b.0 + (b.0 - a.0) / l * RING, b.1 + (b.1 - a.1) / l * RING)
     }
     pub fn gone(&self) -> bool {
         self.out >= 1.0
     }
+    /// out for good, or where the player wants it
+    fn settled(&self) -> bool {
+        self.gone() || self.out == self.goal
+    }
+    /// whether it has moved at all, even if it is back in now
+    pub fn touched(&self) -> bool {
+        self.moved
+    }
+    /// How far this pin, this far out, keeps clear of pin q where it is now
+    /// (below 0 where they overlap): rod on rod, ring on rod, ring on ring.
+    fn clearance(&self, out: f32, q: &Pin) -> f32 {
+        let ((a, b), c) = (self.at(out), self.ring(out));
+        let ((qa, qb), qc) = (q.now(), q.ring(q.out));
+        let rod = seg_seg_dist(a, b, qa, qb) - 2.0 * PIN_R;
+        let rings = dist(c, qc) - 2.0 * RING_R;
+        rod.min(seg_dist(c, qa, qb) - RING_R - PIN_R).min(seg_dist(qc, a, b) - RING_R - PIN_R).min(rings)
+    }
+}
+
+/// The distance between segments a-b and c-d.
+fn seg_seg_dist(a: (f32, f32), b: (f32, f32), c: (f32, f32), d: (f32, f32)) -> f32 {
+    let cross = |o: (f32, f32), p: (f32, f32), q: (f32, f32)| (p.0 - o.0) * (q.1 - o.1) - (p.1 - o.1) * (q.0 - o.0);
+    let (d1, d2, d3, d4) = (cross(c, d, a), cross(c, d, b), cross(a, b, c), cross(a, b, d));
+    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+        return 0.0;
+    }
+    seg_dist(a, c, d).min(seg_dist(b, c, d)).min(seg_dist(c, a, b)).min(seg_dist(d, a, b))
 }
 
 #[derive(Clone, Copy)]
@@ -109,6 +187,12 @@ pub struct Orc {
     pub alive: bool,
     /// where it was before the last step, as its walk moves `prev` too
     start: (f32, f32),
+}
+
+impl Orc {
+    fn moving(&self) -> bool {
+        self.p.1 < 600.0 && dist(self.p, self.start) / DT >= REST
+    }
 }
 
 /// A puff of steam where water met lava.
@@ -146,6 +230,12 @@ pub struct World {
     density: Vec<(f32, f32)>,
     /// the crowding a drop has at rest
     rest_density: f32,
+    /// lumps of stone; one that joined another is left empty
+    lumps: Vec<Lump>,
+    /// drops of water boiling away this step, and which drops of lava
+    /// touch water or stone (where the cold gets in)
+    boil: Vec<usize>,
+    edge: Vec<bool>,
 }
 
 /// the neighbour grid, cells as wide as a drop's reach
@@ -165,6 +255,11 @@ fn nearest(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
     let len2 = (ab.0 * ab.0 + ab.1 * ab.1).max(1e-6);
     let t = (((p.0 - a.0) * ab.0 + (p.1 - a.1) * ab.1) / len2).clamp(0.0, 1.0);
     (a.0 + ab.0 * t, a.1 + ab.1 * t)
+}
+
+/// The distance between points p and q.
+pub fn dist(p: (f32, f32), q: (f32, f32)) -> f32 {
+    ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt()
 }
 
 /// How far p is from the segment a-b.
@@ -252,8 +347,8 @@ fn lattice_density() -> f32 {
 
 impl World {
     pub fn new(lv: &Level) -> World {
-        let grains = lv.grains.iter().map(|&(x, y, kind)| Grain { p: (x, y), prev: (x, y), kind, heat: 0.0, mark: (x, y) }).collect();
-        let pins = lv.pins.iter().map(|&(ax, ay, bx, by)| Pin { a: (ax, ay), b: (bx, by), out: 0.0, pulled: false }).collect();
+        let grains = lv.grains.iter().map(|&(x, y, kind)| Grain { p: (x, y), prev: (x, y), kind, heat: 0.0, mark: (x, y), fell: y, held: false, lump: LOOSE }).collect();
+        let pins = lv.pins.iter().map(|&(ax, ay, bx, by)| Pin { a: (ax, ay), b: (bx, by), out: 0.0, goal: 0.0, jam: 0.0, moved: false }).collect();
         let orc = lv.orc.map(|(x, feet)| Orc { p: (x, feet - ORC_UP), prev: (x, feet - ORC_UP), alive: true, start: (x, feet - ORC_UP) });
         World {
             grains,
@@ -272,16 +367,22 @@ impl World {
             moved: true,
             density: Vec::new(),
             rest_density: lattice_density(),
+            lumps: Vec::new(),
+            boil: Vec::new(),
+            edge: Vec::new(),
         }
     }
 
-    /// Starts pin i sliding out; false if it is already out.
-    pub fn pull(&mut self, i: usize) -> bool {
+    /// Starts pin i sliding toward `goal` (1 all the way out, 0 all the
+    /// way in); false if it is already out for good or already heading
+    /// there.
+    pub fn slide(&mut self, i: usize, goal: f32) -> bool {
         let Some(pin) = self.pins.get_mut(i) else { return false };
-        if pin.pulled {
+        let goal = goal.clamp(0.0, 1.0);
+        if pin.gone() || pin.goal == goal {
             return false;
         }
-        pin.pulled = true;
+        pin.goal = goal;
         true
     }
 
@@ -289,17 +390,45 @@ impl World {
     /// and drop no further than a slow crawl from where it was at the last
     /// mark (crowded drops and coins shiver in place from step to step).
     pub fn resting(&self) -> bool {
-        let still = |p: (f32, f32), q: (f32, f32), dt: f32| ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt() / dt < REST;
-        self.pins.iter().all(|p| !p.pulled || p.gone())
-            && self.steam.is_empty()
-            && !self.moved
-            && self.orc.is_none_or(|o| o.p.1 > 600.0 || still(o.p, o.start, DT))
+        self.pins.iter().all(Pin::settled) && self.steam.is_empty() && !self.moved && self.orc.is_none_or(|o| !o.moving())
+    }
+
+    /// Whether a living orc is still on its way: a living orc on its feet
+    /// always walks at the knight, so one standing still is walled off.
+    pub fn orc_coming(&self) -> bool {
+        self.orc.is_some_and(|o| o.alive && o.moving())
     }
 
     /// One step.
     pub fn step(&mut self, lv: &Level) {
-        for pin in self.pins.iter_mut().filter(|p| p.pulled) {
-            pin.out = (pin.out + STEP_MS / PULL_MS).min(1.0);
+        // the pins slide toward where the player wants them, until one
+        // runs into another
+        for pin in self.pins.iter_mut() {
+            pin.jam = (pin.jam - STEP_MS).max(0.0);
+        }
+        for i in 0..self.pins.len() {
+            let pin = self.pins[i];
+            if pin.settled() {
+                continue;
+            }
+            let reach = STEP_MS / PULL_MS;
+            let out = if pin.goal > pin.out { (pin.out + reach).min(pin.goal) } else { (pin.out - reach).max(pin.goal) };
+            let blocked = self.pins.iter().enumerate().any(|(j, q)| {
+                if j == i || q.gone() {
+                    return false;
+                }
+                let now = pin.clearance(pin.out, q);
+                let next = pin.clearance(out, q);
+                next < 0.0 && next < now
+            });
+            let pin = &mut self.pins[i];
+            if blocked {
+                pin.goal = pin.out;
+                pin.jam = JAM_MS;
+            } else {
+                pin.out = out;
+                pin.moved = true;
+            }
         }
         for s in self.steam.iter_mut() {
             s.age += STEP_MS;
@@ -309,8 +438,16 @@ impl World {
         // every MARK steps, whether anything moved since the last mark
         self.steps += 1;
         if self.steps % MARK == 0 {
+            // a few drops shivering on a pin's round top don't count; one
+            // that really travels does, and so does any coin or stone
             let far = REST * MARK as f32 * DT;
-            self.moved = self.grains.iter().any(|g| g.p.1 < 600.0 && (g.p.0 - g.mark.0).powi(2) + (g.p.1 - g.mark.1).powi(2) > far * far);
+            let (mut some, mut most, mut solid) = (0, 0.0f32, false);
+            for g in self.grains.iter().filter(|g| g.kind != GONE && g.p.1 < 600.0 && dist(g.p, g.mark) > far) {
+                some += 1;
+                most = most.max(dist(g.p, g.mark));
+                solid |= !liquid(g.kind);
+            }
+            self.moved = solid || some > SHIVER || most > 4.0 * far;
             self.grains.iter_mut().for_each(|g| g.mark = g.p);
         }
         let fall = |p: &mut (f32, f32), prev: &mut (f32, f32), calm: f32| {
@@ -329,10 +466,12 @@ impl World {
         // the drops' viscosity, from where they were (the pairs found last
         // step)
         self.viscosity();
-        for g in self.grains.iter_mut() {
-            // water stops shivering; lava is thick enough to settle by
-            // itself, and creeps on slowly
-            fall(&mut g.p, &mut g.prev, if g.kind == WATER { 2.0 * REST } else { 0.0 });
+        for g in self.grains.iter_mut().filter(|g| g.kind != GONE) {
+            // water that rests on something stops shivering (water falling
+            // freely must not: it would hang in the air); lava is thick
+            // enough to settle by itself, and creeps on slowly
+            fall(&mut g.p, &mut g.prev, if g.kind == WATER && g.held { 2.0 * REST } else { 0.0 });
+            g.fell = g.p.1;
             g.heat = (g.heat - STEP_MS).max(0.0);
         }
         if let Some(o) = &mut self.orc {
@@ -349,6 +488,7 @@ impl World {
         // water turns to stone
         self.find_pairs();
         self.react();
+        self.fuse();
         self.relax();
         // the walls and the pins still in, with the boxes round them
         let walls = lv.walls.iter().map(|&(ax, ay, bx, by)| ((ax, ay), (bx, by), WALL_R));
@@ -373,7 +513,8 @@ impl World {
         let knight = knight_box(lv.knight);
         for _ in 0..3 {
             self.collide();
-            for g in self.grains.iter_mut() {
+            self.keep_shapes();
+            for g in self.grains.iter_mut().filter(|g| g.kind != GONE) {
                 let r = radius(g.kind);
                 // a few passes, as a particle can sit in a corner
                 for _ in 0..2 {
@@ -403,6 +544,9 @@ impl World {
             }
         }
         self.segs = segs;
+        for g in self.grains.iter_mut() {
+            g.held = g.fell - g.p.1 > 0.5 * GRAVITY * DT * DT;
+        }
         // what touches the knight and the orc
         for g in &self.grains {
             if g.kind != LAVA {
@@ -444,6 +588,9 @@ impl World {
         self.wet.clear();
         self.dry.clear();
         for i in 0..self.grains.len() {
+            if self.grains[i].kind == GONE {
+                continue;
+            }
             let (p, c) = (self.grains[i].p, self.cells[i] as i32);
             let (cx, cy) = (c % COLS, c / COLS);
             // its own cell and the four ahead, so each pair is met once
@@ -456,7 +603,7 @@ impl World {
                 while j >= 0 {
                     let ju = j as usize;
                     j = self.next[ju];
-                    if dx == 0 && dy == 0 && ju <= i {
+                    if (dx == 0 && dy == 0 && ju <= i) || self.grains[ju].kind == GONE {
                         continue;
                     }
                     let q = self.grains[ju].p;
@@ -544,6 +691,9 @@ impl World {
     fn collide(&mut self) {
         for &(i, j) in &self.dry {
             let (a, b) = (self.grains[i as usize], self.grains[j as usize]);
+            if a.lump != LOOSE && a.lump == b.lump {
+                continue;
+            }
             let two = radius(a.kind) + radius(b.kind);
             let (dx, dy) = (b.p.0 - a.p.0, b.p.1 - a.p.1);
             let d2 = dx * dx + dy * dy;
@@ -576,36 +726,151 @@ impl World {
         }
     }
 
-    /// Lava touching water, or a stone still hot from it, turns to stone,
-    /// with a puff of steam where it met water.
+    /// Water that touches lava (or stone with lava under it) boils away in
+    /// a puff of steam, and sets the COLD drops of lava nearest it that
+    /// touch water or stone to stone: water hardens as much lava as there
+    /// is water for, from where they meet.
     fn react(&mut self) {
-        let reach = 2.0 * DROP_R + 1.0;
-        let World { grains, wet, dry, steam, .. } = self;
+        // water on stone looks for lava under it now and then, while there
+        // is lava left
+        let mark = self.steps.is_multiple_of(MARK) && self.grains.iter().any(|g| g.kind == LAVA);
+        let World { grains, wet, dry, steam, boil, edge, head, next, .. } = self;
+        edge.clear();
+        edge.resize(grains.len(), false);
         for &(i, j) in wet.iter().chain(dry.iter()) {
             let (i, j) = (i as usize, j as usize);
-            let (a, b) = (grains[i], grains[j]);
-            if (b.p.0 - a.p.0).powi(2) + (b.p.1 - a.p.1).powi(2) >= reach * reach {
-                continue;
-            }
-            for (l, o) in [(i, j), (j, i)] {
-                let (lava, other) = (grains[l], grains[o]);
-                if lava.kind != LAVA || !(other.kind == WATER || (other.kind == STONE && other.heat > 0.0)) {
-                    continue;
+            for (x, y) in [(i, j), (j, i)] {
+                let (g, h) = (grains[x], grains[y]);
+                if g.kind == WATER && (h.kind == LAVA || (h.kind == STONE && (h.heat > 0.0 || mark))) && dist(g.p, h.p) < TOUCH {
+                    boil.push(x);
                 }
-                grains[l].kind = STONE;
-                grains[l].heat = HEAT_MS;
-                if other.kind == WATER && steam.len() < 40 {
-                    steam.push(Steam { p: lava.p, age: 0.0 });
+                // lava the cold can reach: at the water or the stone
+                if g.kind == LAVA && (h.kind == WATER || h.kind == STONE) && dist(g.p, h.p) < TOUCH {
+                    edge[x] = true;
                 }
             }
         }
-        // pairs with a new stone collide from now on
+        // each drop of water that met lava, or stone over lava, boils away
+        // and sets the COLD drops of lava nearest it to stone
+        for &w in boil.iter() {
+            // (a drop met twice has boiled already)
+            if grains[w].kind != WATER {
+                continue;
+            }
+            let p = grains[w].p;
+            let mut near: [(f32, usize); COLD] = [(f32::MAX, 0); COLD];
+            let (cx, cy) = cell(p);
+            let span = (CHILL / CELL).ceil() as i32;
+            for ny in (cy - span).max(0)..=(cy + span).min(ROWS - 1) {
+                for nx in (cx - span).max(0)..=(cx + span).min(COLS - 1) {
+                    let mut k = head[(ny * COLS + nx) as usize];
+                    while k >= 0 {
+                        let g = &grains[k as usize];
+                        let d = (g.p.0 - p.0).powi(2) + (g.p.1 - p.1).powi(2);
+                        if g.kind == LAVA && edge[k as usize] && d < CHILL * CHILL && d < near[COLD - 1].0 {
+                            // into its place among the nearest so far
+                            let mut at = COLD - 1;
+                            while at > 0 && near[at - 1].0 > d {
+                                near[at] = near[at - 1];
+                                at -= 1;
+                            }
+                            near[at] = (d, k as usize);
+                        }
+                        k = next[k as usize];
+                    }
+                }
+            }
+            let found = near.iter().filter(|n| n.0 < f32::MAX);
+            if found.clone().count() == 0 {
+                continue;
+            }
+            for &(_, k) in found {
+                grains[k].kind = STONE;
+                grains[k].heat = HEAT_MS;
+                edge[k] = false;
+            }
+            grains[w].kind = GONE;
+            if steam.len() < 40 {
+                steam.push(Steam { p, age: 0.0 });
+            }
+        }
+        boil.clear();
+        // pairs with a new stone collide from now on, and boiled water
+        // leaves them
         wet.retain(|&(i, j)| {
-            let both = liquid(grains[i as usize].kind) && liquid(grains[j as usize].kind);
-            if !both {
+            let (a, b) = (grains[i as usize].kind, grains[j as usize].kind);
+            let both = liquid(a) && liquid(b);
+            if !both && a != GONE && b != GONE {
                 dry.push((i, j));
             }
             both
         });
     }
+
+    /// Stones touching where one is still hot from being made join into one
+    /// lump (stones long cold only pile on each other).
+    fn fuse(&mut self) {
+        let mut changed = Vec::new();
+        for k in 0..self.dry.len() {
+            let (i, j) = self.dry[k];
+            let (a, b) = (self.grains[i as usize], self.grains[j as usize]);
+            if a.kind != STONE || b.kind != STONE || (a.heat <= 0.0 && b.heat <= 0.0) || (a.lump != LOOSE && a.lump == b.lump) {
+                continue;
+            }
+            if dist(a.p, b.p) >= TOUCH {
+                continue;
+            }
+            // into a's lump (a new one if a is loose), b and its lump with it
+            let into = if a.lump == LOOSE {
+                self.lumps.push(Lump { of: vec![i], shape: Vec::new() });
+                self.grains[i as usize].lump = (self.lumps.len() - 1) as u32;
+                self.lumps.len() - 1
+            } else {
+                a.lump as usize
+            };
+            let joining = if b.lump == LOOSE { vec![j] } else { std::mem::take(&mut self.lumps[b.lump as usize].of) };
+            for &g in &joining {
+                self.grains[g as usize].lump = into as u32;
+            }
+            self.lumps[into].of.extend(joining);
+            if !changed.contains(&into) {
+                changed.push(into);
+            }
+        }
+        // each lump that grew keeps the shape it has now
+        for into in changed {
+            let lump = &mut self.lumps[into];
+            let c = centre(&self.grains, &lump.of);
+            lump.shape = lump.of.iter().map(|&g| (self.grains[g as usize].p.0 - c.0, self.grains[g as usize].p.1 - c.1)).collect();
+        }
+    }
+
+    /// Puts each lump's stones back in its shape, turned and moved to fit
+    /// where they have been pushed (shape matching).
+    fn keep_shapes(&mut self) {
+        for lump in &self.lumps {
+            if lump.of.len() < 2 {
+                continue;
+            }
+            let c = centre(&self.grains, &lump.of);
+            // the turn that best fits the shape to the stones
+            let (mut dot, mut cross) = (0.0, 0.0);
+            for (&g, q) in lump.of.iter().zip(&lump.shape) {
+                let r = (self.grains[g as usize].p.0 - c.0, self.grains[g as usize].p.1 - c.1);
+                dot += q.0 * r.0 + q.1 * r.1;
+                cross += q.0 * r.1 - q.1 * r.0;
+            }
+            let l = (dot * dot + cross * cross).sqrt().max(1e-6);
+            let (sin, cos) = (cross / l, dot / l);
+            for (&g, q) in lump.of.iter().zip(&lump.shape) {
+                self.grains[g as usize].p = (c.0 + q.0 * cos - q.1 * sin, c.1 + q.0 * sin + q.1 * cos);
+            }
+        }
+    }
+}
+
+/// The middle of these grains.
+fn centre(grains: &[Grain], of: &[u32]) -> (f32, f32) {
+    let n = of.len() as f32;
+    of.iter().fold((0.0, 0.0), |c, &g| (c.0 + grains[g as usize].p.0 / n, c.1 + grains[g as usize].p.1 / n))
 }

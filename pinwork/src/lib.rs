@@ -38,6 +38,12 @@ const SETTLE_MS: f32 = 400.0;
 const WAIT_MS: f32 = 9000.0;
 /// how near a tap must be to a pin, plan units
 const REACH: f32 = 14.0;
+/// a press shorter than this (ms) or a drag shorter than this (plan units)
+/// pulls a pin all the way; a longer one moves it as far as it goes
+const TAP_MS: i32 = 220;
+const TAP_DRAG: f32 = 3.0;
+/// ms a held key takes to slide a pin all the way
+const HOLD_MS: f32 = 1500.0;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -60,6 +66,16 @@ struct Save {
 // SAFETY: #[repr(C)], integers and Plain types only
 unsafe impl wg::Plain for Save {}
 
+/// A pin the pointer holds: how far out it is less how far along it the
+/// pointer is (so the pin keeps its place under the pointer), whether the
+/// pointer has dragged it yet, and ms held.
+struct Grab {
+    pin: usize,
+    offset: f32,
+    dragged: bool,
+    ms: i32,
+}
+
 struct Pinwork {
     s: Save,
     lv: Level,
@@ -73,6 +89,9 @@ struct Pinwork {
     chosen: Option<usize>,
     hover_pin: Option<usize>,
     hover_button: bool,
+    /// the pin held by the pointer, and ms the pull key has been held
+    grab: Option<Grab>,
+    held_ms: Option<i32>,
     /// the level control under the mouse
     hover_ctl: Option<Icon>,
     liquids: liquid::Liquids,
@@ -107,9 +126,9 @@ impl Pinwork {
     fn can_restart(&self) -> bool {
         self.s.phase == PLAY && self.started()
     }
-    /// a pin was pulled this try
+    /// a pin was moved this try
     fn started(&self) -> bool {
-        self.world.pins.iter().any(|p| p.pulled)
+        self.world.pins.iter().any(|p| p.touched())
     }
 
     fn restart_button(&mut self) -> u32 {
@@ -126,7 +145,7 @@ impl Pinwork {
         self.lv = levels::level(level);
         self.restart();
     }
-    /// The same level again, counted as a retry once a pin was pulled.
+    /// The same level again, counted as a retry once a pin was moved.
     fn retry(&mut self) {
         if self.started() || self.s.phase != PLAY {
             self.s.retries += 1;
@@ -141,18 +160,20 @@ impl Pinwork {
         self.rest = 0.0;
         self.since_pull = 0.0;
         self.chosen = self.chosen.map(|_| 0);
+        self.grab = None;
+        self.held_ms = None;
     }
 
     /// The pin nearest (x, y) still in, if near enough.
     fn pin_at(&self, x: f32, y: f32) -> Option<usize> {
         let mut best: Option<(f32, usize)> = None;
         for (i, pin) in self.world.pins.iter().enumerate() {
-            if pin.pulled {
+            if pin.gone() {
                 continue;
             }
             let (a, b) = pin.now();
             let d = sim::seg_dist((x, y), a, b);
-            let ring = ((x - b.0).powi(2) + (y - b.1).powi(2)).sqrt() - 6.0;
+            let ring = sim::dist((x, y), pin.ring(pin.out)) - sim::RING;
             let d = d.min(ring.max(0.0));
             if d < REACH && best.is_none_or(|bb| d < bb.0) {
                 best = Some((d, i));
@@ -161,22 +182,29 @@ impl Pinwork {
         best.map(|b| b.1)
     }
 
-    fn pull(&mut self, i: usize) -> u32 {
-        if self.s.phase != PLAY || !self.world.pull(i) {
+    /// Slides pin i toward `goal` (1 all the way out).
+    fn slide(&mut self, i: usize, goal: f32) -> u32 {
+        let first = !self.world.pins[i].touched();
+        if self.s.phase != PLAY || !self.world.slide(i, goal) {
             return 0;
         }
-        self.s.pulled += 1;
         self.since_pull = 0.0;
         self.rest = 0.0;
-        if self.chosen.is_some() {
-            self.chosen = self.next_pin(i, 1);
-        }
-        wg::EV_BLIP
+        if first { wg::EV_BLIP } else { 0 }
+    }
+    fn pull(&mut self, i: usize) -> u32 {
+        self.slide(i, 1.0)
+    }
+    /// how far along pin i's slide (x, y) is, as a share of the whole slide
+    fn along(&self, i: usize, x: f32, y: f32) -> f32 {
+        let pin = &self.world.pins[i];
+        let t = pin.travel();
+        ((x - pin.a.0) * t.0 + (y - pin.a.1) * t.1) / (t.0 * t.0 + t.1 * t.1)
     }
     /// the next pin still in from i, going `dir`
     fn next_pin(&self, i: usize, dir: i32) -> Option<usize> {
         let n = self.world.pins.len() as i32;
-        (1..=n).map(|k| ((i as i32 + dir * k).rem_euclid(n)) as usize).find(|&j| !self.world.pins[j].pulled)
+        (1..=n).map(|k| ((i as i32 + dir * k).rem_euclid(n)) as usize).find(|&j| !self.world.pins[j].gone())
     }
 
     /// the gold that has reached the knight
@@ -184,12 +212,10 @@ impl Pinwork {
         let (x0, y0, x1, y1) = self.lv.zone;
         self.world.grains.iter().filter(|g| g.kind == GOLD && g.p.0 > x0 && g.p.0 < x1 && g.p.1 > y0 && g.p.1 < y1).count()
     }
-    fn orc_down(&self) -> bool {
-        self.world.orc.is_none_or(|o| !o.alive)
-    }
 
     /// Runs the physics, then sees whether the level is won or lost.
     fn simulate(&mut self, dt: f32) -> u32 {
+        let gone = self.world.pins.iter().filter(|p| p.gone()).count();
         self.owed = (self.owed + dt).min(100.0);
         while self.owed >= sim::STEP_MS {
             self.owed -= sim::STEP_MS;
@@ -197,6 +223,13 @@ impl Pinwork {
             if self.rest < SETTLE_MS {
                 self.world.step(&self.lv);
             }
+        }
+        // a pin counts as pulled once it is out for good; the keys then
+        // move on from it
+        self.s.pulled += (self.world.pins.iter().filter(|p| p.gone()).count() - gone) as i32;
+        if self.chosen.is_some_and(|i| self.world.pins[i].gone()) {
+            self.chosen = self.next_pin(self.chosen.unwrap(), 1);
+            self.held_ms = None;
         }
         self.since_pull += dt;
         self.rest = if self.world.resting() { self.rest + dt } else { 0.0 };
@@ -210,11 +243,11 @@ impl Pinwork {
             return 0;
         }
         let gold = self.gold_in();
-        if gold >= self.lv.need && self.orc_down() {
+        if gold >= self.lv.need && !self.world.orc_coming() {
             return self.clear_level(gold);
         }
-        if self.world.pins.iter().all(|p| p.pulled) {
-            return self.fail(if self.orc_down() { SHORT } else { ORC_LIVES });
+        if self.world.pins.iter().all(|p| p.gone()) {
+            return self.fail(if self.world.orc_coming() { ORC_LIVES } else { SHORT });
         }
         0
     }
@@ -294,6 +327,8 @@ impl Game for Pinwork {
             chosen: None,
             hover_pin: None,
             hover_button: false,
+            grab: None,
+            held_ms: None,
             hover_ctl: None,
             liquids: liquid::Liquids::new(),
             coins: Default::default(),
@@ -324,6 +359,9 @@ impl Game for Pinwork {
             self.s.level_ms = self.s.level_ms.saturating_add(input.dt);
             self.s.time_ms = self.s.time_ms.saturating_add(input.dt);
         }
+        if let Some(g) = &mut self.grab {
+            g.ms = g.ms.saturating_add(input.dt);
+        }
         if self.s.phase == PLAY {
             // arrows choose a pin, A pulls it
             let dir = if input.pressed & (wg::RIGHT | wg::DOWN) != 0 {
@@ -336,11 +374,33 @@ impl Game for Pinwork {
             if dir != 0 {
                 let from = self.chosen.unwrap_or(if dir > 0 { self.world.pins.len() - 1 } else { 0 });
                 self.chosen = self.next_pin(from, dir).or(self.chosen);
+                self.held_ms = None;
             }
+            // a tap of A pulls the pin all the way; held, A slides it out
+            // and B back in
             if input.pressed & wg::A != 0 {
-                match self.chosen {
-                    Some(i) => ev |= self.pull(i),
-                    None => self.chosen = self.next_pin(self.world.pins.len() - 1, 1),
+                if self.chosen.is_none() {
+                    self.chosen = self.next_pin(self.world.pins.len() - 1, 1);
+                } else {
+                    self.held_ms = Some(0);
+                }
+            }
+            let held = self.held_ms.map(|ms| ms + input.dt);
+            if input.held & wg::A == 0 {
+                self.held_ms = None;
+            } else {
+                self.held_ms = held;
+            }
+            if let Some(i) = self.chosen {
+                let out = self.world.pins[i].out;
+                let step = input.dt as f32 / HOLD_MS;
+                match held {
+                    Some(ms) if input.held & wg::A == 0 && ms <= TAP_MS => ev |= self.pull(i),
+                    Some(ms) if input.held & wg::A != 0 && ms > TAP_MS => ev |= self.slide(i, out + step),
+                    _ => {}
+                }
+                if input.held & wg::B != 0 {
+                    ev |= self.slide(i, out - step);
                 }
             }
         } else if input.pressed & wg::A != 0 {
@@ -367,10 +427,27 @@ impl Game for Pinwork {
             }
             if let Some(i) = self.pin_at(p.x, p.y) {
                 self.chosen = None;
-                return self.pull(i);
+                self.held_ms = None;
+                let offset = self.world.pins[i].out - self.along(i, p.x, p.y);
+                self.grab = Some(Grab { pin: i, offset, dragged: false, ms: 0 });
             }
         }
-        0
+        let Some(i) = self.grab.as_ref().map(|g| g.pin) else { return 0 };
+        let (along, length) = (self.along(i, p.x, p.y), sim::dist((0.0, 0.0), self.world.pins[i].travel()));
+        let out = self.world.pins[i].out;
+        let Some(g) = &mut self.grab else { return 0 };
+        if p.held & wg::M_LEFT == 0 {
+            // let go: a tap pulls the pin all the way
+            let tapped = !g.dragged && g.ms <= TAP_MS;
+            self.grab = None;
+            return if tapped { self.pull(i) } else { 0 };
+        }
+        let goal = g.offset + along;
+        if !g.dragged && (goal - out).abs() * length <= TAP_DRAG {
+            return 0;
+        }
+        g.dragged = true;
+        self.slide(i, goal)
     }
 
     fn picture(&mut self) -> u32 {
@@ -440,7 +517,7 @@ impl Game for Pinwork {
                 continue;
             }
             let lit = self.hover_pin == Some(i) || self.chosen == Some(i);
-            draw_pin(s, pin.now(), lit, pin.out);
+            draw_pin(s, pin, lit);
         }
 
         // the top bar: the level, and the gold that has reached the knight
@@ -548,19 +625,23 @@ fn draw_wall(s: &mut Screen, a: (f32, f32), b: (f32, f32)) {
 }
 
 /// A pin: a gold rod with a ring at its handle end, outlined.
-fn draw_pin(s: &mut Screen, (a, b): ((f32, f32), (f32, f32)), lit: bool, out: f32) {
+fn draw_pin(s: &mut Screen, pin: &sim::Pin, lit: bool) {
     let r = levels::PIN_R;
     let (rod, dark) = if lit { (hex(0xffea8a), hex(0xf0b21a)) } else { (hex(0xffd23f), hex(0xd18a0c)) };
-    let l = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt().max(1.0);
-    let c = (b.0 + (b.0 - a.0) / l * 7.5, b.1 + (b.1 - a.1) / l * 7.5);
+    // one held by another shakes along its length
+    let t = pin.travel();
+    let k = (pin.jam * 0.07).sin() * 1.6 * pin.jam / sim::JAM_MS / sim::dist((0.0, 0.0), t).max(1.0);
+    let shake = |p: (f32, f32)| (p.0 + t.0 * k, p.1 + t.1 * k);
+    let ((a, b), c, out) = (pin.now(), pin.ring(pin.out), pin.out);
+    let (a, b, c) = (shake(a), shake(b), shake(c));
     s.line(a.0 + 1.0, a.1 + 2.0, b.0 + 1.0, b.1 + 2.0, r, hex(0x000000), 0.3);
-    s.ring(c.0 + 1.0, c.1 + 2.0, 7.5, 3.4, hex(0x000000), 0.3);
+    s.ring(c.0 + 1.0, c.1 + 2.0, sim::RING, 3.4, hex(0x000000), 0.3);
     s.line(a.0, a.1, b.0, b.1, r + 1.1, INK, 1.0);
-    s.ring(c.0, c.1, 7.5, 3.4 + 2.2, INK, 1.0);
+    s.ring(c.0, c.1, sim::RING, 3.4 + 2.2, INK, 1.0);
     s.line(a.0, a.1, b.0, b.1, r, dark, 1.0);
-    s.ring(c.0, c.1, 7.5, 3.4, dark, 1.0);
+    s.ring(c.0, c.1, sim::RING, 3.4, dark, 1.0);
     s.line(a.0, a.1 - 0.9, b.0, b.1 - 0.9, r * 0.5, rod, 1.0);
-    s.ring(c.0, c.1 - 0.6, 7.5, 1.6, rod, 1.0);
+    s.ring(c.0, c.1 - 0.6, sim::RING, 1.6, rod, 1.0);
     if lit && out == 0.0 {
         s.ring(c.0, c.1, 12.5, 1.6, hex(0xffffff), 0.85);
     }
@@ -690,7 +771,7 @@ mod tests {
             g.pull(i);
             for _ in 0..700 {
                 g.update(&step);
-                if g.s.phase != PLAY || (g.rest > 200.0 && g.since_pull > 300.0) {
+                if g.s.phase != PLAY || (g.rest > SETTLE_MS + 50.0) {
                     break;
                 }
             }
@@ -728,23 +809,26 @@ mod tests {
 
     #[test]
     fn every_level_has_a_way_and_a_trap() {
-        for level in 0..LEVELS {
+        // PINWORK_LEVEL=n checks only level n
+        let only = std::env::var("PINWORK_LEVEL").ok().and_then(|v| v.parse::<i32>().ok());
+        for level in (0..LEVELS).filter(|l| only.is_none_or(|o| o == l + 1)) {
             let n = levels::level(level).pins.len();
             let mut wins = Vec::new();
-            let mut losses = 0;
+            let (mut lost, mut all) = (0, 0);
             for o in orders(n).into_iter().filter(|o| !o.is_empty()) {
                 let phase = play(level, &o);
                 if matches!(phase, CLEARED | DONE) {
-                    wins.push(o);
-                } else if phase == FAILED {
-                    losses += 1;
+                    wins.push(o.clone());
+                }
+                // a player pulling every pin in some order
+                if o.len() == n {
+                    all += 1;
+                    lost += (phase == FAILED) as i32;
                 }
             }
-            println!("level {:2}: pins {} wins {:?} losses {}", level + 1, n, wins, losses);
+            println!("level {:2}: pins {} lost {:3.0}% wins {:?}", level + 1, n, 100.0 * lost as f32 / all as f32, wins);
             assert!(!wins.is_empty(), "level {} cannot be won", level + 1);
-            if level % levels::LAYOUTS != 0 {
-                assert!(losses > 0, "level {} cannot be lost", level + 1);
-            }
+            assert!(lost > 0, "level {} cannot be lost", level + 1);
         }
     }
 }
