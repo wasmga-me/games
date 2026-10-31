@@ -822,24 +822,6 @@ WG_EXPORT(wg_state_loaded) i32 wg_state_loaded(void) {
 static char a11y_buf[200];
 static char a11y_said[120];
 
-/* s into p; returns the end */
-static char *put(char *p, const char *s) {
-  while (*s) *p++ = *s++;
-  *p = 0;
-  return p;
-}
-
-/* s with # replaced by n, into p; returns the end */
-static char *put_n(char *p, const char *s, i32 n) {
-  char num[12];
-  for (; *s; s++) {
-    if (*s != '#') { *p++ = *s; continue; }
-    for (const char *d = itoa10(n, num); *d; d++) *p++ = *d;
-  }
-  *p = 0;
-  return p;
-}
-
 static char *cell_label(i32 x, i32 y, char *p) {
   i32 st = S.st[y][x], n = S.adj[y][x];
   const char *s;
@@ -896,7 +878,7 @@ WG_EXPORT(wg_a11y_text) i32 wg_a11y_text(i32 kind, i32 x, i32 y) {
     p = put(p, a11y_said);
     a11y_said[0] = 0;
   } else if (kind == WG_A11Y_KEYS)
-    p = put(p, tr("Arrows move, Space opens, X flags, I reads mines left and time.",
+    p = put(p, tr("Arrow keys move, Space reveals, X toggles flag, I announces remaining mines and time.",
                 "方向键移动，空格翻开，X 插旗，I 读出剩余地雷和用时。",
                 "矢印で移動、スペースで開く、X で旗、I で残り地雷と時間。",
                 "화살표로 이동, 스페이스로 열기, X로 깃발, I로 남은 지뢰와 시간.",
@@ -924,7 +906,7 @@ WG_EXPORT(wg_a11y_act) void wg_a11y_act(i32 x, i32 y, i32 a) {
     put_n(p, tr("Squares opened: #", "翻开 # 格", "# マス開いた", "# 칸 열림", "Casillas abiertas: #", "Casas abertas: #", "Cases ouvertes : #", "Felder geöffnet: #", "Открыто клеток: #", "翻開 # 格"), S.opened - opened);
   else if (S.opened > opened || S.st[y][x] != st) cell_label(x, y, p);
   else if (a) put(p, tr("Already open", "已经翻开", "開いています", "이미 열림", "Ya abierta", "Já aberta", "Déjà ouverte", "Schon offen", "Уже открыта", "已經翻開"));
-  else if (st == FLAG) put(p, tr("Flagged, X removes the flag", "已插旗，按 X 取下", "旗あり、X で外す", "깃발 있음, X로 제거", "Con bandera, X la quita", "Com bandeira, X tira", "Drapeau, X l'enlève", "Flagge, X nimmt sie weg", "Флажок, X снимает", "已插旗，按 X 取下"));
+  else if (st == FLAG) put(p, tr("Flagged; press X to unflag", "已插旗，按 X 取下", "旗あり、X で外す", "깃발 있음, X로 제거", "Con bandera, X la quita", "Com bandeira, X tira", "Drapeau, X l'enlève", "Flagge, X nimmt sie weg", "Флажок, X снимает", "已插旗，按 X 取下"));
   else if (flags_around(x, y) >= S.adj[y][x]) cell_label(x, y, p);
-  else put(p, tr("Not enough flags around", "周围旗子不够", "周りの旗が足りません", "주변 깃발이 부족합니다", "Faltan banderas alrededor", "Faltam bandeiras em volta", "Pas assez de drapeaux autour", "Zu wenige Flaggen ringsum", "Вокруг мало флажков", "周圍旗子不夠"));
+  else put(p, tr("Not enough adjacent flags", "周围旗子不够", "周りの旗が足りません", "주변 깃발이 부족합니다", "Faltan banderas alrededor", "Faltam bandeiras em volta", "Pas assez de drapeaux autour", "Zu wenige Flaggen ringsum", "Вокруг мало флажков", "周圍旗子不夠"));
 }
