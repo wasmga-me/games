@@ -62,12 +62,16 @@ gets.
 `tilestack/art/extra/` are ours. `node tilestack/art/build.mjs` (needs sharp)
 renders them all into `tilestack/src/art.bin`, which the module embeds.
 
-`boarding/`, `pinwork/` and `unpark/` draw art rendered from
+`boarding/` and `unpark/` draw art rendered from
 [Kenney](https://kenney.nl)'s CC0 3D models: each `art/jobs.py` lists the
 renders, made with `tools/render3d/` (see its README.md) into the game's
 `src/art.png`. `bankshot/`, `higher-floor/` and `hive-guard/` draw their own
 cartoons: each `art/draw.py` draws them with `tools/cartoon/` (see its
 README.md), packed the same way.
+
+`pinwork/art/draw.py` draws Pinwork's knight, orc, chests and coins as SVG;
+`pinwork/art/build.sh` renders them with sharp and packs them into
+`pinwork/src/art.png` with `tools/render3d/pack.py`.
 
 `wgdemo/` is the smallest whole game on the Rust engine, to copy for a new one.
 
