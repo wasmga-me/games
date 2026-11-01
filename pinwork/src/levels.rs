@@ -1,7 +1,7 @@
 //! The levels: a dungeon's stone walls and pins, what fills its chambers,
 //! where the knight and the orc stand, and where the gold must land.
 
-pub const LEVELS: i32 = 2 * LAYOUT.len() as i32;
+pub const LEVELS: i32 = LAYOUT.len() as i32;
 
 /// what a grain is
 pub const GOLD: u8 = 0;
@@ -35,9 +35,8 @@ struct Layout {
 
 const FLOORS: (f32, f32, f32, f32) = (FRAME_L, 290.0, FRAME_R, FLOOR);
 
-/// The layouts, easiest first. Each mechanic has a mirrored practice
-/// stage before the next is introduced; the campaign never returns from
-/// four-pin sequences to the introductory two-pin layout.
+/// Eight distinct layouts, easiest first. Each stage introduces the next
+/// mechanism; mirrored copies do not count as additional puzzles.
 const LAYOUT: &[Layout] = &[
     // gold or lava, the lava over the knight
     Layout {
@@ -142,13 +141,10 @@ pub const ROW_RISE: f32 = SPACING * 0.866;
 
 /// Level n, needing a larger share of its gold the further on it is.
 pub fn level(n: i32) -> Level {
-    let l = &LAYOUT[n as usize / 2];
-    let flip = n % 2 != 0;
-    let fx = |x: f32| if flip { 300.0 - x } else { x };
-    let seg = |s: &Seg| (fx(s.0), s.1, fx(s.2), s.3);
+    let l = &LAYOUT[n as usize];
     let mut walls = vec![(FRAME_L, FRAME_TOP, FRAME_L, FLOOR), (FRAME_R, FRAME_TOP, FRAME_R, FLOOR), (FRAME_L, FLOOR, FRAME_R, FLOOR)];
-    walls.extend(l.walls.iter().map(seg));
-    let pins = l.pins.iter().map(seg).collect();
+    walls.extend_from_slice(l.walls);
+    let pins = l.pins.to_vec();
     let mut grains = Vec::new();
     let mut gold = 0;
     for &(kind, x0, y0, x1, y1) in l.fills {
@@ -160,7 +156,7 @@ pub fn level(n: i32) -> Level {
         while y >= y0 + r - 0.01 {
             let mut x = x0 + r + if row % 2 == 1 { shift } else { 0.0 };
             while x <= x1 - r + 0.01 {
-                grains.push((fx(x), y, kind));
+                grains.push((x, y, kind));
                 gold += (kind == GOLD) as usize;
                 x += step;
             }
@@ -169,7 +165,40 @@ pub fn level(n: i32) -> Level {
         }
     }
     let share = 0.5 + 0.15 * n as f32 / (LEVELS - 1) as f32;
-    let (zx0, zy0, zx1, zy1) = l.zone;
-    let zone = if flip { (300.0 - zx1, zy0, 300.0 - zx0, zy1) } else { (zx0, zy0, zx1, zy1) };
-    Level { walls, pins, grains, knight: fx(l.knight), orc: l.orc.map(|(x, y)| (fx(x), y)), zone, need: (gold as f32 * share).ceil() as usize }
+    Level { walls, pins, grains, knight: l.knight, orc: l.orc, zone: l.zone, need: (gold as f32 * share).ceil() as usize }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Ignore left/right reflection, segment direction, ordering and gold
+    // quota: none of those make a repeated chamber a new puzzle.
+    fn chambers(n: i32, flip: bool) -> Vec<(u8, i32, i32, i32, i32)> {
+        let lv = level(n);
+        let fx = |x: f32| if flip { 300.0 - x } else { x };
+        let mut parts = Vec::new();
+        for (kind, segments) in [(0, &lv.walls), (1, &lv.pins)] {
+            for &(x0, y0, x1, y1) in segments {
+                let a = (fx(x0) as i32, y0 as i32);
+                let b = (fx(x1) as i32, y1 as i32);
+                let (a, b) = if a < b { (a, b) } else { (b, a) };
+                parts.push((kind, a.0, a.1, b.0, b.1));
+            }
+        }
+        parts.sort();
+        parts
+    }
+
+    #[test]
+    fn campaign_has_no_repeated_or_mirrored_chambers() {
+        assert_eq!(LEVELS, 8);
+        for a in 0..LEVELS {
+            for b in 0..a {
+                for flip in [false, true] {
+                    assert_ne!(chambers(a, false), chambers(b, flip), "levels {} and {} repeat", a + 1, b + 1);
+                }
+            }
+        }
+    }
 }

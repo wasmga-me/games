@@ -75,7 +75,7 @@ Boarding moves passengers into matching buses through a five-seat waiting bench.
 Flowline requires a sealed route to the garden before the timer expires while
 keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floor
 reserves the marked boss for last; Pinwork seals fluid barriers and teaches its
-eight mechanisms in original/mirrored pairs. Decant uses increasing solution-length
+eight mechanisms in eight distinct chambers. Decant uses increasing solution-length
 targets, and Unbolt retains a verified winning screw-removal sequence for every deal.
 
 ## Licence
