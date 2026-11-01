@@ -1,8 +1,6 @@
 //! The rooms: walls, ledges and steel plates, where everyone stands, how a
-//! shot bounces through it all, and the levels, dealt so each needs a
-//! ricochet.
+//! shot bounces through it all, and a fixed campaign teaching one idea at a time.
 
-use wg::Rng;
 
 pub const LEVELS: i32 = 30;
 /// the room, plan units: the walls bullets bounce off
@@ -11,7 +9,7 @@ pub const RIGHT: f32 = 300.0;
 pub const TOP: f32 = 48.0;
 pub const FLOOR: f32 = 352.0;
 /// a person's half width and height, plan units
-pub const HALF_W: f32 = 8.0;
+pub const HALF_W: f32 = 10.0;
 pub const TALL: f32 = 36.0;
 /// a plate's half thickness
 pub const PLATE_R: f32 = 3.0;
@@ -21,13 +19,13 @@ pub const GUN_UP: f32 = 21.0;
 const REACH: f32 = 1600.0;
 pub const BOUNCES: usize = 6;
 /// the solver's aim steps
+#[cfg(test)]
 pub const ANGLES: usize = 1440;
 
-/// The aim steps in a row each shot a level needs must allow: 3 degrees
-/// at first, 1.5 at the end, so a level asks for thought, not a steady hand.
-pub fn window(level: i32) -> usize {
-    12 - (6 * level / (LEVELS - 1)) as usize
-}
+/// A forgiving three-degree solution window, including on the last level.
+/// Extra targets and cover add difficulty; smaller aim tolerances do not.
+#[cfg(test)]
+pub fn window(_level: i32) -> usize { 13 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -40,9 +38,6 @@ pub struct Rect {
 impl Rect {
     pub fn overlaps(&self, o: &Rect) -> bool {
         self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
-    }
-    fn grow(&self, d: f32) -> Rect {
-        Rect { x: self.x - d, y: self.y - d, w: self.w + 2.0 * d, h: self.h + 2.0 * d }
     }
     /// Where the segment a to b first enters this box, as a share of the
     /// way, if it does.
@@ -95,31 +90,32 @@ pub struct Room {
     /// walls and ledges
     pub blocks: Vec<Rect>,
     pub plates: Vec<Plate>,
+    pub crates: Vec<Rect>,
     /// the agent's feet
     pub agent: (f32, f32),
     pub foes: Vec<Person>,
     pub hostages: Vec<Person>,
     /// bullets for the level
     pub shots: i32,
+    /// Shots for three stars; missed shots cost stars, not the whole attempt.
+    pub par: i32,
 }
 
-/// Who on our side a shot can hit.
+/// Objects that absorb a shot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Hit {
     Hostage(usize),
-    /// the shot came back into the agent
-    Agent,
+    Crate(usize),
 }
 
 /// A shot's way through the room: the points it turns at, and who it hits
-/// how far along. It ends at a hostage, back at the agent, or when it runs
-/// out.
+/// how far along. It ends at a hostage, a wooden crate, or its range limit.
 #[derive(Clone, Default)]
 pub struct Path {
     pub pts: Vec<(f32, f32)>,
     /// each foe hit and the distance there
     pub foes: Vec<(usize, f32)>,
-    /// someone on our side hit, if any: the path ends there
+    /// A hostage or crate hit, if any: the path ends there
     pub hit: Option<Hit>,
     pub len: f32,
 }
@@ -170,7 +166,7 @@ pub fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
 impl Room {
     /// a room with nobody in it, until a level is dealt
     pub fn empty() -> Room {
-        Room { blocks: Vec::new(), plates: Vec::new(), agent: (RIGHT / 2.0, FLOOR), foes: Vec::new(), hostages: Vec::new(), shots: 0 }
+        Room { blocks: Vec::new(), plates: Vec::new(), crates: Vec::new(), agent: (RIGHT / 2.0, FLOOR), foes: Vec::new(), hostages: Vec::new(), shots: 0, par: 1 }
     }
     /// every foe, as bits
     pub fn all_foes(&self) -> u32 {
@@ -200,11 +196,16 @@ impl Room {
 
     /// The way a shot at `angle` (radians, 0 to the right, down positive)
     /// goes.
+    #[cfg(test)]
     pub fn trace(&self, angle: f32) -> Path {
-        self.trace_with(&self.walls(), angle)
+        self.trace_broken(angle, 0)
     }
 
-    fn trace_with(&self, walls: &[((f32, f32), (f32, f32))], angle: f32) -> Path {
+    pub fn trace_broken(&self, angle: f32, broken: u32) -> Path {
+        self.trace_with(&self.walls(), angle, broken)
+    }
+
+    fn trace_with(&self, walls: &[((f32, f32), (f32, f32))], angle: f32, broken: u32) -> Path {
         let mut p = self.gun();
         let mut d = (angle.cos(), angle.sin());
         let mut path = Path { pts: vec![p], ..Path::default() };
@@ -230,11 +231,10 @@ impl Room {
             let (t, n) = best.unwrap_or((left, (0.0, 0.0)));
             let t = t.min(left);
             let q = (p.0 + d.0 * t, p.1 + d.1 * t);
-            // who stands on the way: a hostage, or the agent once the shot
-            // has bounced (it leaves the agent's own gun first)
+            // Hostages and intact wooden cover stop the bullet.
             let mut stop: Option<(Hit, f32)> = None;
-            let agent = (bounce > 0).then(|| (Hit::Agent, agent_rect(self.agent)));
-            for (who, r) in self.hostages.iter().enumerate().map(|(i, h)| (Hit::Hostage(i), h.rect())).chain(agent) {
+            for (who, r) in self.hostages.iter().enumerate().map(|(i, h)| (Hit::Hostage(i), h.rect()))
+                .chain(self.crates.iter().enumerate().filter(|(i, _)| broken & (1 << i) == 0).map(|(i, r)| (Hit::Crate(i), *r))) {
                 if let Some(s) = r.enter(p, q) {
                     if stop.is_none_or(|st| s < st.1) {
                         stop = Some((who, s));
@@ -276,40 +276,49 @@ impl Room {
     }
 
     /// The angle of aim step k.
+    #[cfg(test)]
     pub fn step_angle(k: usize) -> f32 {
         std::f32::consts::TAU * k as f32 / ANGLES as f32
     }
 
     /// Each shot that hits someone, by aim step: the foes it hits as
-    /// bits, and whether it hurts a hostage or the agent; and which foes a straight shot
+    /// bits, and whether it hits a hostage or crate; and which foes a straight shot
     /// reaches.
+    #[cfg(test)]
     fn survey(&self) -> (Vec<(u32, bool)>, u32) {
         let walls = self.walls();
         let mut direct = 0;
         let shots = (0..ANGLES)
             .map(|k| {
-                let path = self.trace_with(&walls, Room::step_angle(k));
+                let path = self.trace_with(&walls, Room::step_angle(k), 0);
                 let first = dist(path.pts[0], path.pts[1]);
                 for &(i, d) in &path.foes {
                     if d <= first + 0.01 {
                         direct |= 1 << i;
                     }
                 }
-                (path.mask(), path.hit.is_some())
+                (path.mask(), path.hit.is_some() && path.mask() != self.all_foes())
             })
             .collect();
         (shots, direct)
     }
 
     /// The foes the shot at aim step k hits, as bits, if it hits some,
-    /// spares the hostages and the agent and hits the same for `w` aim steps in a row.
+    /// spares the hostages and hits the same for `w` aim steps in a row.
+    #[cfg(test)]
     fn steady(survey: &[(u32, bool)], k: usize, w: usize) -> Option<u32> {
         let n = survey.len();
-        let m = survey[k].0;
-        (m != 0 && (0..w).all(|j| survey[(k + j) % n] == (m, false))).then_some(m)
+        let mut m = u32::MAX;
+        for j in 0..w {
+            let (hits, blocked) = survey[(k + j) % n];
+            if blocked { return None; }
+            m &= hits;
+        }
+        (m != 0).then_some(m)
     }
 
     /// The shots steady over `w` aim steps: their foe bits.
+    #[cfg(test)]
     fn good_shots(survey: &[(u32, bool)], w: usize) -> Vec<u32> {
         let mut out = Vec::new();
         for m in (0..survey.len()).filter_map(|k| Room::steady(survey, k, w)) {
@@ -321,7 +330,7 @@ impl Room {
     }
 
     /// An aim on a way to down every foe in the fewest shots, safely and
-    /// within a window of aim steps, as the dealer counted.
+    /// within a fixed window of aim steps.
     #[cfg(test)]
     pub fn best_shot(&self, down: u32, w: usize) -> Option<f32> {
         let (survey, _) = self.survey();
@@ -335,6 +344,7 @@ impl Room {
 
     /// How few shots clear the room from foes `down` (as bits), using
     /// these shots; None if some foe cannot be hit.
+    #[cfg(test)]
     fn shots_needed(good: &[u32], all: u32, down: u32) -> Option<i32> {
         if down == all {
             return Some(0);
@@ -343,159 +353,59 @@ impl Room {
     }
 }
 
-/// a level's foes and hostages
-fn counts(level: i32) -> (usize, usize) {
-    let foes = (1 + level / 7) as usize;
-    let hostages = if level >= 4 { 1 + (level >= 16) as usize } else { 0 };
-    (foes.min(4), hostages)
-}
-
-/// Deals a level: the same level always deals the same room.
+/// Authored lessons following Mr Bullet's core progression: a clear shot,
+/// a line of targets, stairs, then bank shots and finally hostage avoidance.
+/// Coordinates are original. Every entry has a fixed four-shot allowance.
 pub fn level(level: i32) -> Room {
-    let mut rng = Rng::new(0xBA45 + level as u32 * 7919);
-    let (foes, hostages) = counts(level);
-    // the share of aim steps that hit a foe safely: more at first, fewer
-    // at the end
-    let want = 0.15 - 0.12 * level as f32 / (LEVELS - 1) as f32;
-    let mut best: Option<(f32, Room)> = None;
-    let (mut tries, mut dealt) = (0, 0);
-    while tries < 2000 && dealt < 8 {
-        tries += 1;
-        let Some(mut room) = build(&mut rng, foes, hostages) else { continue };
-        let (survey, direct) = room.survey();
-        let all = room.all_foes();
-        // at least one foe out of a straight shot's reach, two from the
-        // middle levels on
-        let hidden = (all & !direct).count_ones();
-        if hidden < 1 + (level >= 10 && foes >= 2) as u32 {
-            continue;
-        }
-        let good = Room::good_shots(&survey, window(level));
-        let Some(need) = Room::shots_needed(&good, all, 0) else { continue };
-        room.shots = need + (level < 15) as i32;
-        dealt += 1;
-        let safe = survey.iter().filter(|&&(m, h)| m != 0 && !h).count() as f32 / survey.len() as f32;
-        let off = (safe - want).abs();
-        if best.as_ref().is_none_or(|b| off < b.0) {
-            best = Some((off, room));
-        }
-    }
-    best.expect("no room dealt").1
-}
-
-/// One room: the agent at one side, walls between, perhaps ledges and
-/// plates, and the foes and hostages standing about. None if it did not
-/// fit together.
-fn build(rng: &mut Rng, foes: usize, hostages: usize) -> Option<Room> {
-    let left = rng.below(2) == 0;
-    let ax = if left { 26.0 } else { RIGHT - 26.0 };
-    let mut room = Room { blocks: Vec::new(), plates: Vec::new(), agent: (ax, FLOOR), foes: Vec::new(), hostages: Vec::new(), shots: 0 };
-    // the walls between: up from the floor or down from the ceiling
-    let walls = 1 + rng.below(2) as usize;
-    for i in 0..walls {
-        let w = 14.0 + rng.below(3) as f32 * 4.0;
-        let x = 92.0 + rng.float() * 116.0 - w / 2.0;
-        let r = if i == 0 || rng.below(2) == 0 {
-            let top = 140.0 + rng.float() * 110.0;
-            Rect { x, y: top, w, h: FLOOR - top }
-        } else {
-            let bottom = 170.0 + rng.float() * 110.0;
-            Rect { x, y: TOP, w, h: bottom - TOP }
-        };
-        if room.blocks.iter().any(|b| b.grow(26.0).overlaps(&r)) {
-            return None;
-        }
-        room.blocks.push(r);
-    }
-    // ledges to stand on
-    for _ in 0..rng.below(3) {
-        let w = 56.0 + rng.float() * 50.0;
-        let x = if rng.below(2) == 0 { LEFT } else { RIGHT - w };
-        let x = if rng.below(3) == 0 { 60.0 + rng.float() * (180.0 - w) } else { x };
-        let r = Rect { x, y: 150.0 + rng.float() * 130.0, w, h: 10.0 };
-        if room.blocks.iter().any(|b| b.grow(2.0).overlaps(&r)) || r.grow(TALL + 6.0).overlaps(&agent_rect((ax, FLOOR))) {
-            return None;
-        }
-        room.blocks.push(r);
-    }
-    // steel plates in the air
-    for _ in 0..rng.below(3) {
-        let len = 34.0 + rng.float() * 24.0;
-        let a = [-60.0f32, -45.0, -30.0, 0.0, 30.0, 45.0, 60.0, 90.0][rng.below(8) as usize].to_radians();
-        let c = (40.0 + rng.float() * 220.0, TOP + 30.0 + rng.float() * 170.0);
-        let (dx, dy) = (a.cos() * len / 2.0, a.sin() * len / 2.0);
-        let p = Plate { a: (c.0 - dx, c.1 - dy), b: (c.0 + dx, c.1 + dy) };
-        let bound = Rect { x: c.0 - dx.abs() - PLATE_R, y: c.1 - dy.abs() - PLATE_R, w: 2.0 * (dx.abs() + PLATE_R), h: 2.0 * (dy.abs() + PLATE_R) };
-        if room.blocks.iter().any(|b| b.grow(10.0).overlaps(&bound)) || bound.grow(12.0).overlaps(&agent_rect((ax, FLOOR))) {
-            return None;
-        }
-        room.plates.push(p);
-    }
-    // where people can stand: the floor and the tops of walls and ledges
-    let mut tops: Vec<(f32, f32, f32)> = vec![(LEFT, RIGHT, FLOOR)];
-    for b in &room.blocks {
-        if b.y > TOP + TALL + 4.0 {
-            tops.push((b.x, b.x + b.w, b.y));
-        }
-    }
-    let stands = |room: &Room, p: &Person| {
-        let r = p.rect();
-        r.x >= LEFT + 2.0
-            && r.x + r.w <= RIGHT - 2.0
-            && r.y > TOP + 4.0
-            && !room.blocks.iter().any(|b| b.overlaps(&r))
-            && !room.plates.iter().any(|pl| plate_box(pl).overlaps(&r.grow(4.0)))
-            && !agent_rect((ax, FLOOR)).grow(50.0).overlaps(&r)
-            && !room.foes.iter().chain(&room.hostages).any(|o| (o.x - p.x).abs() < 2.0 * HALF_W + 18.0 && (o.feet - p.feet).abs() < TALL)
+    let mut r = Room { agent: (35.0, FLOOR), shots: 4, ..Room::empty() };
+    let (blocks, plates, foes, hostages, agent, par): (&[(f32,f32,f32,f32)], &[(f32,f32,f32,f32)], &[(f32,f32)], &[(f32,f32)], (f32,f32), i32) = match level {
+        0 => (&[], &[], &[(235.,352.)], &[], (35.,352.), 1),
+        1 => (&[], &[], &[(180.,352.),(255.,352.)], &[], (35.,352.), 1),
+        2 => (&[(120.,312.,60.,40.),(180.,272.,60.,80.),(240.,232.,60.,120.)], &[], &[(145.,312.),(205.,272.),(265.,232.)], &[], (65.,352.), 1),
+        3 => (&[], &[], &[(250.,352.)], &[], (35.,352.), 1),
+        4 => (&[(0.,272.,70.,80.),(215.,272.,85.,80.)], &[], &[(250.,272.),(150.,352.)], &[], (35.,272.), 2),
+        5 => (&[(135.,252.,25.,100.)], &[], &[(240.,352.)], &[], (35.,352.), 1),
+        6 => (&[(130.,282.,25.,70.)], &[], &[(210.,352.),(265.,352.)], &[], (35.,352.), 2),
+        7 => (&[(115.,222.,25.,130.),(200.,282.,100.,70.)], &[], &[(250.,282.)], &[], (35.,352.), 1),
+        8 => (&[(120.,48.,25.,160.)], &[], &[(230.,352.),(265.,352.)], &[], (35.,352.), 1),
+        9 => (&[(125.,242.,30.,110.),(215.,212.,85.,12.)], &[], &[(250.,212.),(250.,352.)], &[], (35.,352.), 2),
+        10 => (&[], &[], &[(240.,352.)], &[(140.,352.)], (35.,352.), 1),
+        11 => (&[(210.,252.,90.,100.)], &[], &[(250.,252.)], &[(155.,352.)], (35.,352.), 1),
+        12 => (&[(0.,232.,75.,120.),(210.,272.,90.,12.)], &[], &[(250.,272.),(155.,352.)], &[(250.,352.)], (35.,232.), 2),
+        13 => (&[(125.,252.,25.,100.)], &[], &[(240.,352.)], &[(90.,352.)], (35.,352.), 1),
+        14 => (&[(120.,48.,25.,150.),(215.,252.,85.,12.)], &[], &[(250.,252.),(250.,352.)], &[(155.,352.)], (35.,352.), 2),
+        15 => (&[(125.,262.,25.,90.)], &[(140.,172.,220.,188.)], &[(240.,352.)], &[], (35.,352.), 1),
+        16 => (&[(125.,302.,25.,50.),(210.,232.,90.,12.)], &[(140.,165.,220.,195.)], &[(250.,232.),(180.,352.)], &[], (35.,352.), 2),
+        17 => (&[(110.,302.,25.,50.),(220.,232.,80.,120.)], &[(140.,165.,220.,195.)], &[(255.,232.),(180.,352.)], &[], (35.,352.), 2),
+        18 => (&[(0.,232.,70.,120.),(125.,252.,25.,100.)], &[(210.,112.,270.,172.)], &[(240.,352.),(180.,352.)], &[], (35.,232.), 2),
+        19 => (&[(125.,262.,25.,90.)], &[(140.,172.,220.,188.)], &[(255.,352.)], &[(85.,352.)], (35.,352.), 1),
+        20 => (&[(95.,292.,50.,60.),(160.,232.,50.,120.),(225.,172.,75.,180.)], &[], &[(120.,292.),(185.,232.),(260.,172.)], &[], (35.,352.), 2),
+        21 => (&[(0.,192.,75.,160.),(220.,252.,80.,100.)], &[], &[(250.,252.),(140.,352.),(190.,352.)], &[], (35.,192.), 2),
+        22 => (&[(120.,302.,25.,50.),(240.,212.,60.,140.)], &[], &[(265.,212.),(175.,352.),(215.,352.)], &[], (35.,352.), 3),
+        23 => (&[(0.,252.,75.,100.),(135.,292.,25.,60.),(225.,232.,75.,12.)], &[], &[(250.,232.),(200.,352.),(265.,352.)], &[(110.,352.)], (35.,252.), 2),
+        24 => (&[(100.,48.,25.,130.),(200.,262.,25.,90.)], &[], &[(160.,352.),(260.,352.)], &[(60.,352.)], (35.,252.), 2),
+        25 => (&[(0.,252.,70.,100.),(110.,292.,25.,60.),(205.,232.,95.,12.)], &[(120.,155.,180.,95.)], &[(250.,232.),(170.,352.),(265.,352.)], &[], (35.,252.), 2),
+        26 => (&[(125.,302.,25.,50.),(210.,232.,90.,12.),(0.,192.,60.,12.),(65.,110.,50.,12.)], &[(140.,165.,220.,195.)], &[(250.,232.),(180.,352.)], &[(90.,110.),(30.,192.)], (35.,352.), 2),
+        27 => (&[(0.,172.,75.,180.),(130.,272.,30.,80.),(250.,232.,50.,120.)], &[], &[(275.,232.),(100.,352.),(190.,352.),(230.,352.)], &[], (35.,172.), 3),
+        28 => (&[(100.,292.,40.,60.),(175.,232.,40.,120.),(250.,172.,50.,180.)], &[(20.,125.,80.,75.)], &[(120.,292.),(195.,232.),(275.,172.)], &[(155.,352.)], (35.,352.), 2),
+        29 => (&[(0.,252.,75.,100.),(135.,302.,25.,50.),(225.,212.,75.,12.),(0.,110.,70.,12.)], &[(125.,145.,185.,85.)], &[(250.,212.),(200.,352.),(265.,352.)], &[(110.,352.),(30.,110.)], (35.,252.), 3),
+        _ => panic!("invalid Bankshot level"),
     };
-    for i in 0..foes {
-        let mut placed = false;
-        for _ in 0..30 {
-            let &(x0, x1, y) = &tops[rng.below(tops.len() as u32) as usize];
-            if x1 - x0 < 2.0 * HALF_W + 4.0 {
-                continue;
-            }
-            let p = Person { x: x0 + HALF_W + 2.0 + rng.float() * (x1 - x0 - 2.0 * HALF_W - 4.0), feet: y, look: (i % 3) as u8 };
-            if stands(&room, &p) {
-                room.foes.push(p);
-                placed = true;
-                break;
-            }
-        }
-        if !placed {
-            return None;
+    r.blocks = blocks.iter().map(|&(x,y,w,h)| Rect{x,y,w,h}).collect();
+    r.plates = plates.iter().map(|&(x,y,u,v)| Plate{a:(x,y),b:(u,v)}).collect();
+    r.foes = foes.iter().enumerate().map(|(i,&(x,feet))|Person{x,feet,look:(i%3) as u8}).collect();
+    r.hostages = hostages.iter().map(|&(x,feet)|Person{x,feet,look:0}).collect();
+    r.agent = agent;
+    if agent.1 != FLOOR {
+        if let Some(b) = r.blocks.iter().find(|b| b.y == agent.1 && b.x == 0.0) {
+            r.agent.0 = b.x + b.w - HALF_W;
         }
     }
-    // hostages next to a foe
-    for _ in 0..hostages {
-        let mut placed = false;
-        for _ in 0..20 {
-            let f = room.foes[rng.below(room.foes.len() as u32) as usize];
-            let side = if rng.below(2) == 0 { -1.0 } else { 1.0 };
-            let p = Person { x: f.x + side * (2.0 * HALF_W + 18.0 + rng.float() * 8.0), feet: f.feet, look: 0 };
-            // on the same ground
-            let ground = tops.iter().any(|&(x0, x1, y)| y == p.feet && p.x - HALF_W >= x0 && p.x + HALF_W <= x1);
-            if ground && stands(&room, &p) {
-                room.hostages.push(p);
-                placed = true;
-                break;
-            }
-        }
-        if !placed {
-            return None;
-        }
-    }
-    Some(room)
-}
-
-fn agent_rect((x, feet): (f32, f32)) -> Rect {
-    Rect { x: x - HALF_W, y: feet - TALL, w: 2.0 * HALF_W, h: TALL }
-}
-
-fn plate_box(p: &Plate) -> Rect {
-    let (x0, x1) = (p.a.0.min(p.b.0), p.a.0.max(p.b.0));
-    let (y0, y1) = (p.a.1.min(p.b.1), p.a.1.max(p.b.1));
-    Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }.grow(PLATE_R)
+    r.par = par;
+    if level == 3 { r.crates.push(Rect { x: 130.0, y: 292.0, w: 46.0, h: 60.0 }); }
+    // The agent also needs a visible platform on this balcony lesson.
+    if level == 24 { r.blocks.push(Rect { x: 0.0, y: 252.0, w: 50.0, h: 12.0 }); }
+    r
 }
 
 #[cfg(test)]
@@ -509,8 +419,10 @@ mod tests {
             let (survey, direct) = room.survey();
             let all = room.all_foes();
             let need = Room::shots_needed(&Room::good_shots(&survey, window(l)), all, 0).expect("unclearable");
-            assert!(need <= room.shots, "level {}", l + 1);
-            assert!(all & !direct != 0, "level {}: every foe in plain sight", l + 1);
+            assert!(need <= room.par, "level {} needs {} shots but par is {}", l + 1, need, room.par);
+            assert_eq!(room.shots, 4);
+            assert!(room.par < room.shots);
+            if l < 3 { assert_eq!(direct, all, "opening lesson must be readable"); }
             let safe = survey.iter().filter(|&&(m, h)| m != 0 && !h).count();
             println!(
                 "level {:2}: foes {} hostages {} blocks {} plates {} shots {} hidden {} safe {:.3}",
@@ -527,8 +439,49 @@ mod tests {
     }
 
     #[test]
+    fn campaign_has_distinct_supported_readable_layouts() {
+        let mut layouts = std::collections::HashSet::new();
+        let mut failures = Vec::new();
+        for l in 0..LEVELS {
+            let r = level(l);
+            let agent = Person { x: r.agent.0, feet: r.agent.1, look: 0 };
+            let people: Vec<_> = r.foes.iter().chain(&r.hostages).chain(std::iter::once(&agent)).collect();
+            for (i, p) in people.iter().enumerate() {
+                let rect = p.rect();
+                assert!(rect.x >= LEFT && rect.x + rect.w <= RIGHT && rect.y >= TOP && p.feet <= FLOOR, "level {} person out of room", l + 1);
+                assert!(!r.blocks.iter().chain(&r.crates).any(|b| b.overlaps(&rect)), "level {} person inside cover", l + 1);
+                assert!(p.feet == FLOOR || r.blocks.iter().any(|b| b.y == p.feet && b.x <= rect.x && b.x + b.w >= rect.x + rect.w), "level {} person unsupported", l + 1);
+                assert!(!people[..i].iter().any(|q| q.rect().overlaps(&rect)), "level {} people overlap", l + 1);
+            }
+            let key = format!("{:?}{:?}{:?}{:?}{:?}{:?}", r.blocks, r.plates, r.crates, r.agent, r.foes, r.hostages);
+            assert!(layouts.insert(key), "duplicate level {}", l + 1);
+            // A solution must not rely on tracing a long, unreadable chain of rebounds.
+            let (mut survey, _) = r.survey();
+            for (k, item) in survey.iter_mut().enumerate() {
+                let p = r.trace(Room::step_angle(k));
+                let readable_distance: f32 = p.pts.windows(2).take(3).map(|w| dist(w[0], w[1])).sum();
+                item.0 = p.foes.iter().filter(|&&(_, d)| d <= readable_distance).fold(0, |m, &(i, _)| m | 1 << i);
+            }
+            let need = Room::shots_needed(&Room::good_shots(&survey, window(l)), r.all_foes(), 0);
+            if !need.is_some_and(|n| n <= r.par) { failures.push((l + 1, need)); }
+        }
+        assert!(failures.is_empty(), "levels needing unreadable ricochets: {:?}", failures);
+    }
+
+    #[test]
+    fn wooden_cover_absorbs_one_bullet_then_opens_a_path() {
+        let r = level(3);
+        let first = r.trace(0.0);
+        assert_eq!(first.hit, Some(Hit::Crate(0)));
+        assert_eq!(first.mask(), 0);
+        let second = r.trace_broken(0.0, 1);
+        assert_eq!(second.mask(), r.all_foes());
+        assert_eq!(second.hit, None);
+    }
+
+    #[test]
     fn a_shot_bounces_like_a_mirror() {
-        let room = Room { agent: (30.0, FLOOR), shots: 1, ..Room::empty() };
+        let room = Room { agent: (30.0, FLOOR), shots: 4, ..Room::empty() };
         // straight up: off the ceiling and back down
         let p = room.trace(-std::f32::consts::FRAC_PI_2);
         assert!((p.pts[1].1 - TOP).abs() < 0.01 && (p.pts[1].0 - 30.0).abs() < 0.01);
@@ -541,30 +494,20 @@ mod tests {
     }
 
     #[test]
-    fn a_shot_coming_back_hits_the_agent() {
-        let room = Room { agent: (30.0, FLOOR), shots: 1, ..Room::empty() };
-        // straight up and back down onto the agent's head
-        let p = room.trace(-std::f32::consts::FRAC_PI_2);
-        assert_eq!(p.hit, Some(Hit::Agent));
-        assert!((p.pts[2].1 - (FLOOR - TALL)).abs() < 0.01);
-        // off the floor at the agent's feet, back up through the agent
-        let p = room.trace(std::f32::consts::FRAC_PI_2 * 0.98);
-        assert!(p.hit == Some(Hit::Agent) && p.pts.len() == 3);
-        // level, off the far wall, back the same way
-        assert_eq!(room.trace(0.0).hit, Some(Hit::Agent));
-        // the shot leaving the gun does not count: it goes on to the far
-        // wall and bounces
-        let p = room.trace(-std::f32::consts::FRAC_PI_4);
-        assert!((p.pts[1].0 - RIGHT).abs() < 0.01 && p.bounces() > 0);
+    fn returning_bullets_do_not_hurt_the_shooter() {
+        let room = Room { agent: (30.0, FLOOR), shots: 4, ..Room::empty() };
+        for angle in [0.0, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2] {
+            assert_eq!(room.trace(angle).hit, None);
+        }
     }
 
     #[test]
     fn a_cut_shot_ends_there() {
         let foe = Person { x: 200.0, feet: FLOOR, look: 0 };
-        let room = Room { agent: (30.0, FLOOR), foes: vec![foe], shots: 1, ..Room::empty() };
+        let room = Room { agent: (30.0, FLOOR), foes: vec![foe], shots: 4, ..Room::empty() };
         // level: through the foe, off the far wall and back into the agent
         let mut p = room.trace(0.0);
-        assert_eq!((p.mask(), p.hit), (1, Some(Hit::Agent)));
+        assert_eq!((p.mask(), p.hit), (1, None));
         p.cut(170.0);
         assert_eq!((p.mask(), p.hit, p.pts.len()), (1, None, 2));
         assert!((p.pts[1].0 - 200.0).abs() < 0.01);
@@ -574,7 +517,7 @@ mod tests {
     fn a_hostage_stops_the_shot() {
         let foe = Person { x: 200.0, feet: FLOOR, look: 0 };
         let hostage = Person { x: 150.0, feet: FLOOR, look: 0 };
-        let room = Room { agent: (30.0, FLOOR), foes: vec![foe], hostages: vec![hostage], shots: 1, ..Room::empty() };
+        let room = Room { agent: (30.0, FLOOR), foes: vec![foe], hostages: vec![hostage], shots: 4, ..Room::empty() };
         let p = room.trace(0.0);
         assert_eq!(p.hit, Some(Hit::Hostage(0)));
         assert!(p.foes.is_empty());

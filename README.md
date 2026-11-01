@@ -66,7 +66,7 @@ Building C games requires `clang` and `wasm-ld` with `wasm32` target support (LL
 ## Gameplay checks
 
 Run `python3 check-ad-games.py` to check Pinwork, Decant, Unpark, Higher Floor,
-Flowline, Boarding, Unbolt, Hive Guard and Hexpile. The native Rust tests replay
+Flowline, Boarding, Unbolt, Hive Guard, Hexpile and Bankshot. The native Rust tests replay
 campaign solutions and check failure states, retry, saves and physics regressions.
 Pass game IDs to run only those suites, for example
 `python3 check-ad-games.py boarding flowline`.
@@ -77,6 +77,12 @@ keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floo
 reserves the marked boss for last; Pinwork seals fluid barriers and teaches its
 eight mechanisms in eight distinct chambers. Decant uses increasing solution-length
 targets, and Unbolt retains a verified winning screw-removal sequence for every deal.
+
+Bankshot follows [Mr Bullet](https://poki.com/en/g/mr-bullet)'s shooting rules and
+opening lessons: direct shots, aligned enemies, stairs and breakable wooden cover.
+Its 30 fixed layouts replace random rooms. Four bullets allow mistakes, while
+visible shot targets reward efficient clears with up to three stars. Tests check
+campaign wins, reachable losses, retry, cover saves and consistent aiming tolerance.
 
 ## Licence
 

@@ -11,19 +11,16 @@ use room::{dist, Hit, Path, Room, FLOOR, LEFT, LEVELS, RIGHT, TOP};
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen};
 
-/// 2: levels dealt again when shots coming back at the agent began to count
-/// 3: dealt again so every level's shots allow a wider aim
-const VERSION: u32 = 3;
+/// Authored campaign and destructible cover replace the random room dealer.
+const VERSION: u32 = 4;
 
 const AIM: i32 = 0;
 /// a shot on its way
 const FLY: i32 = 1;
 const CLEARED: i32 = 2;
 const DONE: i32 = 3;
-/// a hostage or the agent hit, or the shots ran out
+/// a hostage hit, or the shots ran out
 const FAILED: i32 = 4;
-/// `hurt` when the shot came back into the agent
-const HURT_AGENT: i32 = -2;
 
 const PLAN: (f32, f32) = (300.0, 400.0);
 /// a shot's speed, plan units a second
@@ -43,10 +40,10 @@ struct Save {
     level: i32,
     phase: i32,
     retries: i32,
-    /// shots left, foes down as bits, and the hostage hit (-1 none,
-    /// HURT_AGENT the agent)
+    /// shots left, foes down as bits, and the hostage hit (-1 none)
     shots: i32,
     down: u32,
+    broken: u32,
     hurt: i32,
     level_ms: i32,
     time_ms: i32,
@@ -84,7 +81,7 @@ struct Bankshot {
 impl Bankshot {
     fn card(&self) -> (f32, f32, f32, f32) {
         let (w, h) = PLAN;
-        let (pw, ph) = (248.0, if self.s.phase == DONE { 96.0 } else { 158.0 });
+        let (pw, ph) = (248.0, match self.s.phase { DONE => 128.0, FAILED => 158.0, _ => 190.0 });
         (w / 2.0 - pw / 2.0, h * 0.36 - ph / 2.0, pw, ph)
     }
     fn button(&self) -> (f32, f32, f32, f32) {
@@ -137,6 +134,7 @@ impl Bankshot {
         self.s.phase = AIM;
         self.s.shots = self.room.shots;
         self.s.down = 0;
+        self.s.broken = 0;
         self.s.hurt = -1;
         self.s.aim = if self.room.agent.0 < RIGHT / 2.0 { -0.35 } else { std::f32::consts::PI + 0.35 };
         self.shot = Path::default();
@@ -147,7 +145,7 @@ impl Bankshot {
 
     fn aim_at(&mut self, a: f32) {
         self.s.aim = a;
-        self.preview = self.room.trace(a);
+        self.preview = self.room.trace_broken(a, self.s.broken);
     }
     fn aim_to(&mut self, x: f32, y: f32) {
         let g = self.room.gun();
@@ -161,11 +159,11 @@ impl Bankshot {
         if self.s.phase != AIM || self.s.shots <= 0 {
             return 0;
         }
-        self.shot = self.room.trace(self.s.aim);
+        self.shot = self.room.trace_broken(self.s.aim, self.s.broken);
         // a shot that downs the last foe ends there: the level is won even
         // if it would have come back at someone
         let left = self.room.all_foes() & !self.s.down;
-        if self.shot.hit.is_some() && self.shot.mask() & left == left {
+        if self.shot.mask() & left == left {
             let last = self.shot.foes.iter().filter(|&&(i, _)| left & 1 << i != 0).map(|&(_, d)| d).fold(0.0, f32::max);
             self.shot.cut(last + room::HALF_W);
         }
@@ -194,7 +192,13 @@ impl Bankshot {
         if let Some(hit) = self.shot.hit {
             self.s.hurt = match hit {
                 Hit::Hostage(h) => h as i32,
-                Hit::Agent => HURT_AGENT,
+                Hit::Crate(c) => {
+                    self.s.broken |= 1 << c;
+                    if self.s.shots == 0 { self.s.phase = FAILED; return ev | wg::EV_LOSE; }
+                    self.s.phase = AIM;
+                    self.aim_at(self.s.aim);
+                    return ev | wg::EV_HIT;
+                }
             };
             self.s.phase = FAILED;
             return ev | wg::EV_LOSE;
@@ -213,8 +217,10 @@ impl Bankshot {
 
     fn clear_level(&mut self) -> u32 {
         let s = &mut self.s;
-        // more points for shots to spare and no retries
-        let score = (100 + 50 * s.shots - 30 * s.retries).max(30);
+        // A fresh retry can still earn all three stars.
+        let used = self.room.shots - s.shots;
+        let stars = (3 - (used - self.room.par).max(0)).max(1);
+        let score = stars * 100;
         s.score += score;
         s.cleared = s.level;
         s.cleared_score = score;
@@ -370,7 +376,7 @@ impl Game for Bankshot {
 
     fn draw(&mut self, s: &mut Screen) {
         let (w, _) = PLAN;
-        let key = wg::hash(0, wg::bytes_of(&[self.s.level]));
+        let key = wg::hash(0, wg::bytes_of(&[self.s.level, self.s.broken as i32]));
         s.background(key, |s| draw_scene(s, self));
         let room = &self.room;
 
@@ -393,7 +399,6 @@ impl Game for Bankshot {
         let left = self.s.aim.cos() < 0.0;
         let agent = match self.s.phase {
             CLEARED | DONE => art::AGENT_CHEER,
-            FAILED if self.s.hurt == HURT_AGENT => art::AGENT_DOWN,
             FAILED => art::AGENT_SAD,
             _ if self.since_fire < 160.0 => art::AGENT_FIRE,
             _ => art::AGENT_AIM,
@@ -441,6 +446,19 @@ impl Game for Bankshot {
             let live = k < self.s.shots;
             bullet(s, x, 24.0, if live { 1.0 } else { 0.25 });
         }
+        let lesson = match self.s.level {
+            0 => tr(&["Aim, then release to fire", "瞄准后松开发射", "狙って離すと発射", "조준 후 놓으면 발사", "Apunta y suelta para disparar", "Mire e solte para atirar", "Visez, puis relâchez pour tirer", "Zielen und zum Schießen loslassen", "Прицельтесь и отпустите", "瞄準後放開發射"]),
+            1..=2 => tr(&["One bullet can hit several targets", "一发子弹可以击中多个目标", "一発で複数の敵を倒せる", "한 발로 여러 적을 맞히세요", "Una bala puede dar a varios", "Uma bala pode acertar vários", "Une balle peut toucher plusieurs cibles", "Eine Kugel kann mehrere treffen", "Одна пуля — несколько целей", "一發子彈可以擊中多個目標"]),
+            3 => tr(&["Wood absorbs one shot, then breaks", "木箱挡住一发子弹后破碎", "木箱は一発を止めて壊れる", "나무 상자는 한 발을 막고 부서져요", "La madera absorbe una bala y se rompe", "Madeira bloqueia um tiro e quebra", "Le bois absorbe un tir puis se brise", "Holz stoppt einen Schuss und zerbricht", "Ящик поглощает выстрел и ломается", "木箱擋住一發子彈後破碎"]),
+            4..=9 => tr(&["Bounce around cover", "利用反弹绕过掩体", "跳弾で障害物を回り込もう", "도탄으로 장애물을 피하세요", "Rebota para rodear obstáculos", "Ricocheteie para contornar obstáculos", "Contournez les obstacles par ricochet", "Mit Abprallern um Hindernisse", "Обойдите укрытие рикошетом", "利用反彈繞過掩體"]),
+            10..=14 => tr(&["Keep hostages out of the bullet's path", "避开人质", "人質を弾道から外そう", "인질을 피해서 쏘세요", "Evita a los rehenes", "Evite os reféns", "Évitez les otages", "Verschone die Geiseln", "Не заденьте заложников", "避開人質"]),
+            15..=19 => tr(&["Steel plates reflect bullets", "钢板会反弹子弹", "鉄板は弾を反射する", "철판은 총알을 반사해요", "Las placas de acero desvían las balas", "Placas de aço refletem as balas", "Les plaques d'acier renvoient les balles", "Stahlplatten lenken Kugeln ab", "Стальные пластины отражают пули", "鋼板會反彈子彈"]),
+            _ => tr(&["Plan the path before firing", "发射前规划路线", "撃つ前に弾道を考えよう", "발사 전에 경로를 계획하세요", "Planea la trayectoria antes de disparar", "Planeje a trajetória antes de atirar", "Prévoyez la trajectoire avant de tirer", "Plane die Flugbahn vor dem Schuss", "Продумайте путь до выстрела", "發射前規劃路線"]),
+        };
+        s.text_c(lesson, w / 2.0, 368.0, s.fit_size(lesson, 11.0, w - 20.0), hex(0x202733), 1.0);
+        let target = tr(&["Shots for 3 stars", "三星所需发数", "星3つの弾数", "별 3개 목표 발수", "Disparos para 3 estrellas", "Tiros para 3 estrelas", "Tirs pour 3 étoiles", "Schüsse für 3 Sterne", "Выстрелов для 3 звёзд", "三星所需發數"]);
+        let target = format!("{}: {}", target, self.room.par);
+        s.text_c(&target, w / 2.0, 388.0, s.fit_size(&target, 10.0, w - 20.0), hex(0x202733), 1.0);
         if !matches!(self.s.phase, AIM | FLY) {
             self.draw_card(s, w);
         }
@@ -479,11 +497,12 @@ impl Game for Bankshot {
             let saved = self.s;
             self.room = room::level(saved.level);
             let all = self.room.all_foes();
-            if saved.phase == AIM && (0..=self.room.shots).contains(&saved.shots) && saved.down & !all == 0 {
+            if saved.phase == AIM && (0..=self.room.shots).contains(&saved.shots) && saved.down & !all == 0 && saved.broken < (1 << self.room.crates.len()) {
                 // mid level: as it was between shots
                 self.restart();
                 self.s.shots = saved.shots;
                 self.s.down = saved.down;
+                self.s.broken = saved.broken;
                 self.aim_at(saved.aim);
             } else if matches!(saved.phase, CLEARED | DONE) {
                 self.restart();
@@ -495,6 +514,21 @@ impl Game for Bankshot {
             }
         }
         ok
+    }
+}
+
+fn star(s: &mut Screen, x: f32, y: f32, radius: f32, earned: bool) {
+    let points: Vec<_> = (0..10).map(|i| {
+        let a = i as f32 * std::f32::consts::PI / 5.0 - std::f32::consts::FRAC_PI_2;
+        let r = radius * if i % 2 == 0 { 1.0 } else { 0.45 };
+        (x + a.cos() * r, y + a.sin() * r)
+    }).collect();
+    // Screen::poly accepts convex polygons only: fill the center and five tips.
+    let color = hex(if earned { 0xffd166 } else { 0x657080 });
+    let center: Vec<_> = (0..5).map(|i| points[i * 2 + 1]).collect();
+    s.poly(&center, color, 1.0);
+    for i in (0..10).step_by(2) {
+        s.tri(points[(i + 9) % 10], points[i], points[i + 1], color, 1.0);
     }
 }
 
@@ -515,6 +549,7 @@ fn blank() -> Save {
         retries: 0,
         shots: 0,
         down: 0,
+        broken: 0,
         hurt: -1,
         level_ms: 0,
         time_ms: 0,
@@ -589,16 +624,12 @@ fn draw_scene(s: &mut Screen, g: &Bankshot) {
     }
     s.rect(LEFT - 3.0, TOP, 3.0, FLOOR - TOP, 0.0, hex(0x7b818b), 1.0);
     s.rect(RIGHT, TOP, 3.0, FLOOR - TOP, 0.0, hex(0x7b818b), 1.0);
-    // crates against the back wall, where nobody stands
-    let mut cx = LEFT + 40.0 + rng.float() * 30.0;
-    while cx < RIGHT - 20.0 {
-        let near = |x: f32| (x - cx).abs() < 46.0;
-        let busy = near(room.agent.0) || room.foes.iter().chain(&room.hostages).any(|p| near(p.x)) || room.blocks.iter().any(|b| b.y + b.h >= FLOOR - 1.0 && cx + 26.0 > b.x && cx - 26.0 < b.x + b.w);
-        if !busy {
-            let kind = if rng.below(2) == 0 { art::CRATE_WIDE } else { art::CRATE_MEDIUM };
-            g.put(s, kind, cx, FLOOR, false, 0.9);
-        }
-        cx += 70.0 + rng.float() * 50.0;
+    for (i, b) in room.crates.iter().enumerate() {
+        if g.s.broken & (1 << i) != 0 { continue; }
+        s.rect(b.x, b.y, b.w, b.h, 2.0, hex(0xa46a2e), 1.0);
+        s.rect(b.x + 3.0, b.y + 3.0, b.w - 6.0, b.h - 6.0, 1.0, hex(0xc58b44), 1.0);
+        s.line(b.x + 6.0, b.y + 6.0, b.x + b.w - 6.0, b.y + b.h - 6.0, 3.0, hex(0xe1ad65), 1.0);
+        s.line(b.x + b.w - 6.0, b.y + 6.0, b.x + 6.0, b.y + b.h - 6.0, 3.0, hex(0xe1ad65), 1.0);
     }
     // walls and ledges: concrete with a lit top edge; ledges steel
     for b in &room.blocks {
@@ -642,8 +673,6 @@ impl Bankshot {
         let failed = self.s.phase == FAILED;
         let title = if !failed {
             tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"])
-        } else if self.s.hurt == HURT_AGENT {
-            tr(&["Hit by a ricochet", "被跳弹击中", "跳弾に被弾", "도탄에 맞음", "Alcanzado por rebote", "Atingido pelo ricochete", "Touché par le ricochet", "Vom Querschläger getroffen", "Ранен рикошетом", "被跳彈擊中"])
         } else if self.s.hurt >= 0 {
             tr(&["Hostage hit", "误伤人质", "人質に命中", "인질 명중", "Rehén herido", "Refém atingido", "Otage touché", "Geisel getroffen", "Заложник ранен", "誤傷人質"])
         } else {
@@ -659,8 +688,13 @@ impl Bankshot {
             let score_l = tr(&["Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки", "得分"]);
             format!("{} +{}", score_l, self.s.cleared_score)
         };
+        if !failed {
+            for i in 0..3 {
+                star(s, w / 2.0 + (i - 1) as f32 * 40.0, py + 66.0, 16.0, i < self.s.cleared_score / 100);
+            }
+        }
         let size = s.fit_size(&line, 14.0, pw - 32.0);
-        s.text_c(&line, w / 2.0, py + 64.0, size, hex(0xb9c2cf), 1.0);
+        s.text_c(&line, w / 2.0, py + if failed { 64.0 } else { 98.0 }, size, hex(0xb9c2cf), 1.0);
         if self.s.phase != DONE {
             let b = self.button();
             let label = if failed {
@@ -732,14 +766,84 @@ mod tests {
     }
 
     #[test]
-    fn a_ricochet_into_the_agent_fails_the_level() {
+    fn returning_shots_cost_ammunition_without_self_damage() {
         let mut g = Bankshot::new();
         g.start(1);
-        // into the floor by the agent's feet: it bounces back up
-        g.aim_at(std::f32::consts::FRAC_PI_2 * if g.room.agent.0 < 150.0 { 0.98 } else { 1.02 });
+        g.aim_at(std::f32::consts::FRAC_PI_2);
         g.fire();
-        assert!(run(&mut g, 4000) & wg::EV_LOSE != 0);
-        assert_eq!((g.s.phase, g.s.hurt), (FAILED, HURT_AGENT));
+        assert_eq!(run(&mut g, 4000) & wg::EV_LOSE, 0);
+        assert_eq!((g.s.phase, g.s.shots), (AIM, 3));
+    }
+
+    #[test]
+    fn crate_damage_saves_and_retry_restores_cover() {
+        let mut g = Bankshot::new();
+        g.start(1);
+        g.begin(3);
+        g.aim_at(0.0);
+        g.fire();
+        assert_ne!(run(&mut g, 3000) & wg::EV_HIT, 0);
+        assert_eq!((g.s.phase, g.s.shots, g.s.broken, g.s.down), (AIM, 3, 1, 0));
+        let mut loaded = Bankshot::new();
+        loaded.s = g.s;
+        assert!(loaded.loaded());
+        assert_eq!((loaded.s.shots, loaded.s.broken, loaded.preview.mask()), (3, 1, loaded.room.all_foes()));
+        loaded.fire();
+        run(&mut loaded, 3000);
+        assert_eq!((loaded.s.phase, loaded.s.cleared_score), (CLEARED, 200));
+        g.retry();
+        assert_eq!((g.s.phase, g.s.shots, g.s.broken), (AIM, 4, 0));
+        assert_eq!(g.room.trace_broken(0.0, g.s.broken).hit, Some(Hit::Crate(0)));
+    }
+
+    #[test]
+    fn stars_reward_efficient_shots_and_retry_can_recover() {
+        let mut g = Bankshot::new();
+        g.start(1);
+        for misses in 0..=3 {
+            g.retry();
+            for _ in 0..misses {
+                g.aim_at(std::f32::consts::FRAC_PI_2);
+                g.fire();
+                run(&mut g, 3000);
+            }
+            g.aim_at(0.0);
+            g.fire();
+            run(&mut g, 3000);
+            assert_eq!(g.s.phase, CLEARED);
+            assert_eq!(g.s.cleared_score, (3 - misses).max(1) * 100);
+        }
+        g.retry();
+        g.aim_at(0.0);
+        g.fire();
+        run(&mut g, 3000);
+        assert_eq!(g.s.cleared_score, 300);
+    }
+
+    #[test]
+    fn every_level_can_fail_and_retry_exactly() {
+        let mut g = Bankshot::new();
+        g.start(1);
+        for l in 0..LEVELS {
+            g.begin(l);
+            let initial = g.room.clone();
+            let miss = (0..room::ANGLES).map(Room::step_angle).find(|&a| {
+                let p = g.room.trace(a);
+                p.foes.is_empty() && p.hit.is_none()
+            }).expect("no harmless shot");
+            for _ in 0..g.room.shots {
+                g.aim_at(miss);
+                g.fire();
+                run(&mut g, 3000);
+            }
+            assert_eq!((g.s.phase, g.s.shots), (FAILED, 0), "level {} must fail", l + 1);
+            assert_eq!(g.fire(), 0);
+            g.press_button();
+            assert_eq!((g.s.phase, g.s.shots, g.s.down, g.s.broken), (AIM, 4, 0, 0));
+            assert_eq!(g.room.blocks, initial.blocks);
+            assert_eq!(g.room.crates, initial.crates);
+            assert_eq!(g.room.gun(), initial.gun());
+        }
     }
 
     #[test]
