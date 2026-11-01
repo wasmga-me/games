@@ -14,7 +14,7 @@ const GRAVITY: f32 = 700.0;
 /// how long a pin takes to slide out, and shakes when another holds it, ms
 const PULL_MS: f32 = 240.0;
 pub const JAM_MS: f32 = 260.0;
-/// ms a new stone joins the stones it touches into one lump
+/// Fresh-cooling marker; cleared after that step's contact bonds form
 const HEAT_MS: f32 = 220.0;
 /// drops of connected lava each drop of water sets to stone
 const COLD: usize = 3;
@@ -55,7 +55,7 @@ pub struct Grain {
     pub p: (f32, f32),
     prev: (f32, f32),
     pub kind: u8,
-    /// ms left of joining other stones, for a stone just made
+    /// Fresh-cooling marker used once when contact bonds form
     heat: f32,
     /// where it was at the last mark (see `World::moved`)
     mark: (f32, f32),
@@ -406,8 +406,7 @@ fn lattice_density() -> f32 {
 
 impl World {
     pub fn new(lv: &Level) -> World {
-        let grains =
-            lv.grains.iter().map(|&(x, y, kind)| Grain { p: (x, y), prev: (x, y), kind, heat: 0.0, mark: (x, y), fell: y, held: false, lump: LOOSE }).collect();
+        let grains = lv.grains.iter().map(|&(x, y, kind)| Grain { p: (x, y), prev: (x, y), kind, heat: 0.0, mark: (x, y), fell: y, held: false, lump: LOOSE }).collect();
         let pins = lv.pins.iter().map(|&(ax, ay, bx, by)| Pin { a: (ax, ay), b: (bx, by), out: 0.0, goal: 0.0, jam: 0.0, moved: false }).collect();
         let orc = lv.orc.map(|(x, feet)| Orc { p: (x, feet - ORC_UP), prev: (x, feet - ORC_UP), alive: true, start: (x, feet - ORC_UP) });
         World {
@@ -551,6 +550,7 @@ impl World {
         let pins = self.pins.iter().filter(|p| !p.gone()).map(|p| (p.now().0, p.now().1, PIN_R));
         self.segs.clear();
         self.segs.extend(walls.chain(pins).map(|(a, b, r)| (a, b, r, (a.0.min(b.0) - r, a.1.min(b.1) - r, a.0.max(b.0) + r, a.1.max(b.1) + r))));
+        self.split_stones();
         self.find_pairs();
         self.react();
         self.fuse();
@@ -670,10 +670,11 @@ impl World {
                         continue;
                     }
                     let q = self.grains[ju].p;
-                    if (q.0 - p.0).powi(2) + (q.1 - p.1).powi(2) < H * H && !self.segs.iter().any(|&(a, b, r, (x0, y0, x1, y1))| {
-                        p.0.max(q.0) >= x0 && p.0.min(q.0) <= x1 && p.1.max(q.1) >= y0 && p.1.min(q.1) <= y1
-                            && seg_seg_dist(p, q, a, b) <= r
-                    }) {
+                    if (q.0 - p.0).powi(2) + (q.1 - p.1).powi(2) < H * H
+                        && !self.segs.iter().any(|&(a, b, r, (x0, y0, x1, y1))| {
+                            p.0.max(q.0) >= x0 && p.0.min(q.0) <= x1 && p.1.max(q.1) >= y0 && p.1.min(q.1) <= y1 && seg_seg_dist(p, q, a, b) <= r
+                        })
+                    {
                         let wet = liquid(self.grains[i].kind) && liquid(self.grains[ju].kind);
                         (if wet { &mut self.wet } else { &mut self.dry }).push((i as u32, ju as u32));
                     }
@@ -767,6 +768,22 @@ impl World {
                 continue;
             }
             let d = d2.sqrt().max(1e-4);
+            // A fluid cannot form a rigid supporting contact under gold.
+            // Let the drop yield around the coin; walls, pins and stone
+            // still constrain the coin through their normal solid contacts.
+            // Translating the drop's previous position with it avoids an
+            // artificial launch velocity from this positional correction.
+            if (a.kind == GOLD && liquid(b.kind)) || (b.kind == GOLD && liquid(a.kind)) {
+                let k = (two - d) / d;
+                let (drop, sign) = if a.kind == GOLD { (j, 1.0) } else { (i, -1.0) };
+                let shift = (dx * k * sign, dy * k * sign);
+                let g = &mut self.grains[drop as usize];
+                g.p.0 += shift.0;
+                g.p.1 += shift.1;
+                g.prev.0 += shift.0;
+                g.prev.1 += shift.1;
+                continue;
+            }
             let (ma, mb) = (mass(a.kind), mass(b.kind));
             let k = (two - d) / d;
             let (ka, kb) = (k * mb / (ma + mb), k * ma / (ma + mb));
@@ -796,7 +813,9 @@ impl World {
     /// not insulate an arbitrary pocket just because it exceeds a radius.
     /// The neighbour graph already excludes contacts across closed barriers.
     fn react(&mut self) {
-        if !self.grains.iter().any(|g| g.kind == LAVA) { return; }
+        if !self.grains.iter().any(|g| g.kind == LAVA) {
+            return;
+        }
         fn root(parent: &mut [usize], mut i: usize) -> usize {
             while parent[i] != i {
                 parent[i] = parent[parent[i]];
@@ -818,14 +837,20 @@ impl World {
         }
         let mut pools = vec![Vec::new(); self.grains.len()];
         for (i, g) in self.grains.iter().enumerate() {
-            if g.kind == LAVA { pools[root(&mut parent, i)].push(i); }
+            if g.kind == LAVA {
+                pools[root(&mut parent, i)].push(i);
+            }
         }
         for &(i, j) in self.wet.iter().chain(&self.dry) {
             for (w, r) in [(i as usize, j as usize), (j as usize, i as usize)] {
                 let (water, stone) = (self.grains[w], self.grains[r]);
-                if water.kind != WATER || !rock(stone.kind) || dist(water.p, stone.p) >= DROP_R + radius(stone.kind) + 1.0 { continue; }
+                if water.kind != WATER || !rock(stone.kind) || dist(water.p, stone.p) >= DROP_R + radius(stone.kind) + 1.0 {
+                    continue;
+                }
                 let pool = &mut pools[root(&mut parent, r)];
-                if pool.is_empty() { continue; }
+                if pool.is_empty() {
+                    continue;
+                }
                 // Work inward from the contact. Each consumed water drop
                 // still has a finite cooling capacity.
                 pool.sort_by(|&a, &b| dist(self.grains[b].p, water.p).total_cmp(&dist(self.grains[a].p, water.p)));
@@ -835,25 +860,28 @@ impl World {
                     self.grains[k].heat = HEAT_MS;
                 }
                 self.grains[w].kind = GONE;
-                if self.steam.len() < 40 { self.steam.push(Steam { p: water.p, age: 0.0 }); }
+                if self.steam.len() < 40 {
+                    self.steam.push(Steam { p: water.p, age: 0.0 });
+                }
             }
         }
         self.wet.retain(|&(i, j)| {
             let (a, b) = (self.grains[i as usize].kind, self.grains[j as usize].kind);
             let both = liquid(a) && liquid(b);
-            if !both && a != GONE && b != GONE { self.dry.push((i, j)); }
+            if !both && a != GONE && b != GONE {
+                self.dry.push((i, j));
+            }
             both
         });
     }
 
-    /// Stones touching where one is still hot from being made join into one
-    /// lump (stones long cold only pile on each other).
+    /// Only neighbouring drops that solidified together form a rigid body.
     fn fuse(&mut self) {
         let mut changed = Vec::new();
         for k in 0..self.dry.len() {
             let (i, j) = self.dry[k];
             let (a, b) = (self.grains[i as usize], self.grains[j as usize]);
-            if a.kind != STONE || b.kind != STONE || (a.heat <= 0.0 && b.heat <= 0.0) || (a.lump != LOOSE && a.lump == b.lump) {
+            if a.kind != STONE || b.kind != STONE || (a.heat != HEAT_MS || b.heat != HEAT_MS) || (a.lump != LOOSE && a.lump == b.lump) {
                 continue;
             }
             if dist(a.p, b.p) >= TOUCH {
@@ -876,11 +904,58 @@ impl World {
                 changed.push(into);
             }
         }
+        // Cooling bonds are created once. A separate pebble never welds
+        // itself to an existing rock merely by falling against it later.
+        for g in &mut self.grains {
+            g.heat = 0.0;
+        }
         // each lump that grew keeps the shape it has now
         for into in changed {
             let lump = &mut self.lumps[into];
             let c = centre(&self.grains, &lump.of);
             lump.shape = lump.of.iter().map(|&g| (self.grains[g as usize].p.0 - c.0, self.grains[g as usize].p.1 - c.1)).collect();
+        }
+    }
+
+    /// Rebuild rigid bodies from actual contact, so a wall or pin that
+    /// separates a fragment cannot leave an invisible rigid connection.
+    fn split_stones(&mut self) {
+        let old = std::mem::take(&mut self.lumps);
+        for lump in old.into_iter().filter(|l| !l.of.is_empty()) {
+            let mut pending = lump.of.clone();
+            while let Some(first) = pending.pop() {
+                let mut component = vec![first];
+                let mut at = 0;
+                while at < component.len() {
+                    let p = self.grains[component[at] as usize].p;
+                    let mut i = 0;
+                    while i < pending.len() {
+                        let q = self.grains[pending[i] as usize].p;
+                        if dist(p, q) < TOUCH && !self.segs.iter().any(|&(a, b, r, _)| seg_seg_dist(p, q, a, b) < r) {
+                            component.push(pending.swap_remove(i));
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    at += 1;
+                }
+                if component.len() == 1 {
+                    self.grains[first as usize].lump = LOOSE;
+                    continue;
+                }
+                let id = self.lumps.len() as u32;
+                for &g in &component {
+                    self.grains[g as usize].lump = id;
+                }
+                if component.len() == lump.of.len() {
+                    // An intact rock keeps its original rigid shape.
+                    self.lumps.push(lump);
+                    break;
+                }
+                let c = centre(&self.grains, &component);
+                let shape = component.iter().map(|&g| (self.grains[g as usize].p.0 - c.0, self.grains[g as usize].p.1 - c.1)).collect();
+                self.lumps.push(Lump { of: component, shape });
+            }
         }
     }
 
@@ -919,6 +994,88 @@ mod collision_tests {
     use super::*;
 
     #[test]
+    fn gold_sinks_through_a_settled_pool_but_not_a_closed_pin() {
+        for closed in [false, true] {
+            let mut lv = crate::levels::level(0);
+            lv.walls = vec![(80., 100., 80., 280.), (180., 100., 180., 280.), (80., 280., 180., 280.)];
+            lv.pins = if closed { vec![(80., 230., 180., 230.)] } else { vec![] };
+            lv.grains.clear();
+            lv.knight = 250.;
+            for row in 0..18 {
+                for col in 0..15 {
+                    lv.grains.push((88. + col as f32 * 6., 150. + row as f32 * 6., WATER));
+                }
+            }
+            let mut w = World::new(&lv);
+            for _ in 0..600 {
+                w.step(&lv);
+            }
+            for x in [110., 130., 150.] {
+                let mut coin = w.grains[0];
+                coin.kind = GOLD;
+                coin.p = (x, 120.);
+                coin.prev = coin.p;
+                coin.mark = coin.p;
+                coin.lump = LOOSE;
+                coin.held = false;
+                w.grains.push(coin);
+            }
+            for _ in 0..1200 {
+                w.step(&lv);
+            }
+            let gold: Vec<_> = w.grains.iter().filter(|g| g.kind == GOLD).collect();
+            for g in gold {
+                if closed {
+                    assert!(g.p.1 > 210. && g.p.1 < 230., "gold must settle on the closed pin: {:?}", g.p);
+                } else {
+                    assert!(g.p.1 > 260. && g.p.1 < 280., "gold must sink to the basin floor: {:?}", g.p);
+                }
+            }
+            assert_eq!(w.grains.iter().filter(|g| g.kind == WATER).count(), 270);
+        }
+    }
+
+    #[test]
+    fn cooled_fragments_do_not_weld_on_later_contact() {
+        let mut lv = crate::levels::level(0);
+        lv.grains = vec![(100., 100., STONE), (105., 100., STONE), (114., 100., STONE)];
+        let mut w = World::new(&lv);
+        for g in &mut w.grains {
+            g.heat = HEAT_MS;
+        }
+        w.find_pairs();
+        w.fuse();
+        assert_eq!(w.grains[0].lump, w.grains[1].lump);
+        assert_eq!(w.grains[2].lump, LOOSE);
+        // A separately cooled pebble later falls against the first rock.
+        w.grains[2].p = (110., 100.);
+        w.find_pairs();
+        w.fuse();
+        assert_eq!(w.grains[2].lump, LOOSE, "a loose stone must not glue itself to a rock on contact");
+    }
+
+    #[test]
+    fn disconnected_stone_fragments_fall_independently() {
+        let mut lv = crate::levels::level(0);
+        lv.grains = vec![(100., 100., STONE), (105., 100., STONE), (110., 100., STONE)];
+        let mut w = World::new(&lv);
+        for g in &mut w.grains {
+            g.heat = HEAT_MS;
+        }
+        w.find_pairs();
+        w.fuse();
+        // A pin or wall correction separates a fragment. Shape matching
+        // must not teleport it back across the visible gap.
+        w.grains[2].p = (120., 100.);
+        w.grains[2].prev = w.grains[2].p;
+        w.split_stones();
+        assert_eq!(w.grains[2].lump, LOOSE);
+        w.keep_shapes();
+        assert_eq!(w.grains[2].p, (120., 100.));
+        assert_eq!(w.grains[0].lump, w.grains[1].lump);
+    }
+
+    #[test]
     fn dead_orc_does_not_displace_liquid() {
         let lv = crate::levels::level(3);
         let mut corpse = World::new(&lv);
@@ -926,9 +1083,15 @@ mod collision_tests {
         corpse.orc.as_mut().unwrap().alive = false;
         absent.orc = None;
         for w in [&mut corpse, &mut absent] {
-            w.pins.iter_mut().for_each(|p| { p.out = 1.0; p.goal = 1.0; });
+            w.pins.iter_mut().for_each(|p| {
+                p.out = 1.0;
+                p.goal = 1.0;
+            });
         }
-        for _ in 0..600 { corpse.step(&lv); absent.step(&lv); }
+        for _ in 0..600 {
+            corpse.step(&lv);
+            absent.step(&lv);
+        }
         for (a, b) in corpse.grains.iter().zip(&absent.grains) {
             assert_eq!(a.p, b.p, "a corpse must not act as a dam");
         }
@@ -941,9 +1104,13 @@ mod collision_tests {
             let mut w = World::new(&lv);
             for pin in order {
                 w.slide(pin, 1.0);
-                for _ in 0..600 { w.step(&lv); }
+                for _ in 0..600 {
+                    w.step(&lv);
+                }
             }
-            for _ in 0..1200 { w.step(&lv); }
+            for _ in 0..1200 {
+                w.step(&lv);
+            }
             let lava = w.grains.iter().filter(|g| g.kind == LAVA).count();
             let water = w.grains.iter().filter(|g| g.kind == WATER).count();
             assert_eq!(lava, 0, "order {order:?}: {lava} lava remains with {water} water");
@@ -970,7 +1137,10 @@ mod collision_tests {
         lv.grains = vec![(100.0, 100.0, WATER)];
         lv.grains.extend((1..=5).map(|i| (100.0 + i as f32 * 5.0, 100.0, LAVA)));
         let mut w = World::new(&lv);
-        for _ in 0..5 { w.find_pairs(); w.react(); }
+        for _ in 0..5 {
+            w.find_pairs();
+            w.react();
+        }
         assert_eq!(w.grains.iter().filter(|g| g.kind == STONE).count(), COLD);
         assert_eq!(w.grains.iter().filter(|g| g.kind == LAVA).count(), 5 - COLD);
     }

@@ -646,6 +646,9 @@ impl Game for HigherFloor {
     fn score(&self) -> u32 {
         self.s.score.max(0) as u32
     }
+    fn won(&self) -> bool {
+        self.s.phase == DONE
+    }
     fn over(&self) -> bool {
         self.s.phase == DONE || self.s.endless() && self.s.phase == LOST
     }

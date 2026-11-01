@@ -15,7 +15,7 @@ mechanics, not extracted copies of complete commercial campaigns.
 | Unpark | [unpark/src/campaign.rs](unpark/src/campaign.rs) | Two-car directional lesson, then a car blocked at both ends. Cones at 6, fences at 11, long vehicles at 16. Later lots require successive groups of cars to leave. |
 | Offgrid | [offgrid/src/campaign.rs](offgrid/src/campaign.rs) | Three-arrow chain, then branching dependencies. Later chapters use crosses, rings, diagonal bands, combs and full boards, from 3×3 to 9×9. |
 | Loose Ends / Unbolt | [unbolt/src/campaign.rs](unbolt/src/campaign.rs) | Two plates/two colors, mixed colors, a covering bridge, then spare-slot planning. Later chapters combine three to six plate layers. |
-| Hive Guard | [hive-guard/src/levels.rs](hive-guard/src/levels.rs) | Thirty distinct terrain arrangements instead of ten repeated three times. Elevation, cliffs, roofs, two-hive crossfire, then three-hive finales. |
+| Hive Guard | [hive-guard/src/levels.rs](hive-guard/src/levels.rs) | Three drawing lessons, then roof bridges, guided vertical gates, paired openings and combinations. The finale requires sealing two roof openings and a side entrance. See [design notes](hive-guard/levels.md). |
 
 The seven `campaign.rs` files contain explicit level entries, indexed from zero.
 Their loading functions name the tuple fields and construct the playable board.
@@ -51,10 +51,11 @@ data directly; they do not search for a new layout when a level starts.
   route whose tested clockwise solution fits the timer at three seconds per
   turn. This is a minimum interaction allowance, not a claim about every player's
   solving speed. New board sizes begin with a shorter consolidation lesson.
-- Hive Guard keeps enough ink for a tested protective arch. Each terrain passes
-  a real physics replay with that shelter and loses when the player only caps
-  the hives. Later terrain changes attack directions instead of simply replaying
-  the same map with a shorter allowance.
+- Hive Guard uses low cave ceilings and a per-layout ink allowance from level 4.
+  Players must use terrain to close entrances. Tests replay every intended
+  shelter, alternate swarms and small drawing offsets; they reject four sizes
+  of the repeated semicircle. Every opening in a combined puzzle is necessary:
+  omitting any one barrier loses, as do irrelevant lines and hive caps.
 
 ## References and adaptation limits
 
@@ -77,7 +78,7 @@ python3 check-ad-games.py decant flowline higher-floor boarding unpark offgrid u
 The suites replay all 240 levels and check distinct layouts, opening complexity,
 staged mechanics, conservation, solvability, loss/retry and the existing save /
 physics regressions. Undo/retry continues to reproduce the same board.
-Seven export tests and the existing exhaustive/tuning tests are intentionally
+Seven export tests and the existing exhaustive tests are intentionally
 ignored during normal verification.
 
 Edit `campaign.rs` directly to adjust an individual level, then run that game's
@@ -97,4 +98,4 @@ edits, so it is never part of a normal build or test.
 Campaign revisions invalidate in-progress snapshots whose level numbers could
 otherwise resolve to different layouts on retry. Separate completed-level
 progress is preserved. New snapshot versions: Decant 2, Flowline 3, Higher Floor
-4, Boarding 3, Unpark 3, Offgrid 2, Unbolt 2, Hive Guard 2.
+4, Boarding 3, Unpark 3, Offgrid 2, Unbolt 2, Hive Guard 3.

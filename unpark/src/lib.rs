@@ -714,6 +714,9 @@ impl Game for Unpark {
     fn score(&self) -> u32 {
         self.s.score.max(0) as u32
     }
+    fn won(&self) -> bool {
+        self.s.phase == DONE
+    }
     fn over(&self) -> bool {
         self.s.phase == DONE
     }

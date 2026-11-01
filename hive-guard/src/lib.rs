@@ -22,7 +22,7 @@ enum Tool {
     Go,
 }
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// drawing the line
 const DRAW: i32 = 0;
@@ -237,10 +237,7 @@ impl HiveGuard {
                 }
             }
         }
-        self.bars = (0..n)
-            .filter(|&g| group.contains(&g))
-            .map(|g| Bar::new(&(0..n).filter(|&i| group[i] == g).map(|i| &self.lines[i].0[..]).collect::<Vec<_>>()))
-            .collect();
+        self.bars = (0..n).filter(|&g| group.contains(&g)).map(|g| Bar::new(&(0..n).filter(|&i| group[i] == g).map(|i| &self.lines[i].0[..]).collect::<Vec<_>>())).collect();
         self.s.lines += n as i32;
         self.s.phase = SWARM;
         wg::EV_BLIP
@@ -513,6 +510,9 @@ impl Game for HiveGuard {
     fn score(&self) -> u32 {
         self.s.score.max(0) as u32
     }
+    fn won(&self) -> bool {
+        self.s.phase == DONE
+    }
     fn over(&self) -> bool {
         self.s.phase == DONE
     }
@@ -578,21 +578,7 @@ fn tool_button(s: &mut Screen, t: Tool, x: f32, y: f32, r: f32, on: bool, hover:
 }
 
 fn blank() -> Save {
-    Save {
-        version: VERSION,
-        opt: [0],
-        level: 0,
-        phase: DRAW,
-        retries: 0,
-        level_ms: 0,
-        time_ms: 0,
-        all_stung: 0,
-        lines: 0,
-        done: 0,
-        score: 0,
-        cleared: -1,
-        cleared_score: 0,
-    }
+    Save { version: VERSION, opt: [0], level: 0, phase: DRAW, retries: 0, level_ms: 0, time_ms: 0, all_stung: 0, lines: 0, done: 0, score: 0, cleared: -1, cleared_score: 0 }
 }
 
 impl HiveGuard {
@@ -729,20 +715,91 @@ mod tests {
     }
 
     #[test]
-    fn a_dome_saves_the_dog_on_every_level() {
+    fn terrain_solutions_clear_the_campaign() {
         let mut g = HiveGuard::new();
         g.start(1);
+        let mut failures = Vec::new();
         for level in 0..LEVELS {
+            g.s.opt[0] = level;
+            g.start(1);
             assert_eq!(g.s.level, level);
             let (dx, dy, _) = g.lv.dog;
-            stroke(&mut g, arch(levels::DOME_R, levels::DOME_R, dx, dy));
-            assert!(g.lines[0].0.len() > 10, "level {}: dome not drawn", level + 1);
-            assert!(play(&mut g), "level {}: stung (ink {:.0} of {:.0})", level + 1, g.ink(), g.lv.ink);
+            if level < 3 {
+                stroke(&mut g, arch(levels::DOME_R, levels::DOME_R, dx, dy));
+            } else {
+                for points in levels::solution(level) {
+                    stroke(&mut g, points);
+                }
+            }
+            assert!(!g.lines.is_empty(), "level {}: no legal solution stroke", level + 1);
+            if !play(&mut g) {
+                failures.push(level + 1);
+            }
             if level + 1 < LEVELS {
                 g.press_button();
             }
         }
+        assert!(failures.is_empty(), "solutions failed {failures:?}");
         assert!(g.over());
+    }
+
+    #[test]
+    fn a_repeated_dome_cannot_solve_terrain_levels() {
+        let mut g = HiveGuard::new();
+        let mut won = Vec::new();
+        for level in 3..LEVELS {
+            for radius in [40., 49., 58., 65.] {
+                g.s.opt[0] = level;
+                g.start(1);
+                let (x, y, _) = g.lv.dog;
+                stroke(&mut g, arch(radius, radius, x, y));
+                if !g.lines.is_empty() && play(&mut g) {
+                    won.push((level + 1, radius));
+                }
+            }
+        }
+        println!("dome wins {won:?}");
+        assert!(won.is_empty(), "dome shortcuts: {won:?}");
+    }
+
+    #[test]
+    fn every_opening_in_combined_puzzles_needs_protection() {
+        let mut shortcuts = Vec::new();
+        for level in 3..LEVELS {
+            let solution = levels::solution(level);
+            if solution.len() < 2 {
+                continue;
+            }
+            for omit in 0..solution.len() {
+                let mut g = HiveGuard::new();
+                g.s.opt[0] = level;
+                g.start(1);
+                for (i, points) in solution.iter().enumerate() {
+                    if i != omit {
+                        stroke(&mut g, points.iter().copied());
+                    }
+                }
+                if play(&mut g) {
+                    shortcuts.push((level + 1, omit));
+                }
+            }
+        }
+        assert!(shortcuts.is_empty(), "unused openings {shortcuts:?}");
+    }
+
+    #[test]
+    fn terrain_alone_does_not_protect_the_dog() {
+        let mut g = HiveGuard::new();
+        let mut safe = Vec::new();
+        for level in 3..LEVELS {
+            g.s.opt[0] = level;
+            g.start(1);
+            stroke(&mut g, [(10., 60.), (20., 60.)]);
+            if play(&mut g) {
+                safe.push(level + 1);
+            }
+        }
+        assert!(safe.is_empty(), "terrain needs no drawing: {safe:?}");
     }
 
     #[test]
@@ -758,38 +815,24 @@ mod tests {
         }
     }
 
-    /// Counts, over several swarms and shapes, the domes that let a bee
-    /// through and the caps that held: `cargo test tune -- --ignored --nocapture`
     #[test]
-    #[ignore]
-    fn tune() {
-        let (mut domes, mut caps, mut runs) = (0, 0, 0);
-        let mut g = HiveGuard::new();
-        for level in 0..LEVELS {
-            for seed in 0..4u32 {
-                runs += 1;
+    fn shelters_tolerate_pen_offsets_and_different_swarms() {
+        let mut failures = Vec::new();
+        for level in 3..LEVELS {
+            for (seed, ox, oy) in [(1001, -1., -1.), (1002, 1., -1.), (1003, 0., -2.)] {
+                let mut g = HiveGuard::new();
                 g.s.opt[0] = level;
                 g.start(1);
-                let (dx, dy, _) = g.lv.dog;
-                let r = levels::DOME_R + [0.0, 3.0, -2.0, 5.0][seed as usize];
-                stroke(&mut g, arch(r, r, dx, dy));
-                g.swarm = world::Swarm::new(&g.lv, 1000 + seed + 7 * level as u32);
-                if !play(&mut g) {
-                    domes += 1;
-                    eprintln!("dome stung: level {} seed {seed}", level + 1);
+                for points in levels::solution(level) {
+                    stroke(&mut g, points.into_iter().map(|(x, y)| (x + ox, y + oy)));
                 }
-                g.start(1);
-                for (hx, hy) in g.lv.hives.clone() {
-                    stroke(&mut g, arch(36.0 + seed as f32 * 3.0, 60.0 + seed as f32 * 2.0, hx, hy));
-                }
-                g.swarm = world::Swarm::new(&g.lv, 2000 + seed + 7 * level as u32);
-                if play(&mut g) {
-                    caps += 1;
-                    eprintln!("cap held: level {} seed {seed} ink {:.0}", level + 1, g.ink());
+                g.swarm = world::Swarm::new(&g.lv, seed);
+                if g.lines.is_empty() || !play(&mut g) {
+                    failures.push((level + 1, seed));
                 }
             }
         }
-        eprintln!("TUNE domes stung {domes}/{runs}, caps held {caps}/{runs}");
+        assert!(failures.is_empty(), "fragile shelters {failures:?}");
     }
 
     #[test]

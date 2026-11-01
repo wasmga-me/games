@@ -35,8 +35,8 @@ struct Layout {
 
 const FLOORS: (f32, f32, f32, f32) = (FRAME_L, 290.0, FRAME_R, FLOOR);
 
-/// Eight introductory chambers followed by twelve adaptations of Hero Rescue
-/// layouts. See references.md for the source and the mechanical adaptations.
+/// Eight introductory chambers, eight Hero Rescue adaptations and four
+/// original replacements for repetitive late layouts. See references.md for the source and the mechanical adaptations.
 const LAYOUT: &[Layout] = &[
     // gold or lava, the lava over the knight
     Layout {
@@ -128,12 +128,12 @@ const LAYOUT: &[Layout] = &[
         fills: &[(GOLD, 30., 100., 140., 142.), (WATER, 160., 80., 278., 142.), (LAVA, 88., 225., 212., 264.)],
         knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
     },
-    // Hero Rescue 3: a zigzag route with a separately held lava pocket.
+    // Split treasure: release both pockets, then coolant, before opening the lower lake.
     Layout {
-        walls: &[(80., 60., 80., 168.), (220., 60., 220., 168.), (14., 236., 110., 270.), (220., 180., 220., 260.)],
-        pins: &[(74., 174., 246., 174.), (114., 276., 278., 210.), (214., 270., 278., 270.)],
-        fills: &[(GOLD, 90., 115., 210., 164.), (LAVA, 232., 220., 276., 262.)],
-        knight: 100., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+        walls: &[(104., 55., 104., 194.), (196., 55., 196., 194.)],
+        pins: &[(110., 200., 22., 200.), (190., 200., 278., 200.), (98., 128., 222., 128.), (8., 286., 278., 286.)],
+        fills: &[(GOLD, 24., 146., 94., 190.), (GOLD, 206., 146., 276., 190.), (WATER, 114., 60., 186., 120.), (LAVA, 26., 242., 274., 278.)],
+        knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
     },
     // Hero Rescue 4: a side reservoir must cool the lower tank before its exit opens.
     Layout {
@@ -156,19 +156,21 @@ const LAYOUT: &[Layout] = &[
         fills: &[(LAVA, 24., 95., 140., 148.), (GOLD, 162., 95., 278., 148.)],
         knight: 230., orc: None, zone: (156., 340., FRAME_R, FLOOR),
     },
-    // Hero Rescue 8: gold takes the side route around a fixed central obstruction.
+    // Flooded treasure: release lava onto the monster, then flood the
+    // chamber and sink the coins through its coolant before opening the exit.
     Layout {
-        walls: &[(130., 50., 130., 158.), (14., 220., 186., 270.), (180., 276., 180., 290.)],
-        pins: &[(136., 164., 22., 164.), (124., 164., 278., 164.), (180., 296., 278., 296.)],
-        fills: &[(LAVA, 25., 120., 112., 156.), (GOLD, 200., 108., 276., 156.)],
-        knight: 235., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+        walls: &[(110., 50., 110., 172.), (200., 50., 200., 172.), (230., 90., 230., 190.), (286., 212., 204., 242.), (80., 244., 80., 310.), (220., 244., 220., 310.)],
+        pins: &[(104., 114., 226., 114.), (206., 178., 94., 178.), (224., 196., 278., 196.), (74., 316., 246., 316.)],
+        fills: &[(GOLD, 120., 60., 190., 106.), (WATER, 120., 122., 190., 168.), (LAVA, 240., 142., 276., 186.)],
+        knight: 150., orc: Some((150., 300.)), zone: (FRAME_L, 350., FRAME_R, FLOOR),
     },
-    // Hero Rescue 11: two independently gated hazards on a descending route.
+    // A divider keeps two halves apart: join them to burn the monster,
+    // then cool the joined tank and choose its treasure exits.
     Layout {
-        walls: &[(110., 50., 110., 142.), (200., 50., 200., 142.), (210., 180., 210., 252.)],
-        pins: &[(104., 148., 226., 148.), (116., 148., 22., 148.), (204., 258., 278., 258.), (8., 310., 278., 310.)],
-        fills: &[(GOLD, 120., 95., 190., 138.), (LAVA, 22., 100., 100., 138.), (LAVA, 222., 205., 276., 248.)],
-        knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+        walls: &[(100., 50., 100., 112.), (200., 50., 200., 112.)],
+        pins: &[(94., 118., 226., 118.), (150., 280., 150., 156.), (156., 286., 22., 286.), (144., 286., 278., 286.)],
+        fills: &[(WATER, 110., 58., 190., 108.), (LAVA, 24., 236., 140., 276.), (GOLD, 28., 196., 130., 228.), (GOLD, 176., 200., 274., 230.)],
+        knight: 150., orc: Some((174., 280.)), zone: (FRAME_L, 340., FRAME_R, FLOOR),
     },
     // Hero Rescue 12: burn the monster, cool its chamber, then release the treasure.
     Layout {
@@ -184,12 +186,13 @@ const LAYOUT: &[Layout] = &[
         fills: &[(WATER, 24., 120., 140., 188.), (LAVA, 162., 142., 276., 188.), (GOLD, 162., 102., 276., 136.)],
         knight: 150., orc: None, zone: (FRAME_L, 300., FRAME_R, FLOOR),
     },
-    // Hero Rescue 23: crossed sloping supports, choosing the safe descent.
+    // Cascade: cool the upper lake, then send its remaining water into
+    // the second lava chamber containing the gold, before opening the exit.
     Layout {
-        walls: &[(110., 50., 110., 138.), (190., 50., 190., 138.), (220., 160., 220., 214.), (14., 286., 120., 318.)],
-        pins: &[(104., 144., 216., 144.), (214., 220., 278., 220.), (126., 324., 278., 250.)],
-        fills: &[(GOLD, 120., 88., 180., 132.), (LAVA, 232., 170., 276., 208.)],
-        knight: 180., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+        walls: &[(100., 50., 100., 224.), (200., 50., 200., 224.), (68., 244., 68., 318.), (232., 244., 232., 318.)],
+        pins: &[(94., 120., 226., 120.), (206., 230., 74., 230.), (62., 324., 258., 324.)],
+        fills: &[(WATER, 110., 58., 190., 112.), (LAVA, 108., 194., 192., 222.), (LAVA, 78., 284., 222., 312.), (GOLD, 80., 250., 220., 278.)],
+        knight: 150., orc: None, zone: (FRAME_L, 350., FRAME_R, FLOOR),
     },
     // Hero Rescue 30: two lava reservoirs must be mixed before the final release.
     Layout {

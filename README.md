@@ -75,7 +75,7 @@ Boarding moves passengers into matching buses through a five-seat waiting bench.
 Flowline requires a sealed route to the garden before the timer expires while
 keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floor
 reserves the marked boss for last; Pinwork seals fluid barriers and offers
-twenty distinct chambers, including twelve adaptations from the browser game
+twenty distinct chambers, including eight adaptations from the browser game
 [Hero Rescue](https://plays.org/hero-rescue/) (see [level notes](pinwork/references.md)). The other eight puzzle campaigns each have 30 fixed layouts with staged lessons.
 See [campaign design and editable level data](campaigns.md). Unbolt and Boarding
 retain a verified winning removal sequence for every layout.
@@ -89,3 +89,9 @@ campaign wins, reachable losses, retry, cover saves and consistent aiming tolera
 ## Licence
 
 MIT; see [LICENSE](LICENSE). In-game Latin text is rendered from [Inter](https://rsms.me/inter/) glyphs and Simplified Chinese text from [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) glyphs (`.zh.h` and `zh_glyphs` files), both licensed under the SIL Open Font License 1.1. The Zork story files (`zork1.z3`, `zork2.z3`, `zork3.z3`) are unmodified Infocom originals from [historicalsource](https://github.com/historicalsource), released by Microsoft under the MIT License (see `STORY-LICENSE` in each game directory).
+
+Campaign games report successful completion separately from a loss through
+`wg_won`, so the host can display “All levels cleared!” with the final score.
+The ten ad-style modules pin the shared engine's clarified restart arrow and
+completion export. Pinwork's level notes describe the four redesigned late
+chambers and the gold/stone collision fixes.

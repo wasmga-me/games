@@ -141,7 +141,7 @@ impl Bar {
         self.c.1 += self.v.1 * DT;
         self.a += self.w * DT;
         let sc = self.a.sin_cos();
-        for _ in 0..3 {
+        for _ in 0..12 {
             for i in 0..self.local.len() {
                 let r = rot(self.local[i], sc);
                 let q = (self.c.0 + r.0, self.c.1 + r.1);
@@ -414,7 +414,9 @@ impl Swarm {
             let way = self.map.way(b.p);
             let (hx, hy) = (b.p.0 - b.home.0, b.p.1 - b.home.1);
             let boxed = way == Way::Shut && hx * hx + hy * hy < BOXED * BOXED;
-            let way = if let Way::Go(w) = way { w } else {
+            let way = if let Way::Go(w) = way {
+                w
+            } else {
                 let (tx, ty) = if boxed { (hx, hy - BOXED * 0.5) } else { (dx - b.p.0, dy - b.p.1) };
                 let d = (tx * tx + ty * ty).sqrt().max(1.0);
                 (tx / d, ty / d)
@@ -428,18 +430,30 @@ impl Swarm {
             }
             b.p.0 += b.v.0 * DT;
             b.p.1 += b.v.1 * DT;
-            // off the ground and the ledges (not the hives they come from)
-            if let Some((n, depth)) = lv.contact(b.p, BEE_R, false, false) {
-                bounce(b, n, depth);
-            }
-            for bar in bars.iter_mut() {
-                if let Some((q, n, depth)) = bar.touch(b.p, reach) {
-                    let vn = dot(b.v, n);
+            // Resolve corners shared by terrain and ink together so a bee
+            // pushed out of a bar cannot remain inside the adjacent wall.
+            for _ in 0..3 {
+                // off the ground and the ledges (not the hives they come from)
+                if let Some((n, depth)) = lv.contact(b.p, BEE_R, false, false) {
                     bounce(b, n, depth);
-                    // the bee shoves the ink as hard as it bounced off it
-                    if vn < 0.0 {
+                }
+                for bar in bars.iter_mut() {
+                    if let Some((q, n, depth)) = bar.touch(b.p, reach) {
+                        // Share the collision impulse with the moving bar. Treating
+                        // it as immovable when bouncing the bee, then applying the
+                        // full impulse to it, injected energy and launched light
+                        // gates through their supports under repeated impacts.
                         let r = (q.0 - bar.c.0, q.1 - bar.c.1);
-                        bar.apply(r, (n.0 * vn * 1.6 * mass, n.1 * vn * 1.6 * mass));
+                        let bv = bar.vel(r);
+                        let vn = dot((b.v.0 - bv.0, b.v.1 - bv.1), n);
+                        b.p.0 += n.0 * depth;
+                        b.p.1 += n.1 * depth;
+                        if vn < 0.0 {
+                            let j = -1.6 * vn / (1.0 / mass + bar.give(r, n));
+                            b.v.0 += n.0 * j / mass;
+                            b.v.1 += n.1 * j / mass;
+                            bar.apply(r, (-n.0 * j, -n.1 * j));
+                        }
                     }
                 }
             }

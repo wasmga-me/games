@@ -14,8 +14,8 @@ const DOG_UP: f32 = 25.0;
 /// a hive's half width and height
 const HIVE_W: f32 = 21.0;
 const HIVE_H: f32 = 44.0;
-/// the arch a dog needs over it, measured from its feet: what the levels'
-/// ink is reckoned from
+/// Reference arch for the opening lessons.
+#[cfg(test)]
 pub const DOME_R: f32 = 58.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -115,7 +115,7 @@ impl Level {
 
 const GROUND_RECT: Rect = r(-200.0, GROUND, 500.0, 520.0);
 
-/// Thirty distinct layouts: ledges, the dog's feet and facing, the hives' feet.
+/// The three open-air drawing lessons.
 fn layout(k: i32) -> (Vec<Rect>, (f32, f32, bool), Vec<(f32, f32)>) {
     match k {
         // a meadow, the hive to the left
@@ -124,58 +124,120 @@ fn layout(k: i32) -> (Vec<Rect>, (f32, f32, bool), Vec<(f32, f32)>) {
         1 => (vec![r(196.0, 160.0, 320.0, 176.0)], (110.0, GROUND, false), vec![(252.0, 160.0)]),
         // the dog on a ledge, the hive below
         2 => (vec![r(80.0, 236.0, 220.0, 252.0)], (150.0, 236.0, true), vec![(40.0, GROUND)]),
-        // against a cliff on the right, the hive up on the left
-        3 => (vec![r(232.0, 200.0, 320.0, GROUND), r(-20.0, 122.0, 96.0, 138.0)], (182.0, GROUND, false), vec![(46.0, 122.0)]),
-        // down between two posts, the hive above
-        4 => (vec![r(52.0, 290.0, 76.0, GROUND), r(224.0, 290.0, 248.0, GROUND), r(110.0, 128.0, 190.0, 144.0)], (150.0, GROUND, false), vec![(150.0, 128.0)]),
-        // two hives, either side
-        5 => (vec![r(200.0, 184.0, 320.0, 200.0)], (130.0, GROUND, false), vec![(38.0, GROUND), (256.0, 184.0)]),
-        // up on a shelf to the right, the hive down on the left
-        6 => (vec![r(156.0, 176.0, 320.0, 192.0)], (232.0, 176.0, true), vec![(60.0, GROUND)]),
-        // under a roof, the hive to the right
-        7 => (vec![r(92.0, 236.0, 216.0, 250.0)], (150.0, GROUND, false), vec![(264.0, GROUND)]),
-        // on a step, hives low left and high right
-        8 => (vec![r(-20.0, 262.0, 92.0, GROUND), r(92.0, 304.0, 230.0, GROUND), r(206.0, 126.0, 320.0, 142.0)], (160.0, 304.0, true), vec![(40.0, 262.0), (258.0, 126.0)]),
-        // on an island in the air, hives either side on the ground
-        9 => (vec![r(78.0, 238.0, 222.0, 254.0)], (150.0, 238.0, false), vec![(36.0, GROUND), (264.0, GROUND)]),
-        10 => (vec![r(30., 270., 190., 286.), r(220., 150., 320., 166.)], (110., 270., false), vec![(260., 150.)]),
-        11 => (vec![r(-20., 210., 145., 226.), r(190., 286., 320., 302.)], (78., 210., false), vec![(255., 286.)]),
-        12 => (vec![r(70., 290., 230., 306.), r(-20., 134., 68., 150.)], (150., 290., true), vec![(30., 134.)]),
-        13 => (vec![r(92., 250., 232., 266.), r(-20., 180., 50., 196.)], (162., 250., true), vec![(25., 180.), (275., 352.)]),
-        14 => (vec![r(60., 190., 240., 206.), r(110., 290., 190., 306.)], (150., 190., false), vec![(30., 352.), (270., 352.)]),
-        15 => (vec![r(40., 280., 200., 296.), r(0., 170., 75., 186.), r(225., 220., 320., 236.)], (120., 280., false), vec![(38., 170.), (270., 220.)]),
-        16 => (vec![r(106., 210., 276., 226.), r(-20., 125., 82., 141.)], (190., 210., true), vec![(40., 125.), (40., 352.)]),
-        17 => (vec![r(48., 268., 204., 284.), r(215., 105., 320., 121.), r(65., 158., 175., 174.)], (126., 268., false), vec![(265., 105.), (265., 352.)]),
-        18 => (vec![r(75., 300., 225., 316.), r(-20., 170., 68., 186.), r(232., 220., 320., 236.)], (150., 300., true), vec![(30., 170.), (270., 220.)]),
-        19 => (vec![r(-20., 240., 150., 256.), r(165., 140., 320., 156.)], (78., 240., false), vec![(205., 140.), (270., 352.)]),
-        20 => (vec![r(70., 220., 230., 236.), r(20., 310., 65., 326.), r(235., 310., 280., 326.)], (150., 220., false), vec![(42., 310.), (258., 310.)]),
-        21 => (vec![r(110., 280., 290., 296.), r(-20., 135., 85., 151.), r(130., 170., 270., 186.)], (200., 280., true), vec![(40., 135.), (40., 352.)]),
-        22 => (vec![r(10., 265., 180., 281.), r(195., 190., 320., 206.), r(38., 145., 150., 161.)], (95., 265., false), vec![(250., 190.), (260., 352.)]),
-        23 => (vec![r(76., 190., 224., 206.), r(-20., 280., 60., 296.), r(240., 280., 320., 296.)], (150., 190., true), vec![(30., 280.), (270., 280.)]),
-        24 => {
-            (vec![r(65., 305., 235., 321.), r(-20., 150., 70., 166.), r(230., 150., 320., 166.), r(108., 205., 192., 221.)], (150., 305., false), vec![(32., 150.), (268., 150.)])
-        }
-        25 => (vec![r(-20., 215., 155., 231.), r(175., 285., 320., 301.), r(30., 110., 125., 126.)], (85., 215., false), vec![(235., 285.), (265., 352.)]),
-        26 => (vec![r(145., 200., 320., 216.), r(-20., 140., 85., 156.), r(90., 300., 130., 316.)], (225., 200., true), vec![(35., 140.), (45., 352.)]),
-        27 => (vec![r(68., 260., 232., 276.), r(90., 140., 210., 156.)], (150., 260., false), vec![(150., 140.), (32., 352.), (268., 352.)]),
-        28 => (vec![r(30., 300., 200., 316.), r(215., 190., 320., 206.), r(-20., 145., 60., 161.)], (115., 300., false), vec![(30., 145.), (265., 190.), (270., 352.)]),
-        29 => (vec![r(75., 235., 225., 251.), r(-20., 145., 55., 161.), r(245., 145., 320., 161.)], (150., 235., true), vec![(28., 145.), (272., 145.), (150., 352.)]),
         _ => unreachable!("campaign level"),
     }
 }
 
-/// Chapters introduce elevation, roofs, crossfire, then three-way attacks.
+/// Terrain puzzles after three free-drawing lessons. A short bridge,
+/// sliding gate, paired roof patches, roof-and-gate or two gates is
+/// required; the ink cannot encircle the dog independently of the terrain.
+fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
+    // type, dog x, floor y, half-width, wall height. Explicit authored order
+    // alternates lessons and combinations instead of ten repeating arenas.
+    let (kind, x, y, w, h): (u8, f32, f32, f32, f32) = match n {
+        3 => (0, 150., 352., 40., 68.),
+        4 => (0, 110., 290., 46., 72.),
+        5 => (1, 155., 352., 42., 70.),
+        6 => (0, 180., 250., 50., 78.),
+        7 => (1, 110., 280., 44., 76.),
+        8 => (2, 150., 352., 48., 74.),
+        9 => (0, 145., 300., 54., 80.),
+        10 => (1, 182., 310., 46., 82.),
+        11 => (2, 112., 270., 46., 80.),
+        12 => (3, 150., 352., 44., 72.),
+        13 => (2, 180., 290., 50., 86.),
+        14 => (4, 150., 320., 44., 78.),
+        15 => (3, 110., 286., 46., 76.),
+        16 => (1, 150., 242., 48., 88.),
+        17 => (4, 184., 352., 46., 84.),
+        18 => (2, 150., 240., 52., 78.),
+        19 => (3, 180., 310., 48., 82.),
+        20 => (4, 110., 286., 48., 86.),
+        21 => (2, 110., 352., 54., 90.),
+        22 => (3, 150., 270., 50., 88.),
+        23 => (4, 178., 260., 50., 80.),
+        24 => (2, 175., 330., 56., 94.),
+        25 => (3, 110., 330., 52., 92.),
+        26 => (4, 150., 352., 52., 94.),
+        27 => (3, 170., 250., 54., 84.),
+        28 => (4, 112., 244., 54., 88.),
+        29 => (5, 150., 320., 56., 96.),
+        _ => unreachable!(),
+    };
+    let (l, rr, top) = (x - w, x + w, y - h);
+    let mut solids = vec![GROUND_RECT, r(l - 14., y, rr + 14., y + 16.)];
+    let side = |solids: &mut Vec<Rect>, xx: f32, door: bool| {
+        if door {
+            solids.push(r(xx - 9., top, xx + 9., y - 47.));
+            solids.push(r(xx - 9., y - 27., xx + 9., y));
+        } else {
+            solids.push(r(xx - 7., top, xx + 7., y));
+        }
+    };
+    side(&mut solids, l, kind == 4);
+    side(&mut solids, rr, kind == 1 || kind == 3 || kind == 4 || kind == 5);
+    if kind == 1 || kind == 4 {
+        solids.push(r(l - 7., top - 12., rr + 7., y - 52.));
+    }
+    if kind == 2 || kind == 5 {
+        solids.extend([r(l - 7., top, l + 14., top + 12.), r(rr - 14., top, rr + 7., top + 12.)]);
+        solids.push(r(x - 20., top, x + 20., y - 52.));
+        solids.extend([r(l - 23., top - 12., l - 19., top + 4.), r(x - 3., top - 12., x + 3., top), r(rr + 19., top - 12., rr + 23., top + 4.)]);
+        stroke(&[(l - 10., top - 6.), (x - 8., top - 6.)]);
+        stroke(&[(x + 8., top - 6.), (rr + 10., top - 6.)]);
+    } else if kind == 0 || kind == 3 {
+        // Offset roof opening: a short plank must bridge the actual gap.
+        let gap = if kind == 0 && n % 2 == 0 { x + 8. } else { x - 30. };
+        solids.push(r(l - 7., top, gap, y - 52.));
+        solids.push(r(gap + 28., top, rr + 7., y - 52.));
+        solids.extend([r(gap - 33., top - 12., gap - 29., top), r(gap + 57., top - 12., gap + 61., top)]);
+        stroke(&[(gap - 20., top - 6.), (gap + 48., top - 6.)]);
+    }
+    if kind == 1 || kind == 3 || kind == 4 || kind == 5 {
+        solids.extend([r(rr + 7., y, rr + 27., y + 16.), r(rr + 21., y - 27., rr + 27., y), r(rr + 21., y - 100., rr + 27., y - 47.)]);
+        stroke(&[(rr + 14., y - if kind == 5 { 76. } else { 85. }), (rr + 14., y - 4.)]);
+    }
+    if kind == 4 {
+        solids.extend([r(l - 27., y, l - 7., y + 16.), r(l - 27., y - 27., l - 21., y), r(l - 27., y - 100., l - 21., y - 47.)]);
+        stroke(&[(l - 14., y - 85.), (l - 14., y - 4.)]);
+    }
+    let length = match kind {
+        0 => 68.,
+        1 => 81.,
+        2 => 2. * (w + 2.),
+        3 => 149.,
+        4 => 162.,
+        5 => 2. * (w + 2.) + 72.,
+        _ => unreachable!(),
+    };
+    let hives = if n < 8 {
+        vec![(if x < 150. { 265. } else { 35. }, GROUND)]
+    } else if n < 23 {
+        vec![(30., GROUND), (270., GROUND)]
+    } else {
+        vec![(30., GROUND), (270., GROUND), (150., 110.)]
+    };
+    if n >= 23 {
+        solids.push(r(119., 110., 181., 124.));
+    }
+    let ink = length + if n < 12 { 8. } else { 4. };
+    Level { solids, dog: (x, y, n % 2 == 0), hives, ink, bees: 8 + (n / 6) as u32, secs: 8. + (n / 10) as f32 }
+}
+
 pub fn level(n: i32) -> Level {
-    let (mut solids, dog, hives) = layout(n.clamp(0, LEVELS - 1));
+    if n >= 3 {
+        return challenge(n, |_| {});
+    }
+    let (mut solids, dog, hives) = layout(n);
     solids.insert(0, GROUND_RECT);
-    let round = n / 5;
-    // an arch over the dog, with some to spare that shrinks round by round
-    let arch = std::f32::consts::PI * DOME_R;
-    let ink = arch * [1.8, 1.65, 1.5, 1.4, 1.3, 1.22][round as usize] + 10.0;
-    // the bees shared between the hives
-    let total = (10 + 3 * round + (n % 5) / 2) as u32;
-    let bees = total.div_ceil(hives.len() as u32);
-    Level { solids, dog, hives, ink, bees, secs: [8.0, 8.0, 9.0, 10.0, 11.0, 12.0][round as usize] }
+    Level { solids, dog, hives, ink: 300. - n as f32 * 20., bees: 10, secs: 8. }
+}
+
+#[cfg(test)]
+pub fn solution(n: i32) -> Vec<Vec<(f32, f32)>> {
+    let mut strokes = Vec::new();
+    challenge(n, |s| strokes.push(s.to_vec()));
+    strokes
 }
 
 #[cfg(test)]
@@ -190,7 +252,9 @@ mod tests {
             let hives: Vec<_> = lv.hives.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
             assert!(seen.insert((terrain, hives, lv.dog.0 as i32, lv.dog.1 as i32)), "repeated terrain {}", n + 1);
             assert!(lv.solids.iter().any(|r| r.y == lv.dog.1 && lv.dog.0 > r.x && lv.dog.0 < r.x + r.w));
-            assert!(lv.ink > std::f32::consts::PI * DOME_R);
+            if n >= 3 {
+                assert!(lv.ink < 210.);
+            }
         }
     }
 }

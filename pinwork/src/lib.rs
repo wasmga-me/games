@@ -123,7 +123,11 @@ impl Pinwork {
     /// Restart, in the top bar while a level is on
     fn controls(&self) -> Row {
         let row = controls::row(&[Icon::Restart], PLAN.0 - 8.0, 22.0);
-        if self.s.phase == PLAY { row } else { row.hidden() }
+        if self.s.phase == PLAY {
+            row
+        } else {
+            row.hidden()
+        }
     }
     fn can_restart(&self) -> bool {
         self.s.phase == PLAY && self.started()
@@ -504,11 +508,7 @@ impl Game for Pinwork {
         };
         self.put(s, pose, knight, GROUND, side < 0.0);
         if let Some(o) = self.world.orc.as_ref().filter(|o| o.alive) {
-            let sprite = if self.world.caught {
-                art::ORC_SWING
-            } else {
-                art::ORC_IDLE
-            };
+            let sprite = if self.world.caught { art::ORC_SWING } else { art::ORC_IDLE };
             self.put(s, sprite, o.p.0, o.p.1 + sim::ORC_UP, o.p.0 < knight);
         }
         for st in &self.world.steam {
@@ -556,6 +556,9 @@ impl Game for Pinwork {
     fn score(&self) -> u32 {
         self.s.score.max(0) as u32
     }
+    fn won(&self) -> bool {
+        self.s.phase == DONE
+    }
     fn over(&self) -> bool {
         self.s.phase == DONE
     }
@@ -577,11 +580,8 @@ impl Game for Pinwork {
     }
     fn loaded(&mut self) -> bool {
         let s = &self.s;
-        let ok = s.version == VERSION
-            && (0..LEVELS).contains(&s.opt[0])
-            && (0..LEVELS).contains(&s.level)
-            && (PLAY..=FAILED).contains(&s.phase)
-            && (BURNED..=SHORT).contains(&s.why);
+        let ok =
+            s.version == VERSION && (0..LEVELS).contains(&s.opt[0]) && (0..LEVELS).contains(&s.level) && (PLAY..=FAILED).contains(&s.phase) && (BURNED..=SHORT).contains(&s.why);
         if ok {
             // the grains are not saved: a level in play starts over
             self.lv = levels::level(self.s.level);
@@ -727,10 +727,54 @@ impl Pinwork {
             tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"])
         } else {
             match self.s.why {
-                BURNED => tr(&["Burned by lava", "被岩浆烧到", "溶岩でやけど", "용암에 데었어요", "Quemado por lava", "Queimado pela lava", "Brûlé par la lave", "Von Lava verbrannt", "Обжёгся лавой", "被岩漿燒到"]),
-                CAUGHT => tr(&["Slain by the orc", "被兽人抓住", "オークにやられた", "오크에게 당했어요", "El orco lo atrapó", "O orc o pegou", "L'orc l'a eu", "Der Ork hat ihn erwischt", "Орк его настиг", "被獸人抓住"]),
-                ORC_LIVES => tr(&["Orc still standing", "兽人还活着", "オークが残っている", "오크가 아직 살아 있어요", "El orco sigue en pie", "O orc continua de pé", "L'orc est toujours debout", "Der Ork steht noch", "Орк ещё стоит", "獸人還活著"]),
-                _ => tr(&["Not enough gold", "金币不够", "金貨が足りない", "금화가 부족해요", "No hay suficiente oro", "Ouro insuficiente", "Pas assez d'or", "Nicht genug Gold", "Мало золота", "金幣不夠"]),
+                BURNED => tr(&[
+                    "Burned by lava",
+                    "被岩浆烧到",
+                    "溶岩でやけど",
+                    "용암에 데었어요",
+                    "Quemado por lava",
+                    "Queimado pela lava",
+                    "Brûlé par la lave",
+                    "Von Lava verbrannt",
+                    "Обжёгся лавой",
+                    "被岩漿燒到",
+                ]),
+                CAUGHT => tr(&[
+                    "Slain by the orc",
+                    "被兽人抓住",
+                    "オークにやられた",
+                    "오크에게 당했어요",
+                    "El orco lo atrapó",
+                    "O orc o pegou",
+                    "L'orc l'a eu",
+                    "Der Ork hat ihn erwischt",
+                    "Орк его настиг",
+                    "被獸人抓住",
+                ]),
+                ORC_LIVES => tr(&[
+                    "Orc still standing",
+                    "兽人还活着",
+                    "オークが残っている",
+                    "오크가 아직 살아 있어요",
+                    "El orco sigue en pie",
+                    "O orc continua de pé",
+                    "L'orc est toujours debout",
+                    "Der Ork steht noch",
+                    "Орк ещё стоит",
+                    "獸人還活著",
+                ]),
+                _ => tr(&[
+                    "Not enough gold",
+                    "金币不够",
+                    "金貨が足りない",
+                    "금화가 부족해요",
+                    "No hay suficiente oro",
+                    "Ouro insuficiente",
+                    "Pas assez d'or",
+                    "Nicht genug Gold",
+                    "Мало золота",
+                    "金幣不夠",
+                ]),
             }
         };
         let size = s.fit_size(title, 21.0, pw - 32.0);
@@ -818,8 +862,12 @@ mod tests {
             let mut sounds = 1;
             for i in 0..120 {
                 // Moving out, back in, and out again is still one pin.
-                if i == 30 { g.slide(0, 0.0); }
-                if i == 60 { g.slide(0, 0.2); }
+                if i == 30 {
+                    g.slide(0, 0.0);
+                }
+                if i == 60 {
+                    g.slide(0, 0.2);
+                }
                 sounds += (g.update(&Input { dt: 16, ..Input::default() }) & wg::EV_BLIP != 0) as usize;
             }
             assert!(g.world.pins[0].touched());
@@ -859,6 +907,19 @@ mod tests {
                 break;
             }
             g.update(&step);
+        }
+        if std::env::var_os("PINWORK_ORDER").is_some() {
+            println!(
+                "phase {} gold {}/{} lava {} water {} burned {} caught {} orc {:?}",
+                g.s.phase,
+                g.gold_in(),
+                g.lv.need,
+                g.world.grains.iter().filter(|g| g.kind == LAVA).count(),
+                g.world.grains.iter().filter(|g| g.kind == levels::WATER).count(),
+                g.world.burned,
+                g.world.caught,
+                g.world.orc.map(|o| (o.alive, o.p))
+            );
         }
         g.s.phase
     }
@@ -917,6 +978,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual level-design probe; campaign test checks all orders"]
+    fn replay_design_route() {
+        let level = std::env::var("PINWORK_LEVEL").unwrap().parse::<i32>().unwrap();
+        let order: Vec<usize> = std::env::var("PINWORK_ORDER").unwrap().split(',').map(|n| n.parse().unwrap()).collect();
+        assert!(matches!(play(level - 1, &order), CLEARED | DONE), "level {level}, order {order:?}");
+    }
+
+    #[test]
     fn every_level_has_a_way_and_a_trap() {
         // PINWORK_LEVEL=n checks only level n
         let only = std::env::var("PINWORK_LEVEL").ok().and_then(|v| v.parse::<i32>().ok());
@@ -937,6 +1006,10 @@ mod tests {
             }
             println!("level {:2}: pins {} lost {:3.0}% wins {:?}", level + 1, n, 100.0 * lost as f32 / all as f32, wins);
             assert!(!wins.is_empty(), "level {} cannot be won", level + 1);
+            if [10, 14, 15, 18].contains(&level) {
+                let minimum = if level == 10 || level == 14 { 4 } else { 3 };
+                assert!(wins.iter().all(|o| o.len() >= minimum), "level {} skips its intended decisions: {:?}", level + 1, wins);
+            }
             assert!(lost > 0, "level {} cannot be lost", level + 1);
         }
     }
