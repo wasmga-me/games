@@ -1,9 +1,9 @@
 //! Bots that play every level and the endless pier, for balancing:
 //!   cargo test --release -- --nocapture
-//! A sharp player picks the better gate, shoots barrels and crates open and
-//! keeps out of shell fire; a good one now and then misses a gate
+//! A sharp player picks the best lane at each row of gates, runs into buffs
+//! and keeps out of shell fire; a good one now and then misses a gate
 //! or a shell; a casual one gets gates wrong more often, doesn't steer at
-//! barrels and crates and dodges half the shells. The asserts hold the
+//! buffs and dodges half the shells. The asserts hold the
 //! balance aimed for: every level can be lost, a sharp player clears each
 //! nearly always, a good one most, a casual one most of the early ones and
 //! under half of the last.
@@ -20,7 +20,7 @@ struct Skill {
     name: &'static str,
     /// how often the better gate is picked
     gates: f32,
-    /// steers at barrels and crates so the squad's fire turns on them
+    /// steers into buffs
     aim: bool,
     /// how often a shell is seen in time
     dodge: f32,
@@ -62,15 +62,16 @@ const CASUAL: Skill = Skill {
 #[derive(Default, Debug)]
 struct Run {
     won: bool,
-    /// metres reached, and soldiers at the boss and at the end
+    /// metres reached, soldiers on meeting the first mech or giant and at
+    /// the end, and seconds spent near them
     d: f32,
-    at_boss: i32,
+    at_big: i32,
     peak: i32,
     end: i32,
-    boss_s: f32,
+    big_s: f32,
     time_s: f32,
     score: i32,
-    bosses: i32,
+    bigs: i32,
     /// what knocked the squad out
     died: &'static str,
 }
@@ -88,107 +89,75 @@ fn hash01(d: f32, salt: u32) -> f32 {
 fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
     let s = &p.s;
     let r = radius(s.count.min(MAXV as i32));
-    let mut want = s.tx;
-    // the next gate pair
+    // the middle lane, unless there is a reason to be elsewhere
+    let mut want = 0.0;
+    // a lane to keep to, with a gate close
+    let mut keep = None;
+    // the next row of gates: the lane that grows the squad most, its gate
+    // or none, or now and then the lane that grows it least
     let gate = s
         .things()
         .iter()
-        .enumerate()
-        .filter(|(_, t)| t.kind == K_GATE && t.state == 0 && t.d > s.d - 0.2)
-        .min_by(|a, b| a.1.d.total_cmp(&b.1.d));
-    let mut busy = false;
-    if let Some((k, g)) = gate {
-        if g.d - s.d < 30.0 {
-            let o = &s.thing[g.b as usize];
-            let (mine, other) = (
-                gate_sum(g.a, g.value, s.count),
-                if g.b as usize != k {
-                    gate_sum(o.a, o.value, s.count)
-                } else {
-                    i32::MIN
-                },
-            );
-            let best = if mine >= other { g.x } else { o.x };
-            let worst = if mine >= other { o.x } else { g.x };
-            want = if hash01(g.d, salt) < sk.gates {
-                best
-            } else {
-                worst
-            };
-            busy = true;
-        }
+        .filter(|t| t.kind == K_GATE && t.state == 0 && t.d > s.d - 0.2)
+        .min_by(|a, b| a.d.total_cmp(&b.d));
+    if let Some(g) = gate.filter(|g| g.d - s.d < 30.0) {
+        let after = |lane: i32| {
+            s.things()
+                .iter()
+                .find(|t| t.kind == K_GATE && t.state == 0 && t.b == g.b && lane_of(t.x) == lane)
+                .map_or(s.count, |t| gate_sum(t.a, t.value, s.count))
+        };
+        // ties go to the lane nearer the squad
+        let by = |l: &i32| (after(*l), -(lane_x(*l) - s.cx).abs().round() as i32);
+        let best = (0..3).max_by_key(by).unwrap();
+        let worst = (0..3).min_by_key(|l| after(*l)).unwrap();
+        let lane = if hash01(g.d, salt) < sk.gates {
+            best
+        } else {
+            worst
+        };
+        want = lane_x(lane);
+        keep = (g.d - s.d < 12.0).then_some(lane);
     }
-    // a barrel or crate in range and nearer than any gate
+    // a buff in reach, before any gate
     if sk.aim {
-        let gd = gate.map_or(f32::MAX, |(_, g)| g.d);
+        let gd = gate.map_or(f32::MAX, |g| g.d);
         if let Some(t) = s
             .things()
             .iter()
             .filter(|t| {
-                matches!(t.kind, K_BARREL | K_CRATE)
-                    && t.hp > 0
-                    && t.d > s.d + 1.0
-                    && t.d - s.d < WEAPONS[s.weapon as usize].range - 4.0
-                    && t.d < gd
+                t.kind == K_BUFF && t.state == 0 && t.d > s.d - 1.0 && t.d - s.d < 25.0 && t.d < gd
             })
             .min_by(|a, b| a.d.total_cmp(&b.d))
         {
-            // close, it steps the squad round it
-            let clear = half_size(t.kind) + radius(s.count) + 0.4;
-            want = if t.d - s.d < clear + 1.0 {
-                t.x + clear * if t.x > 0.0 { -1.0 } else { 1.0 }
-            } else {
-                t.x
-            };
-            busy = true;
-        }
-    }
-    // TNT: shot from afar, given a wide berth near
-    if let Some(t) = s
-        .things()
-        .iter()
-        .filter(|t| t.kind == K_TNT && t.hp > 0 && t.d > s.d - 2.0 && t.d - s.d < 20.0)
-        .min_by(|a, b| a.d.total_cmp(&b.d))
-    {
-        if t.d - s.d > 9.0 && sk.aim {
             want = t.x;
-        } else if (want - t.x).abs() < r + 1.0 {
-            let side = if t.x > 0.0 { -1.0 } else { 1.0 };
-            want = t.x + side * (r + 1.5);
         }
-        busy = true;
     }
-    if !busy {
-        want = s
-            .enemies()
-            .iter()
-            .find(|e| e.state == ES_WAIT && e.d - s.d < 25.0)
-            .map_or(0.0, |e| e.x.clamp(-4.0, 4.0));
-    }
-    want = want.clamp(-HALF + 0.8, HALF - 0.8);
-    // shells about to land, and the boss about to jump: where they catch the fewest
-    let jump = s.boss.landing().map(|(x, d)| (x, d, JUMP_R));
+    // shells about to land, and mechs and giants about to stamp: where they catch the fewest
+    let stamps = s.big.iter().filter_map(|b| b.landing());
     let hit = |x: f32| {
         s.shell[..s.nshell as usize]
             .iter()
             .filter(|h| h.t_max - h.t < 1.4)
             .map(|h| (h.x, h.d, h.r))
-            .chain(jump)
+            .chain(stamps.clone().map(|(x, d)| (x, d, STAMP_R)))
             .map(|(hx, hd, hr)| (hr + r - (x - hx).hypot(s.d - hd)).max(0.0))
             .sum::<f32>()
     };
-    // one look per threat: the first shell, or where the jump comes down
+    // one look per threat: the first shell, or where the first stamp comes down
     let threat = if s.nshell > 0 {
-        s.shell[0].x
+        Some(s.shell[0].x)
     } else {
-        (s.boss.td * 2.0).round()
+        stamps.clone().next().map(|(x, _)| (x * 4.0).round())
     };
-    let seen = hash01(threat, salt ^ 7) < sk.dodge;
-    if (s.nshell > 0 || jump.is_some()) && hit(want) > 0.0 && seen {
+    let seen = threat.is_some_and(|t| hash01(t, salt ^ 7) < sk.dodge);
+    if seen && hit(want) > 0.0 {
         let score = |x: f32| hit(x) * 10.0 + (x - s.cx).abs();
-        // weighing places across the pier a quarter metre apart
+        // weighing places across the pier a quarter metre apart, in the
+        // lane picked when a gate is close
         if let Some((x, _)) = (-36..=36)
             .map(|i| i as f32 * 0.25)
+            .filter(|&x| keep.is_none_or(|l| lane_of(x) == l))
             .map(|x| (x, score(x)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
         {
@@ -198,26 +167,39 @@ fn aim(p: &Combat, sk: &Skill, salt: u32) -> f32 {
     want
 }
 
+/// The nearest mech or giant up, if any.
+fn nearest_big(s: &Save) -> Option<&Big> {
+    s.big
+        .iter()
+        .filter(|b| b.up())
+        .min_by(|a, b| a.d.total_cmp(&b.d))
+}
+
+/// A mech or giant marching on the squad and nearly there.
+fn near_big(s: &Save) -> bool {
+    nearest_big(s).is_some_and(|b| b.d - s.d < 15.0)
+}
+
 fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
     let mut p = Combat::new();
     p.s.opt = [endless as i32, level];
     p.start(seed);
     let mut run = Run::default();
     let mut t = 0;
-    let mut boss_t = 0;
+    let mut big_t = 0;
     let mut cause = "";
     while (t as f32) < secs * 1000.0 {
         if t % sk.look < 20 {
             p.s.tx = aim(&p, sk, seed);
         }
-        let (before, phase) = (p.s.count, p.s.phase);
+        let (before, big) = (p.s.count, near_big(&p.s));
         let ev = p.update(&STEP);
         t += 20;
         if p.s.count < before {
             // what was near when soldiers were lost
             let s = &p.s;
-            cause = if phase == P_BOSS {
-                "boss"
+            cause = if big {
+                "big"
             } else if s
                 .enemies()
                 .iter()
@@ -236,19 +218,16 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
             assert!(kept.loaded(), "a save made in play fails loaded()");
         }
         run.peak = run.peak.max(p.s.count);
-        if p.s.phase == P_BOSS {
-            if boss_t == 0 {
-                run.at_boss = p.s.count;
+        if near_big(&p.s) {
+            if big_t == 0 {
+                run.at_big = p.s.count;
             }
-            boss_t += 20;
+            big_t += 20;
         }
         if ev & wg::EV_LEVEL != 0 {
-            run.boss_s = boss_t as f32 / 1000.0;
-            boss_t = 0;
-            if !endless {
-                run.won = true;
-                break;
-            }
+            run.big_s = big_t as f32 / 1000.0;
+            run.won = true;
+            break;
         }
         if ev & wg::EV_GAMEOVER != 0 {
             run.died = cause;
@@ -259,7 +238,7 @@ fn play(level: i32, endless: bool, sk: &Skill, seed: u32, secs: f32) -> Run {
     run.end = p.s.count;
     run.time_s = t as f32 / 1000.0;
     run.score = p.s.score;
-    run.bosses = p.s.bosses;
+    run.bigs = p.s.bigs;
     run
 }
 
@@ -284,12 +263,12 @@ fn levels() {
             cleared[n][level as usize] = won.len() as i32;
             let per = won.len().max(1) as i32;
             println!(
-                "  level {:2}: won {:2} of {}, {:4} at the boss, {:4.1}s on it, {:4} left{}",
+                "  level {:2}: won {:2} of {}, {:4} at the first big one, {:4.1}s near them, {:4} left{}",
                 level + 1,
                 won.len(),
                 runs.len(),
-                won.iter().map(|r| r.at_boss).sum::<i32>() / per,
-                won.iter().map(|r| r.boss_s).sum::<f32>() / per as f32,
+                won.iter().map(|r| r.at_big).sum::<i32>() / per,
+                won.iter().map(|r| r.big_s).sum::<f32>() / per as f32,
                 won.iter().map(|r| r.end).sum::<i32>() / per,
                 if lost.is_empty() {
                     String::new()
@@ -337,13 +316,13 @@ fn endless() {
             let r = play(0, true, &sk, seed, 3600.0);
             ended.push(r.time_s < 3600.0);
             line += &format!(
-                "  {:5.0} m {} bosses ({}, peak {})",
-                r.d, r.bosses, r.died, r.peak
+                "  {:5.0} m {} big ones ({}, peak {})",
+                r.d, r.bigs, r.died, r.peak
             );
             far.push(r.d);
         }
         println!("{line}");
-        // it ends: no run lasts an hour (a flawless one can last most of it), and a sharp player gets past a few bosses
+        // it ends: no run lasts an hour (a flawless one can last most of it), and a sharp player gets past a kilometre
         assert!(ended.iter().all(|&e| e), "{line}");
         if sk.name == "sharp" {
             assert!(far.iter().all(|&d| d > 1000.0), "{line}");
@@ -358,10 +337,10 @@ fn trace() {
     let level: i32 = std::env::var("BOT_LEVEL").map_or(1, |v| v.parse().unwrap()) - 1;
     let seed: u32 = std::env::var("BOT_SEED").map_or(1, |v| v.parse().unwrap());
     let endless = level < 0;
-    let sk = if std::env::var("BOT_SKILL").is_ok_and(|v| v == "casual") {
-        CASUAL
-    } else {
-        SHARP
+    let sk = match std::env::var("BOT_SKILL").as_deref() {
+        Ok("casual") => CASUAL,
+        Ok("good") => GOOD,
+        _ => SHARP,
     };
     let mut p = Combat::new();
     p.s.opt = [endless as i32, level.max(0)];
@@ -389,8 +368,9 @@ fn trace() {
                     )
                 })
                 .collect();
-            let en = s.enemies().iter().filter(|e| e.state != ES_DOWN).count();
-            println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} boss {}/{} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, s.boss.hp, s.boss.hp_max, near.join(" "));
+            let en = s.enemies().iter().filter(|e| e.up()).count();
+            let big = nearest_big(s).unwrap_or(&NO_BIG);
+            println!("{:5.1}s d {:5.1} ph {} n {:3} w {} cx {:5.2} tx {:5.2} en {:2} shells {} big {}/{} plan {:.0}/{} fire {:.2} | {}", t as f32 * 0.02, s.d, s.phase, s.count, s.weapon, s.cx, s.tx, en, s.nshell, big.hp, big.hp_max, s.expect, s.expect_gun, s.fire() / s.planned_fire(s.d), near.join(" "));
         }
         if ev & wg::EV_GAMEOVER != 0 || (ev & wg::EV_LEVEL != 0 && !endless) {
             println!("ev {ev}");
@@ -399,55 +379,8 @@ fn trace() {
     }
 }
 
-/// Damage a second a squad of n with gun puts into a barrel or crate across
-/// its way, as a share of squad_dps().
-fn aimed(n: i32, gun: i32, kind: i32) -> f32 {
-    const HP: i32 = 1_000_000;
-    let mut p = Combat::new();
-    p.start(1);
-    p.s.count = n;
-    p.s.weapon = gun;
-    p.fill_squad();
-    p.s.nen = 0;
-    p.s.nthing = 1;
-    // near the squad's edge, so only its fire turned that way reaches it,
-    // and the squad standing so nobody runs into it
-    p.s.thing[0] = Thing {
-        kind,
-        x: p.s.cx + radius(n) * 0.8,
-        d: p.s.d + 10.0,
-        hp: HP,
-        hp_max: HP,
-        ..NO_THING
-    };
-    p.s.speed = 0.0;
-    // two seconds, the first bullets' flight in them
-    for _ in 0..100 {
-        p.update(&STEP);
-    }
-    (HP - p.s.thing[0].hp) as f32 / (2.0 * squad_dps(n as f32, gun))
-}
-
-/// However big the squad and whatever its gun, a barrel or crate in its way
-/// takes about all of its fire.
-#[test]
-fn aimed_fire() {
-    for kind in [K_BARREL, K_CRATE] {
-        for gun in 0..WEAPONS.len() as i32 {
-            for n in [10, 30, 100, 200, 1000] {
-                let r = aimed(n, gun, kind);
-                assert!(
-                    (0.75..1.2).contains(&r),
-                    "{n} soldiers with gun {gun} put {r:.2} of the damage planned into a {}",
-                    if kind == K_CRATE { "crate" } else { "barrel" }
-                );
-            }
-        }
-    }
-}
-
-/// Each gun a crate hands out beats the one before at a barrel, crate, gate
-/// or boss, and at a crowd of grunts.
+/// Each gun a buff hands out beats the one before at a gate or mech, and at
+/// a crowd of grunts.
 #[test]
 fn guns_climb() {
     let crowd = |w: usize| {
@@ -458,4 +391,81 @@ fn guns_climb() {
         assert!(gun_dps(w as i32) >= gun_dps(w as i32 - 1) * 1.5, "gun {w}");
         assert!(crowd(w) > crowd(w - 1), "gun {w}");
     }
+}
+
+/// The squad takes the gate in its lane and passes the rest of the row by,
+/// and takes a buff it runs over but not one in another lane.
+#[test]
+fn lanes() {
+    let mut p = Combat::new();
+    p.s.opt = [0, 0];
+    p.start(1);
+    let d = p.s.d;
+    (p.s.nthing, p.s.nen) = (0, 0);
+    let gate = Thing {
+        kind: K_GATE,
+        d: d + 15.0,
+        w: LANE_W - 0.5,
+        b: 1,
+        hp: 1,
+        ..NO_THING
+    };
+    let buff = Thing {
+        kind: K_BUFF,
+        d: d + 30.0,
+        a: BUFF_MEN,
+        value: 7,
+        ..NO_THING
+    };
+    let things = [
+        Thing {
+            x: lane_x(0),
+            a: OP_ADD,
+            value: 5,
+            ..gate
+        },
+        Thing {
+            x: lane_x(1),
+            a: OP_MUL,
+            value: 3,
+            ..gate
+        },
+        Thing {
+            x: lane_x(2),
+            a: OP_DIV,
+            value: 2,
+            ..gate
+        },
+        Thing {
+            x: lane_x(0),
+            ..buff
+        },
+        Thing {
+            x: lane_x(2),
+            ..buff
+        },
+    ];
+    p.s.thing[..5].copy_from_slice(&things);
+    p.s.nthing = 5;
+    p.s.count = 20;
+    p.fill_squad();
+    let run_to = |p: &mut Combat, to: f32| {
+        while p.s.d < to {
+            p.s.tx = lane_x(2);
+            p.update(&STEP);
+        }
+    };
+    let states = |p: &Combat, kind: i32| -> Vec<i32> {
+        p.s.things()
+            .iter()
+            .filter(|t| t.kind == kind)
+            .map(|t| t.state)
+            .collect()
+    };
+    run_to(&mut p, d + 17.0);
+    assert_eq!(p.s.count, 10);
+    assert_eq!(states(&p, K_GATE), [2, 2, 1]);
+    run_to(&mut p, d + 36.0);
+    assert_eq!(p.s.count, 17);
+    assert_eq!(states(&p, K_BUFF), [2, 1]);
 }
