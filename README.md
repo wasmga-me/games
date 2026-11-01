@@ -1,8 +1,6 @@
 # wasmga.me games
 
-The games written for [wasmga.me](https://wasmga.me). Each one builds to a
-single `.wasm` file with no JavaScript glue; the site's play page draws the
-setup, pause and game over screens around it.
+Original WebAssembly games written for [wasmga.me](https://wasmga.me). Each title compiles to a standalone `.wasm` module with no JavaScript glue code; the site's play page renders the setup, pause, and game-over UI around the module.
 
 | Game | Play | Source | Written in |
 | --- | --- | --- | --- |
@@ -34,57 +32,28 @@ setup, pause and game over screens around it.
 | Updraft | [wasmga.me/games/updraft](https://wasmga.me/games/updraft) | [updraft/](updraft) | Rust |
 | Zork I, II and III (Infocom's) | [wasmga.me/games/zork1](https://wasmga.me/games/zork1) | [zmachine/](zmachine), [zork1/](zork1), [zork2/](zork2), [zork3/](zork3) | Rust |
 
-`branchwise/` links [libgit2](https://github.com/libgit2/libgit2) 1.9.1 (GPL-2.0
-with a linking exception), built for WebAssembly by `branchwise/libgit2/build.sh`,
-which fetches wasi-sdk and libgit2 and applies `wasi.diff`; each lesson runs real
-git on an in-memory file system. `node branchwise/tools/check.mjs` plays every
-lesson's solution.
+`branchwise/` links [libgit2](https://github.com/libgit2/libgit2) 1.9.1 (GPL-2.0 with linking exception), compiled to WebAssembly via `branchwise/libgit2/build.sh` (which downloads `wasi-sdk` and `libgit2` and applies `wasi.diff`); each puzzle runs real Git operations against an in-memory filesystem. Running `node branchwise/tools/check.mjs` verifies the solution for every lesson.
 
-`partial-combat/` is drawn in 3D: the module describes its scene each frame
-(`src/scene.rs`) and the play page draws it with WebGL2, with the module's
-framebuffer as the HUD over it. Its models and effect pictures come from CC0
-packs by [Quaternius](https://quaternius.com) and [Kenney](https://kenney.nl);
-`COMBAT_OUT=out node partial-combat/assets/pack.mjs` (after `npm install`
-there) downloads the packs and builds the `.glb` files and `fx.png` the game
-loads into `out/`. `cargo test --release -- --nocapture` in `partial-combat/` has bots play
-every level and the endless pier.
+`partial-combat/` uses hardware-accelerated 3D rendering: the Wasm module emits a scene description each frame (`src/scene.rs`), which the play page renders via WebGL2 while compositing the module's 2D framebuffer on top as a HUD. Its 3D models and particle textures come from CC0 asset packs by [Quaternius](https://quaternius.com) and [Kenney](https://kenney.nl); running `COMBAT_OUT=out node partial-combat/assets/pack.mjs` (after `npm install` in that folder) downloads the source packs and generates the `.glb` bundles and `fx.png` sprite sheet in `out/`. Running `cargo test --release -- --nocapture` inside `partial-combat/` simulates bot playthroughs across all campaign levels and endless mode.
 
-`greenside/` and `updraft/` each have a bot (`src/bot.rs`): `cargo test --release`
-checks that a sharp player makes every Greenside hole in par and that Updraft's
-way up stays open on every pace, `cargo run --release --example par` in
-`greenside/` prints how many strokes a sharp and a sloppy player take on each
-hole, and `cargo run --release --example climb` in `updraft/` how high the bot
-gets.
+`greenside/` and `updraft/` include automated test bots (`src/bot.rs`): `cargo test --release` verifies that a skilled bot clears every Greenside hole within par and that Updraft's generated platforms remain reachable across every difficulty pace. `cargo run --release --example par` in `greenside/` reports stroke counts per hole for skilled and imprecise bots, and `cargo run --release --example climb` in `updraft/` measures maximum bot altitude.
 
-`tilestack/art/riichi/` holds the tile pictures of FluffyStuff's
-[riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles)
-(public domain, CC0); the flowers, seasons and white dragon in
-`tilestack/art/extra/` are ours. `node tilestack/art/build.mjs` (needs sharp)
-renders them all into `tilestack/src/art.bin`, which the module embeds.
+`tilestack/art/riichi/` contains tile artwork from FluffyStuff's [riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles) (CC0 / public domain), supplemented by original flower, season, and white dragon tiles in `tilestack/art/extra/`. Running `node tilestack/art/build.mjs` (requires `sharp`) rasterizes the SVGs into `tilestack/src/art.bin`, which is embedded into the compiled binary.
 
-`boarding/` and `unpark/` draw art rendered from
-[Kenney](https://kenney.nl)'s CC0 3D models: each `art/jobs.py` lists the
-renders, made with `tools/render3d/` (see its README.md) into the game's
-`src/art.png`. `bankshot/`, `higher-floor/` and `hive-guard/` draw their own
-cartoons: each `art/draw.py` draws them with `tools/cartoon/` (see its
-README.md), packed the same way.
+`bankshot/`, `boarding/`, `higher-floor/`, `hive-guard/`, `pinwork/`, and `unpark/` use pre-rendered sprites generated from [Kenney](https://kenney.nl)'s CC0 3D kits: each game's `art/jobs.py` defines render jobs processed by `tools/render3d/` (see its `README.md`) to produce `src/art.png`.
 
 `pinwork/art/draw.py` draws Pinwork's knight, orc, chests and coins as SVG;
 `pinwork/art/build.sh` renders them with sharp and packs them into
 `pinwork/src/art.png` with `tools/render3d/pack.py`.
 
-`wgdemo/` is the smallest whole game on the Rust engine, to copy for a new one.
+`wgdemo/` is a minimal reference game built on the Rust engine, intended as a starter template for new titles.
 
-`zmachine/` is a Z-machine (version 3) on the Rust engine, which plays
-Infocom's story files; `zork1/`, `zork2/` and `zork3/` each build one into a
-module. `cargo test` in `zmachine/` plays the openings of all three.
+`zmachine/` implements a Z-machine (version 3) interpreter on the Rust engine for running Infocom story files; `zork1/`, `zork2/`, and `zork3/` each package a story file into a standalone module. Running `cargo test` in `zmachine/` tests the opening sequences of all three games.
 
 ## Engines
 
-- C games include the headers of [wasmgame-wg-c](https://github.com/wasmga-me/wasmgame-wg-c)
-  (`wg.h` describes every export the page reads). `wg-c.rev` pins its commit.
-- Rust games depend on [wasmgame-wg](https://github.com/wasmga-me/wasmgame-wg);
-  each game's `Cargo.lock` pins its commit.
+- C games compile against the freestanding headers in [wasmgame-wg-c](https://github.com/wasmga-me/wasmgame-wg-c) (`wg.h` defines the exported Wasm ABI consumed by the host page), pinned by commit hash in `wg-c.rev`.
+- Rust games depend on [wasmgame-wg](https://github.com/wasmga-me/wasmgame-wg), pinned per crate via `Cargo.lock`.
 
 ## Build
 
@@ -92,16 +61,8 @@ module. `cargo test` in `zmachine/` plays the openings of all three.
 sh build.sh
 ```
 
-Needs clang and wasm-ld with the wasm32 target (LLVM 15+) for the C games, and
-cargo with `rustup target add wasm32-unknown-unknown` for the Rust ones. The
-modules land in `out/<id>/<id>.wasm`.
+Building C games requires `clang` and `wasm-ld` with `wasm32` target support (LLVM 15+), and building Rust games requires Cargo with `rustup target add wasm32-unknown-unknown`. Compiled binaries are written to `out/<id>/<id>.wasm`.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). The text in every game is drawn from glyphs of
-[Inter](https://rsms.me/inter/), and its Chinese from glyphs of
-[Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) (the
-`.zh.h` and `zh_glyphs` files), both under the SIL Open Font License 1.1.
-The Zork story files (`zork1.z3`, `zork2.z3`, `zork3.z3`) are Infocom's,
-unchanged, from [historicalsource](https://github.com/historicalsource), where
-Microsoft published them under the MIT licence (`STORY-LICENSE` next to each).
+MIT; see [LICENSE](LICENSE). In-game Latin text is rendered from [Inter](https://rsms.me/inter/) glyphs and Simplified Chinese text from [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) glyphs (`.zh.h` and `zh_glyphs` files), both licensed under the SIL Open Font License 1.1. The Zork story files (`zork1.z3`, `zork2.z3`, `zork3.z3`) are unmodified Infocom originals from [historicalsource](https://github.com/historicalsource), released by Microsoft under the MIT License (see `STORY-LICENSE` in each game directory).

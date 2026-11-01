@@ -598,7 +598,7 @@ impl wg::Board for Offgrid {
         });
         out.push_str(", ");
         out.push_str(match self.s.board.blocked(x, y) {
-            None => tr(&["free", "可以飞出", "出口が空いている", "나갈 길 열림", "salida libre", "saída livre", "sortie libre", "Weg frei", "путь свободен", "可以飛出"]),
+            None => tr(&["clear path", "可以飞出", "出口が空いている", "나갈 길 열림", "salida libre", "saída livre", "sortie libre", "Weg frei", "путь свободен", "可以飛出"]),
             Some(_) => tr(&["blocked", "被挡住", "ふさがれている", "막힘", "bloqueada", "bloqueada", "bloquée", "blockiert", "заблокирована", "被擋住"]),
         });
     }
@@ -610,7 +610,7 @@ impl wg::Board for Offgrid {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move, Space sends the arrow off the board, I reads level, lives and arrows left.",
+            "Arrow keys move cursor, Space launches the selected arrow off the board, I announces the level, lives, and remaining arrows.",
             "方向键移动，空格让箭头飞出，I 读出关卡、生命和剩余箭头。",
             "矢印キーで移動、スペースで矢印を飛ばす、I でレベル、ライフ、残りの矢印。",
             "화살표로 이동, 스페이스로 화살표 보내기, I로 레벨, 목숨, 남은 화살표.",
@@ -636,13 +636,13 @@ impl wg::Board for Offgrid {
         let lives = self.s.lives;
         let ev = self.tap(x, y);
         said.push_str(if self.s.phase == CLEARED || self.s.phase == DONE {
-            tr(&["Level cleared! Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"])
+            tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"])
         } else if self.s.phase == LOST {
             tr(&["Blocked. Out of lives, game over.", "被挡住。生命用完，游戏结束。", "ぶつかった。ライフがなくなりゲームオーバー。", "막힘. 목숨이 없어 게임 오버.", "Bloqueada. Sin vidas, fin de la partida.", "Bloqueada. Sem vidas, fim de jogo.", "Bloquée. Plus de vies, partie terminée.", "Blockiert. Keine Leben mehr, Spiel vorbei.", "Заблокирована. Жизни кончились, игра окончена.", "被擋住。生命用完，遊戲結束。"])
         } else if self.s.lives < lives {
             tr(&["Blocked, one life lost.", "被挡住，失去一条生命。", "ぶつかった、ライフを1つ失った。", "막힘, 목숨 하나를 잃었습니다.", "Bloqueada, pierdes una vida.", "Bloqueada, perdeu uma vida.", "Bloquée, une vie perdue.", "Blockiert, ein Leben weg.", "Заблокирована, минус жизнь.", "被擋住，失去一條生命。"])
         } else if ev != 0 {
-            tr(&["Gone.", "飞出去了。", "飛んでいった。", "나갔습니다.", "Fuera.", "Saiu.", "Partie.", "Weg.", "Улетела.", "飛出去了。"])
+            tr(&["Cleared.", "飞出去了。", "飛んでいった。", "나갔습니다.", "Fuera.", "Saiu.", "Partie.", "Weg.", "Улетела.", "飛出去了。"])
         } else {
             ""
         });

@@ -11,7 +11,7 @@ mod art;
 mod glyphs;
 mod puzzle;
 
-use puzzle::{Bus, Lot, Way, DX, DY, LEVELS};
+use puzzle::{Bus, Lot, Way, BAYS, DX, DY, LEVELS};
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
@@ -22,8 +22,6 @@ const CLEARED: i32 = 1;
 const DONE: i32 = 2;
 /// every bay taken and nobody at the front of the queue fits
 const STUCK: i32 = 3;
-
-const BAYS: usize = 5;
 
 /// the board's tilt: the ground's depth shows at this fraction of its width
 const TILT: f32 = 0.848;
@@ -411,13 +409,8 @@ impl Boarding {
     }
     /// the bay with the fullest bus of colour c that has a seat left
     fn bay_for(&self, c: i8) -> Option<usize> {
-        (0..BAYS)
-            .filter(|&k| self.arrived(k))
-            .filter(|&k| {
-                let b = &self.s.lot.buses[self.s.bay_bus[k] as usize];
-                b.colour == c && (self.s.bay_fill[k] as i32) < b.seats()
-            })
-            .max_by_key(|&k| self.s.bay_fill[k])
+        let bays = (0..BAYS).filter(|&k| self.arrived(k)).map(|k| (k, self.s.bay_bus[k] as usize, self.s.bay_fill[k] as i32));
+        self.s.lot.bay_for(bays, c)
     }
 
     /// Full buses leave, the front passenger boards a bus of their colour,

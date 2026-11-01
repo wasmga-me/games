@@ -1,9 +1,9 @@
 //! Unpark - an original wasmga.me game. MIT licensed; the cars are Kenney's
 //! Car Kit (CC0), rendered by games-src/tools/render3d.
-//! A car park is packed with cars nose to tail. Tap a car to drive it the
-//! way it faces, or swipe it to back it out; with a clear road it drives
-//! out onto the ring road and away, otherwise it bumps into what is in its
-//! way. Empty the park to finish the level. 30 levels.
+//! A parking lot is packed with cars bumper to bumper. Tap a car to drive it
+//! forward, or swipe it backward to reverse; with a clear lane it pulls out
+//! onto the ring road and drives away, otherwise it bumps into whatever blocks
+//! its path. Clear the lot to finish the level. 30 levels.
 mod art;
 mod glyphs;
 mod puzzle;
@@ -1019,7 +1019,7 @@ impl wg::Board for Unpark {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move between squares, Space drives the car on that square the way it faces, X backs it up, I reads the level and cars left.",
+            "Arrow keys move between cells, Space drives the selected car forward, X reverses it, and I announces the current level and remaining cars.",
             "方向键在格子间移动，空格让该格的车向前开，X 让它倒车，I 读出关卡和剩余车辆。",
             "矢印でマスを移動、スペースでそのマスの車を前へ、X でバック、I でレベルと残りの車。",
             "화살표로 칸 이동, 스페이스로 그 칸의 차를 앞으로, X로 후진, I로 레벨과 남은 차.",
@@ -1057,9 +1057,9 @@ impl wg::Board for Unpark {
             }
             Way::Blocked { by, .. } => {
                 said.push_str(if by >= 0 {
-                    tr(&["Bumped into a car", "撞到了车", "車にぶつかった", "차에 부딪힘", "Chocó con un coche", "Bateu num carro", "Choc contre une voiture", "Gegen ein Auto gestoßen", "Врезалась в машину", "撞到了車"])
+                    tr(&["Bumped into another car", "撞到了车", "車にぶつかった", "차에 부딪힘", "Chocó con un coche", "Bateu num carro", "Choc contre une voiture", "Gegen ein Auto gestoßen", "Врезалась в машину", "撞到了車"])
                 } else {
-                    tr(&["Bumped into something", "撞到了障碍", "障害物にぶつかった", "장애물에 부딪힘", "Chocó con un obstáculo", "Bateu num obstáculo", "Choc contre un obstacle", "Gegen ein Hindernis gestoßen", "Врезалась в препятствие", "撞到了障礙"])
+                    tr(&["Bumped into an obstacle", "撞到了障碍", "障害物にぶつかった", "장애물에 부딪힘", "Chocó con un obstáculo", "Bateu num obstáculo", "Choc contre un obstacle", "Gegen ein Hindernis gestoßen", "Врезалась в препятствие", "撞到了障礙"])
                 });
             }
         }

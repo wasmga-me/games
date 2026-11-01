@@ -1028,7 +1028,7 @@ impl wg::Board for Decant {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows pick a tube, Space lifts it and then pours it into another, X undoes, I reads the level and moves. Tubes read from the bottom up.",
+            "Arrow keys select a tube, Space picks up or pours into another tube, X undoes, I announces the level and move count. Tube layers are read from bottom to top.",
             "方向键选试管，空格拿起，再按空格倒进另一支，X 撤销，I 读出关卡和步数。试管从下往上读。",
             "矢印で管を選び、スペースで持ち上げて別の管に注ぐ、X で戻す、I でレベルと手数。管は下から読み上げます。",
             "화살표로 관 선택, 스페이스로 들어 올려 다른 관에 붓기, X로 되돌리기, I로 레벨과 이동 수. 관은 아래부터 읽습니다.",
@@ -1072,15 +1072,15 @@ impl wg::Board for Decant {
             self.cell(to, 0, said);
             if self.s.stand.solved() {
                 said.push_str(". ");
-                said.push_str(tr(&["Level cleared! Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
+                said.push_str(tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
             } else if !self.s.stand.any_move() {
                 said.push_str(". ");
                 said.push_str(tr(&["No moves left", "无路可走", "注げる管がありません", "더 이상 부을 수 없습니다", "No quedan movimientos", "Sem jogadas", "Plus aucun coup", "Kein Zug mehr möglich", "Ходов нет", "無路可走"]));
             }
         } else if ev == wg::EV_HIT {
-            said.push_str(tr(&["Can't pour there", "倒不进去", "そこには注げません", "거기에는 부을 수 없습니다", "No se puede verter ahí", "Não dá para despejar aí", "Impossible de verser ici", "Da passt es nicht hinein", "Туда нельзя перелить", "倒不進去"]));
+            said.push_str(tr(&["Cannot pour into that tube", "倒不进去", "そこには注げません", "거기에는 부을 수 없습니다", "No se puede verter ahí", "Não dá para despejar aí", "Impossible de verser ici", "Da passt es nicht hinein", "Туда нельзя перелить", "倒不進去"]));
         } else if sel >= 0 && self.s.sel < 0 {
-            said.push_str(tr(&["Put down", "放下", "置いた", "내려놓음", "Dejado", "Colocado", "Reposé", "Abgestellt", "Поставлена", "放下"]));
+            said.push_str(tr(&["Set down", "放下", "置いた", "내려놓음", "Dejado", "Colocado", "Reposé", "Abgestellt", "Поставлена", "放下"]));
         } else {
             self.cell(x, 0, said);
         }

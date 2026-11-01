@@ -20,10 +20,14 @@ pub const GUN_UP: f32 = 21.0;
 /// how far a shot goes, and how many times it may bounce
 const REACH: f32 = 1600.0;
 pub const BOUNCES: usize = 6;
-/// the solver's aim steps, and how many steps in a row must agree for a
-/// shot to count (so no level hangs on a hair)
+/// the solver's aim steps
 pub const ANGLES: usize = 1440;
-const WINDOW: usize = 3;
+
+/// The aim steps in a row each shot a level needs must allow: 3 degrees
+/// at first, 1.5 at the end, so a level asks for thought, not a steady hand.
+pub fn window(level: i32) -> usize {
+    12 - (6 * level / (LEVELS - 1)) as usize
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -298,17 +302,17 @@ impl Room {
     }
 
     /// The foes the shot at aim step k hits, as bits, if it hits some,
-    /// spares the hostages and the agent and hits the same for WINDOW aim steps in a row.
-    fn steady(survey: &[(u32, bool)], k: usize) -> Option<u32> {
+    /// spares the hostages and the agent and hits the same for `w` aim steps in a row.
+    fn steady(survey: &[(u32, bool)], k: usize, w: usize) -> Option<u32> {
         let n = survey.len();
         let m = survey[k].0;
-        (m != 0 && (0..WINDOW).all(|j| survey[(k + j) % n] == (m, false))).then_some(m)
+        (m != 0 && (0..w).all(|j| survey[(k + j) % n] == (m, false))).then_some(m)
     }
 
-    /// The steady shots: their foe bits.
-    fn good_shots(survey: &[(u32, bool)]) -> Vec<u32> {
+    /// The shots steady over `w` aim steps: their foe bits.
+    fn good_shots(survey: &[(u32, bool)], w: usize) -> Vec<u32> {
         let mut out = Vec::new();
-        for m in (0..survey.len()).filter_map(|k| Room::steady(survey, k)) {
+        for m in (0..survey.len()).filter_map(|k| Room::steady(survey, k, w)) {
             if !out.contains(&m) {
                 out.push(m);
             }
@@ -319,14 +323,14 @@ impl Room {
     /// An aim on a way to down every foe in the fewest shots, safely and
     /// within a window of aim steps, as the dealer counted.
     #[cfg(test)]
-    pub fn best_shot(&self, down: u32) -> Option<f32> {
+    pub fn best_shot(&self, down: u32, w: usize) -> Option<f32> {
         let (survey, _) = self.survey();
-        let good = Room::good_shots(&survey);
+        let good = Room::good_shots(&survey, w);
         (0..survey.len())
-            .filter_map(|k| Room::steady(&survey, k).filter(|m| m & !down != 0).map(|m| (m, k)))
+            .filter_map(|k| Room::steady(&survey, k, w).filter(|m| m & !down != 0).map(|m| (m, k)))
             .filter_map(|(m, k)| Room::shots_needed(&good, self.all_foes(), down | m).map(|left| (left, k)))
             .min()
-            .map(|(_, k)| Room::step_angle(k + WINDOW / 2))
+            .map(|(_, k)| Room::step_angle(k + w / 2))
     }
 
     /// How few shots clear the room from foes `down` (as bits), using
@@ -355,7 +359,7 @@ pub fn level(level: i32) -> Room {
     let want = 0.15 - 0.12 * level as f32 / (LEVELS - 1) as f32;
     let mut best: Option<(f32, Room)> = None;
     let (mut tries, mut dealt) = (0, 0);
-    while tries < 2000 && dealt < 16 {
+    while tries < 2000 && dealt < 8 {
         tries += 1;
         let Some(mut room) = build(&mut rng, foes, hostages) else { continue };
         let (survey, direct) = room.survey();
@@ -366,7 +370,7 @@ pub fn level(level: i32) -> Room {
         if hidden < 1 + (level >= 10 && foes >= 2) as u32 {
             continue;
         }
-        let good = Room::good_shots(&survey);
+        let good = Room::good_shots(&survey, window(level));
         let Some(need) = Room::shots_needed(&good, all, 0) else { continue };
         room.shots = need + (level < 15) as i32;
         dealt += 1;
@@ -504,7 +508,7 @@ mod tests {
             let room = level(l);
             let (survey, direct) = room.survey();
             let all = room.all_foes();
-            let need = Room::shots_needed(&Room::good_shots(&survey), all, 0).expect("unclearable");
+            let need = Room::shots_needed(&Room::good_shots(&survey, window(l)), all, 0).expect("unclearable");
             assert!(need <= room.shots, "level {}", l + 1);
             assert!(all & !direct != 0, "level {}: every foe in plain sight", l + 1);
             let safe = survey.iter().filter(|&&(m, h)| m != 0 && !h).count();

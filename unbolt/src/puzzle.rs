@@ -233,9 +233,10 @@ impl Level {
 
 /// the level's size: layers, plates and colours grow over the 30
 fn shape(level: i32) -> (u8, usize, u8) {
-    let layers = 2 + (level * 4 + 14) / (LEVELS - 1);
-    let plates = 3 + (level * 13 + 14) / (LEVELS - 1);
-    let colours = 3 + (level * 4 + 14) / (LEVELS - 1);
+    // at most six, one plate colour each
+    let layers = 3 + (level * 3 + 14) / (LEVELS - 1);
+    let plates = 6 + (level * 12 + 14) / (LEVELS - 1);
+    let colours = 5 + (level * 2 + 14) / (LEVELS - 1);
     (layers as u8, plates as usize, colours as u8)
 }
 
@@ -244,8 +245,70 @@ fn shape(level: i32) -> (u8, usize, u8) {
 /// colours are handed out along it with a little shuffling, so that order
 /// always works with the spare holes.
 pub fn deal(level: i32) -> Level {
-    let (layers, want, colours) = shape(level);
+    // a retry deals the same level again: keep the last one
+    thread_local!(static LAST: std::cell::Cell<Option<(i32, Level)>> = const { std::cell::Cell::new(None) });
+    if let Some((l, lv)) = LAST.get() {
+        if l == level {
+            return lv;
+        }
+    }
+    let lv = choose(level);
+    LAST.set(Some((level, lv)));
+    lv
+}
+
+fn choose(level: i32) -> Level {
     let mut rng = Rng::new(0x5343_5257 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
+    // deals until a hasty player, taking whatever a box wants and any
+    // screw otherwise, loses close to this share of the time: now and then
+    // at first, mostly at the end (the best found if none comes close)
+    let want = TRIALS as f32 * (0.15 + 0.5 * level as f32 / (LEVELS - 1) as f32);
+    let mut best: Option<(f32, Level)> = None;
+    for _ in 0..DEALS {
+        let lv = candidate(level, &mut rng);
+        let lost = (0..TRIALS).filter(|_| !hasty(&lv, &mut rng)).count();
+        let off = (lost as f32 - want).abs();
+        if best.as_ref().is_none_or(|b| off < b.0) {
+            best = Some((off, lv));
+        }
+        if off < TRIALS as f32 * 0.15 {
+            break;
+        }
+    }
+    best.unwrap().1
+}
+
+const DEALS: usize = 60;
+const TRIALS: usize = 32;
+
+/// A hasty player: a screw a box wants if there is one, else any screw
+/// that can go. Whether that clears the level.
+fn hasty(lv: &Level, rng: &mut Rng) -> bool {
+    let mut g = *lv;
+    // the screws that can go, those a box wants first
+    let (mut wanted, mut any) = ([0usize; MAXS], [0usize; MAXS]);
+    while !g.cleared() {
+        let (mut nw, mut na) = (0, 0);
+        for i in (0..g.screws as usize).filter(|&i| g.takes(i)) {
+            if g.box_for(g.screw[i].colour).is_some() {
+                wanted[nw] = i;
+                nw += 1;
+            }
+            any[na] = i;
+            na += 1;
+        }
+        let pick = if nw > 0 { &wanted[..nw] } else { &any[..na] };
+        if pick.is_empty() {
+            return false;
+        }
+        g.tap(pick[rng.below(pick.len() as u32) as usize]);
+    }
+    true
+}
+
+/// One deal: plates layer by layer, then colours along a way off that works.
+fn candidate(level: i32, rng: &mut Rng) -> Level {
+    let (layers, want, colours) = shape(level);
     loop {
         let mut lv = Level::empty();
         let mut placed = 0;
@@ -277,7 +340,8 @@ pub fn deal(level: i32) -> Level {
                         seg_dist(x, y, q) > PLATE_R as f32 * 2.2
                     })
                 });
-                if !apart || !clear {
+                // and every hole gets its screw
+                if !apart || !clear || lv.screws as usize + holes.len() > MAXS {
                     continue;
                 }
                 // over as many screws below as it can
@@ -343,7 +407,7 @@ pub fn deal(level: i32) -> Level {
             order.push(i);
         }
         // the colours along that order, shuffled within a window
-        let window = 2 + (level as u32) / 3;
+        let window = 8 + (level as u32) / 2;
         for _ in 0..40 {
             let mut seq: Vec<u8> = lv.colour[..nb].iter().flat_map(|&c| [c, c, c]).collect();
             for k in 0..seq.len() {
@@ -365,25 +429,6 @@ pub fn deal(level: i32) -> Level {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// greedy play: a screw a box wants first, then the one that frees most
-    pub fn greedy(lv: &Level) -> bool {
-        let mut g = *lv;
-        while !g.cleared() {
-            let n = g.screws as usize;
-            let pick = (0..n).filter(|&i| g.takes(i)).max_by_key(|&i| {
-                let wanted = g.box_for(g.screw[i].colour).is_some() as i32;
-                wanted * 100 - i as i32
-            });
-            match pick {
-                Some(i) => {
-                    g.tap(i);
-                }
-                None => return false,
-            }
-        }
-        true
-    }
 
     /// four spare screws of one colour and a box of it: three fill it, the
     /// fourth waits for its own box, not the one that comes next
@@ -420,7 +465,20 @@ mod tests {
             let lv = deal(l);
             assert!(lv.valid(), "level {}", l + 1);
             let (layers, _, colours) = shape(l);
-            println!("level {} layers {} colours {} plates {} screws {} greedy {}", l + 1, layers, colours, lv.plates, lv.screws, greedy(&lv));
+            println!("level {} layers {} colours {} plates {} screws {}", l + 1, layers, colours, lv.plates, lv.screws);
+        }
+    }
+
+    /// no level is safe to play without looking
+    #[test]
+    fn hasty_play_can_lose() {
+        let mut rng = Rng::new(5);
+        for l in 0..LEVELS {
+            let lv = deal(l);
+            const N: usize = 400;
+            let lost = (0..N).filter(|_| !hasty(&lv, &mut rng)).count();
+            println!("level {} hasty play loses {:.0}%", l + 1, 100.0 * lost as f32 / N as f32);
+            assert!(lost > 0, "level {}", l + 1);
         }
     }
 }

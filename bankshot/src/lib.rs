@@ -12,7 +12,8 @@ use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen};
 
 /// 2: levels dealt again when shots coming back at the agent began to count
-const VERSION: u32 = 2;
+/// 3: dealt again so every level's shots allow a wider aim
+const VERSION: u32 = 3;
 
 const AIM: i32 = 0;
 /// a shot on its way
@@ -32,7 +33,7 @@ const TURN: f32 = 1.1;
 /// plan units to a model unit for people and crates
 const PERSON_U: f32 = 58.0;
 /// how far past the first bounce the aim line shows
-const PEEK: f32 = 46.0;
+const PEEK: f32 = 70.0;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -697,7 +698,7 @@ mod tests {
         for level in 0..LEVELS {
             assert_eq!((g.s.level, g.s.phase), (level, AIM));
             while g.s.phase == AIM {
-                let a = g.room.best_shot(g.s.down).expect("no shot");
+                let a = g.room.best_shot(g.s.down, room::window(level)).expect("no shot");
                 g.aim_at(a);
                 assert_eq!(g.fire(), wg::EV_BLIP);
                 run(&mut g, 3000);

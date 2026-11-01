@@ -425,7 +425,7 @@ impl Branchwise {
                 return;
             }
             "help" | "?" => {
-                self.say(OUT_HELP, "Type git commands, such as git status or git log; git help lists them all. Also: hint, solution, undo, clear.");
+                self.say(OUT_HELP, "Type git commands such as git status or git log; git help lists all supported commands. Built-in helpers: hint, solution, undo, clear.");
                 return;
             }
             _ => {}
@@ -497,7 +497,7 @@ impl Branchwise {
             13 => self.finish_todo(),
             8 | 27 | 0x71 => {
                 self.world.todo = None;
-                self.say(HINT, "Rebase stopped; nothing changed.");
+                self.say(HINT, "Rebase aborted; nothing changed.");
             }
             0x70 | 0x73 | 0x66 | 0x64 | 0x72 => {
                 let act = if code == 0x72 { b'p' } else { code as u8 };

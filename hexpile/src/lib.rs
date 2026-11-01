@@ -803,7 +803,7 @@ impl wg::Board for Hexpile {
             stack_words(&self.s.tray[k][..h], out);
             if self.s.pick == k as i32 {
                 out.push_str(", ");
-                out.push_str(tr(&["picked", "已选", "選択中", "선택됨", "elegida", "escolhida", "choisie", "gewählt", "выбрана", "已選"]));
+                out.push_str(tr(&["selected", "已选", "選択中", "선택됨", "elegida", "escolhida", "choisie", "gewählt", "выбрана", "已選"]));
             }
             return;
         }
@@ -835,7 +835,7 @@ impl wg::Board for Hexpile {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move over the board and the next stacks, Space picks a next stack or drops the picked one on a cell, X picks the next one, I reads the score and the picked stack. Stacks read from the top; ten of one colour together clear.",
+            "Arrow keys move across the board and available stacks, Space selects a stack or places it on a cell, X cycles stacks, I announces the score and selected stack. Stacks are read from top to bottom; ten matching tiles clear.",
             "方向键在棋盘和待放堆之间移动，空格选择待放堆或把选中的堆放到格子上，X 换下一堆，I 读出得分和选中的堆。堆从上往下读；同色十片连在一起就消除。",
             "矢印で盤と次の山を移動、スペースで山を選ぶか選んだ山をマスに置く、X で次の山、I でスコアと選んだ山。山は上から読み上げます。同じ色が10枚そろうと消えます。",
             "화살표로 판과 다음 더미 사이 이동, 스페이스로 더미 선택 또는 선택한 더미를 칸에 놓기, X로 다음 더미, I로 점수와 선택한 더미. 더미는 위부터 읽습니다. 같은 색 10장이 모이면 사라집니다.",

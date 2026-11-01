@@ -1,40 +1,22 @@
-# render3d: 3D models into sprite sheets
+# render3d: offline 3D-to-sprite-sheet pipeline
 
-Some of our games draw art rendered from free 3D models (Kenney's kits,
-CC0) instead of shapes. The models are rendered once here, in headless
-Chromium with three.js, and only the packed PNG sheet goes into the game.
+Several native games use pre-rendered 2D sprites generated from CC0 3D models (Kenney asset kits) rather than procedural vector shapes. Models are rendered offline once using Three.js inside headless Chromium, and only the packed PNG sprite sheet is embedded into the final game binary.
 
 ```sh
-npm install                      # three.js, once
-sh fetch.sh car-kit nature-kit   # Kenney packs into models/ (not committed)
-python3 ../../<game>/art/jobs.py # from the game's art/ folder: writes jobs.json
+npm install                      # install three.js (once)
+sh fetch.sh car-kit nature-kit   # download Kenney packs into models/ (gitignored)
+python3 ../../<game>/art/jobs.py # run from the game's art/ pipeline to emit jobs.json
 node render.mjs ../../<game>/art/jobs.json /tmp/<game>
 python3 pack.py ../../<game>/art/jobs.json /tmp/<game> ../../<game>/src/art.png ../../<game>/src/art.rs --colours 256
 ```
 
-`node render.mjs --bbox MODEL` and `--anims MODEL` print a model's bounds
-and its animations. render.mjs needs Playwright's Chromium (the one in
-/opt/pw-browsers when present).
+`node render.mjs --bbox MODEL` and `--anims MODEL` inspect a model's bounding box and available animation clips. `render.mjs` requires Playwright's Chromium binary (automatically using `/opt/pw-browsers` when present).
 
-A job renders one PNG, `name`.png:
+Each job entry renders a single `<name>.png` image:
 
-- `parts`: models, each `{url, scale, pos, rot, colors, anim, t}`; `url` is
-  under `models/`, `colors` maps a material name or `#rrggbb` to a new
-  colour, `anim` and `t` pose a rigged model at time `t` of that animation.
-  `texture` swaps a textured model's texture for another (`jobs/...` is
-  next to the jobs file). `hold: [k, node]` puts the part in node `node`
-  (such as `arm-right`) of part k, so it moves with that arm's pose.
-  `{bus: "#rrggbb", len, wheel}` builds a low-poly bus in the Car Kit's
-  style, `{hive: true}` a straw beehive.
-- `turn`: degrees about the up axis (the models' fronts face +z, toward the
-  camera at `yaw` 0).
-- `pitch`, `yaw`: the camera's angle down from level and round from +z;
-  orthographic, `ppu` pixels per model unit, `w` x `h` pixels, centred on
-  `center` (the origin by default).
-- `shadow: false` leaves out the shadow cast on the ground;
-  `shadowOpacity`, `hemi`, `sun`, `sunPos` tune the light.
+- `parts`: array of model instances `{url, scale, pos, rot, colors, anim, t}`, where `url` is relative to `models/`, `colors` remaps material names or `#rrggbb` hex values to replacement colors, and `anim` + `t` sample a skeletal animation at timestamp `t`. `texture` overrides a textured mesh's diffuse map (`jobs/...` resolves relative to the jobs file). `hold: [k, node]` parents the part to bone/node `node` (e.g., `arm-right`) on part `k` so it follows that limb's pose. Procedural helpers `{bus: "#rrggbb", len, wheel}` and `{hive: true}` generate a Car Kit–style low-poly bus and a straw beehive, respectively.
+- `turn`: rotation in degrees around the vertical Y axis (models face `+Z` by default, pointing toward the camera at `yaw` 0).
+- `pitch`, `yaw`: orthographic camera elevation angle downward from the horizon and azimuth angle around `+Z`, rendered at `ppu` pixels per model unit inside a `w` × `h` viewport centered on `center` (defaults to the origin).
+- `shadow: false` disables the ground contact shadow; `shadowOpacity`, `hemi`, `sun`, and `sunPos` configure lighting and shadow intensity.
 
-pack.py crops each render to what it draws, packs them into one sheet and
-writes `art.rs`: the sheet's bytes, each sprite's box, where the model's
-origin lands in it and its pixels per unit, and a constant per job name.
-The game loads it with `wg::Image::png(art::SHEET)` and `crop`s each sprite.
+`pack.py` trims transparent padding from each rendered frame, packs all sprites into a single atlas, and generates `art.rs` containing the embedded PNG bytes, bounding rectangles, projected model-origin anchor coordinates, pixels-per-unit scale factors, and an index constant for each job name. Games decode the atlas at startup via `wg::Image::png(art::SHEET)` and slice individual sprites with `crop`.

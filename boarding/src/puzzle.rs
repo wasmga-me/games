@@ -12,6 +12,8 @@ pub const MAXBUSES: usize = 24;
 pub const MAXQ: usize = MAXBUSES * 6;
 /// the colours: red, orange, yellow, green, blue, purple
 pub const COLOURS: i8 = 6;
+/// bays at the stop
+pub const BAYS: usize = 5;
 
 /// Facing: up, right, down, left the screen.
 pub const DX: [i32; 4] = [0, 1, 0, -1];
@@ -106,6 +108,15 @@ impl Lot {
             gap += 1;
         }
     }
+    /// whether bus i is still in the depot with a clear road out
+    pub fn leavable(&self, i: usize) -> bool {
+        self.buses[i].out == 0 && self.way(i) == Way::Out
+    }
+    /// Of the bays, as (bay, bus, passengers on it), the one a passenger
+    /// of colour c boards: the fullest bus of that colour with a seat left.
+    pub fn bay_for(&self, bays: impl Iterator<Item = (usize, usize, i32)>, c: i8) -> Option<usize> {
+        bays.filter(|&(_, i, f)| self.buses[i].colour == c && f < self.buses[i].seats()).max_by_key(|&(_, _, f)| f).map(|(k, _, _)| k)
+    }
     pub fn left(&self) -> i32 {
         self.buses[..self.n as usize].iter().filter(|b| b.out == 0).count() as i32
     }
@@ -149,37 +160,85 @@ impl Lot {
 /// how many buses' passengers wait mixed together
 fn shape(level: i32) -> (i32, i32, f32, i8, bool, usize) {
     let l = level;
-    let w = (4 + l / 10).min(MAXW as i32);
-    let h = (4 + (l + 5) / 10).min(MAXH as i32);
-    let fill = (0.6 + 0.01 * l as f32).min(0.82);
-    let colours = (3 + l / 6).min(COLOURS as i32) as i8;
-    let mixed = if l < 4 { 2 } else if l < 14 { 3 } else { 4 };
+    let w = (5 + l / 12).min(MAXW as i32);
+    let h = (5 + (l + 6) / 12).min(MAXH as i32);
+    let fill = (0.62 + 0.01 * l as f32).min(0.82);
+    let colours = (4 + l / 8).min(COLOURS as i32) as i8;
+    let mixed = if l < 10 { 3 } else { 4 };
     (w, h, fill, colours, l >= 2, mixed)
 }
 
 /// Deals a level. The same level always deals the same depot and queue.
 pub fn deal(level: i32) -> Lot {
-    deal_order(level).0
+    // a retry deals the same level again: keep the last one
+    thread_local!(static LAST: std::cell::Cell<Option<(i32, Lot)>> = const { std::cell::Cell::new(None) });
+    if let Some((l, lot)) = LAST.get() {
+        if l == level {
+            return lot;
+        }
+    }
+    let lot = deal_order(level).0;
+    LAST.set(Some((level, lot)));
+    lot
 }
 
 /// A level, and the order of sending its buses that its queue was made for.
 pub fn deal_order(level: i32) -> (Lot, Vec<usize>) {
     let (w, h, fill, colours, buses, mixed) = shape(level);
     let mut rng = Rng::new(0xB05 + level as u32 * 7919);
-    let mut best: Option<(i32, Lot)> = None;
-    for _ in 0..24 {
-        let lot = park(&mut rng, w, h, fill, colours, buses);
-        // the fuller the better, and the fewer free from the start
-        let free = (0..lot.n as usize).filter(|&i| lot.way(i) == Way::Out).count() as i32;
-        let cover: i32 = lot.buses[..lot.n as usize].iter().map(|b| b.len as i32).sum();
-        let mark = cover * 4 - free * 3;
-        if best.as_ref().is_none_or(|b| mark > b.0) {
-            best = Some((mark, lot));
+    // the share of tries that a hasty player, sending any bus that can
+    // leave, should lose: now and then at first, mostly at the end
+    let want = TRIALS as f32 * (0.2 + 0.75 * level as f32 / (LEVELS - 1) as f32);
+    let mut best: Option<(f32, Lot, Vec<usize>)> = None;
+    for _ in 0..DEALS {
+        let mut lot = park(&mut rng, w, h, fill, colours, buses);
+        let order = queue(&mut rng, &mut lot, mixed);
+        let lost = (0..TRIALS).filter(|_| !hasty(&lot, &mut rng)).count();
+        let off = (lost as f32 - want).abs();
+        if best.as_ref().is_none_or(|b| off < b.0) {
+            best = Some((off, lot, order));
         }
     }
-    let mut lot = best.unwrap().1;
-    let order = queue(&mut rng, &mut lot, mixed);
+    let (_, lot, order) = best.unwrap();
     (lot, order)
+}
+
+const DEALS: usize = 24;
+const TRIALS: usize = 32;
+
+/// A hasty player: any bus that can leave, whenever a bay is free, and
+/// everyone who can board does before the next. Whether the queue empties.
+fn hasty(lot: &Lot, rng: &mut Rng) -> bool {
+    let mut g = *lot;
+    let mut bays: [Option<(usize, i32)>; BAYS] = [None; BAYS];
+    let mut head = 0;
+    loop {
+        while head < g.qn as usize {
+            let open = bays.iter().enumerate().filter_map(|(k, b)| b.map(|(i, f)| (k, i, f)));
+            let Some(k) = g.bay_for(open, g.queue[head]) else {
+                break;
+            };
+            let (i, f) = bays[k].as_mut().unwrap();
+            *f += 1;
+            if *f == g.buses[*i].seats() {
+                bays[k] = None;
+            }
+            head += 1;
+        }
+        if head == g.qn as usize {
+            return true;
+        }
+        let Some(k) = (0..BAYS).find(|&k| bays[k].is_none()) else {
+            return false;
+        };
+        let free: Vec<usize> = (0..g.n as usize).filter(|&i| g.leavable(i)).collect();
+        if free.is_empty() {
+            return false;
+        }
+        let i = free[rng.below(free.len() as u32) as usize];
+        g.buses[i].out = 1;
+        bays[k] = Some((i, 0));
+    }
 }
 
 fn park(rng: &mut Rng, w: i32, h: i32, fill: f32, colours: i8, buses: bool) -> Lot {
@@ -225,7 +284,7 @@ fn queue(rng: &mut Rng, lot: &mut Lot, mixed: usize) -> Vec<usize> {
     let mut order = Vec::new();
     let mut gone = *lot;
     loop {
-        let free: Vec<usize> = (0..gone.n as usize).filter(|&i| gone.buses[i].out == 0 && gone.way(i) == Way::Out).collect();
+        let free: Vec<usize> = (0..gone.n as usize).filter(|&i| gone.leavable(i)).collect();
         if free.is_empty() {
             break;
         }
@@ -265,12 +324,16 @@ mod tests {
             let lot = deal(level);
             assert!(lot.valid(), "level {level} invalid");
             let mut gone = lot;
-            while let Some(i) = (0..gone.n as usize).find(|&i| gone.buses[i].out == 0 && gone.way(i) == Way::Out) {
+            while let Some(i) = (0..gone.n as usize).find(|&i| gone.leavable(i)) {
                 gone.buses[i].out = 1;
             }
             assert_eq!(gone.left(), 0, "level {level} stuck");
             let free = (0..lot.n as usize).filter(|&i| lot.way(i) == Way::Out).count();
-            println!("level {:2}: {}x{} buses {:2} free {:2} queue {}", level + 1, lot.w, lot.h, lot.n, free, lot.qn);
+            let mut rng = Rng::new(5);
+            const N: usize = 400;
+            let lost = (0..N).filter(|_| !hasty(&lot, &mut rng)).count();
+            println!("level {:2}: {}x{} buses {:2} free {:2} queue {} hasty play loses {:.0}%", level + 1, lot.w, lot.h, lot.n, free, lot.qn, 100.0 * lost as f32 / N as f32);
+            assert!(lost > 0, "level {} can't be lost", level + 1);
         }
     }
 }
