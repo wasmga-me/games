@@ -123,9 +123,7 @@ impl Tower {
         }
         let (f, c) = self.place(r);
         f == 0
-            || [(f - 1, c), (f + 1, c), (f, c - 1), (f, c + 1)]
-                .iter()
-                .any(|&(g, d)| g >= 0 && g < self.floors && d >= 0 && d < self.cols && taken & 1 << (g * self.cols + d) != 0)
+            || [(f - 1, c), (f + 1, c), (f, c - 1), (f, c + 1)].iter().any(|&(g, d)| g >= 0 && g < self.floors && d >= 0 && d < self.cols && taken & 1 << (g * self.cols + d) != 0)
     }
     /// the rooms not yet taken
     pub fn left(&self, taken: u32) -> usize {
@@ -146,9 +144,7 @@ impl Tower {
         (1..=MAXCOLS as i32).contains(&self.cols)
             && (1..=MAXFLOORS as i32).contains(&self.floors)
             && self.start > 0
-            && self.rooms[..self.n()]
-                .iter()
-                .all(|r| (EMPTY..=KEY).contains(&r.kind) && (0..LOOKS).contains(&r.look) && r.val >= 0 && r.grow >= 0 && (0..=1).contains(&r.locked))
+            && self.rooms[..self.n()].iter().all(|r| (EMPTY..=KEY).contains(&r.kind) && (0..LOOKS).contains(&r.look) && r.val >= 0 && r.grow >= 0 && (0..=1).contains(&r.locked))
     }
 
     /// The chance a careful climb wins: one that picks at random among the
@@ -183,12 +179,12 @@ impl Tower {
 /// The rooms besides monsters a tower can hold, each from the level (from
 /// 0) it joins at; a kind listed twice can come twice from the later level.
 const ITEMS: [(i8, i32); 12] =
-    [(TRAP, 0), (POTION, 1), (CHEST, 2), (POISON, 4), (BRUTE, 6), (KEY, 9), (TRAP, 12), (POTION, 14), (BRUTE, 16), (CHEST, 18), (POISON, 21), (TRAP, 24)];
+    [(POTION, 4), (CHEST, 6), (TRAP, 10), (POISON, 14), (BRUTE, 18), (KEY, 22), (POTION, 24), (TRAP, 25), (BRUTE, 26), (CHEST, 27), (POISON, 28), (TRAP, 29)];
 
 /// A tower's floors at difficulty `d` (the level from 0, going on past the
 /// last level in endless mode): a floor more about every seven levels.
 fn floors(d: i32) -> i32 {
-    (2 + d * 4 / 26).min(MAXFLOORS as i32)
+    (2 + d / 6).min(MAXFLOORS as i32)
 }
 
 /// What fills a tower's rooms besides monsters, at most `room`: always the
@@ -196,6 +192,9 @@ fn floors(d: i32) -> i32 {
 fn items(rng: &mut Rng, d: i32, room: usize) -> Vec<i8> {
     let mut can: Vec<(i8, i32)> = ITEMS.iter().copied().filter(|&(_, at)| at <= d).collect();
     // ITEMS is in joining order, so the newest is last
+    if can.is_empty() {
+        return Vec::new();
+    }
     let newest = can.len() - 1;
     can.swap(0, newest);
     rng.shuffle(&mut can[1..]);
@@ -210,8 +209,30 @@ fn careful_wins(d: i32) -> f32 {
 }
 
 /// Deals a level: the same level always deals the same tower.
-pub fn deal(level: i32) -> Tower {
+#[cfg(test)]
+fn generate(level: i32) -> Tower {
+    if level < 6 {
+        // Bottom left/right then upper left/boss. Choosing the larger
+        // ground-floor enemy too soon loses; ties are introduced in level 2.
+        let (start, rooms) = [
+            (5, [(MONSTER, 2), (MONSTER, 6), (MONSTER, 4), (MONSTER, 12)]),
+            (6, [(MONSTER, 6), (MONSTER, 3), (MONSTER, 8), (MONSTER, 18)]),
+            (8, [(MONSTER, 4), (MONSTER, 10), (MONSTER, 13), (MONSTER, 28)]),
+            (7, [(MONSTER, 9), (MONSTER, 5), (MONSTER, 18), (MONSTER, 32)]),
+            (5, [(POTION, 4), (MONSTER, 8), (MONSTER, 12), (MONSTER, 24)]),
+            (6, [(MONSTER, 9), (POTION, 5), (MONSTER, 17), (MONSTER, 30)]),
+        ][level as usize];
+        let mut t = Tower { cols: 2, floors: 2, start, rooms: [Room::default(); MAXROOMS] };
+        for (i, (kind, val)) in rooms.into_iter().enumerate() {
+            t.rooms[i] = Room { kind, val, look: i as i8, ..Room::default() };
+        }
+        return t;
+    }
     deal_with(&mut Rng::new(0x70E7 + level as u32 * 7919), level)
+}
+
+pub fn deal(level: i32) -> Tower {
+    campaign(level)
 }
 
 /// Deals tower `k` (from 0) of an endless climb from this seed.
@@ -314,15 +335,25 @@ mod tests {
 
     /// Whether some order of rooms from here takes them all.
     fn solvable(t: &Tower, taken: u32, power: i32) -> bool {
-        t.won(taken)
-            || (0..t.n()).any(|r| t.reachable(taken, r) && take(power, &t.rooms[r], taken.count_ones()).is_some_and(|p| solvable(t, taken | 1 << r, p)))
+        t.won(taken) || (0..t.n()).any(|r| t.reachable(taken, r) && take(power, &t.rooms[r], taken.count_ones()).is_some_and(|p| solvable(t, taken | 1 << r, p)))
     }
 
     fn check(name: &str, t: &Tower) {
         assert!(t.valid(), "{name} invalid");
         assert!(solvable(t, 0, t.start), "{name} cannot be won");
         let careful = t.odds();
-        assert!(careful < 0.9, "{name}: a careful climb wins {careful}");
+        fn can_lose(t: &Tower, taken: u32, power: i32) -> bool {
+            if t.won(taken) {
+                return false;
+            }
+            let open: Vec<_> = (0..t.n()).filter(|&r| t.reachable(taken, r)).collect();
+            open.is_empty()
+                || open.into_iter().any(|r| match take(power, &t.rooms[r], taken.count_ones()) {
+                    None => true,
+                    Some(p) => can_lose(t, taken | 1 << r, p),
+                })
+        }
+        assert!(can_lose(t, 0, t.start), "{name}: no losing choice");
         let line: Vec<String> = (0..t.n())
             .map(|r| {
                 let m = t.rooms[r];
@@ -369,5 +400,36 @@ mod tests {
         assert_eq!(take(8, &b, 3), None);
         let p = Room { kind: POISON, val: 5, ..Room::default() };
         assert_eq!((take(6, &p, 0), take(5, &p, 0)), (Some(1), None));
+    }
+}
+
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
+
+include!("campaign.rs");
+
+#[cfg(test)]
+mod campaign_checks {
+    use super::*;
+    #[test]
+    fn distinct_levels_teach_then_combine() {
+        let mut seen = std::collections::HashSet::new();
+        for l in 0..LEVELS {
+            let t = deal(l);
+            let rooms: Vec<_> = t.rooms[..t.n()].iter().map(|r| (r.kind, r.val, r.grow, r.locked)).collect();
+            assert!(seen.insert((t.start, rooms)), "duplicate tower {}", l + 1);
+            for r in &t.rooms[..t.n()] {
+                assert!(r.val < 5000, "unreadable arithmetic at {}", l + 1);
+                assert!(l >= 4 || r.kind == MONSTER);
+                assert!(l >= 6 || r.kind != CHEST);
+                assert!(l >= 10 || r.kind != TRAP);
+                assert!(l >= 14 || r.kind != POISON);
+                assert!(l >= 18 || r.kind != BRUTE);
+                assert!(l >= 22 || (r.kind != KEY && r.locked == 0));
+            }
+            assert!(t.rooms[t.n() - 1].fights());
+            assert!(!t.reachable(0, t.n() - 1));
+        }
     }
 }

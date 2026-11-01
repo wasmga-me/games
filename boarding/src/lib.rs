@@ -7,7 +7,7 @@ use puzzle::{Yard, BENCH, LEVELS};
 use wg::controls::{self, Icon, Row};
 use wg::{hex, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 const PLAY: i32 = 0;
 const CLEARED: i32 = 1;
 const DONE: i32 = 2;

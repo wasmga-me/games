@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 root = Path(__file__).resolve().parent
-names = ['pinwork', 'decant', 'unpark', 'higher-floor', 'flowline', 'boarding', 'unbolt', 'hive-guard', 'hexpile', 'bankshot']
+names = ['pinwork', 'decant', 'unpark', 'higher-floor', 'flowline', 'boarding', 'unbolt', 'hive-guard', 'offgrid', 'hexpile', 'bankshot']
 if len(sys.argv) > 1:
     unknown = set(sys.argv[1:]) - set(names)
     if unknown:

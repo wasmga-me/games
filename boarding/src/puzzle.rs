@@ -1,5 +1,6 @@
 //! Bus Jam: clear a path through the crowd, then match the current bus.
 //! Every deal includes a replayable solution; five waiting passengers lose.
+#[cfg(test)]
 use wg::Rng;
 pub const LEVELS: i32 = 30;
 pub const MAXN: usize = 6;
@@ -156,22 +157,19 @@ impl Yard {
     }
 }
 
+#[cfg(test)]
 pub fn shape(level: i32) -> (i32, i32, u8) {
-    (4 + (level >= 10) as i32 + (level >= 22) as i32, 4 + (level >= 5) as i32 + (level >= 16) as i32, (3 + level / 7).min(COLOURS as i32) as u8)
+    if level == 29 {
+        return (6, 6, 6);
+    }
+    [(3, 3, 3), (3, 4, 3), (4, 4, 4), (4, 5, 4), (5, 5, 5), (5, 6, 6)][(level / 5) as usize]
 }
 
 pub fn deal(level: i32) -> Yard {
-    thread_local!(static LAST: std::cell::Cell<Option<(i32, Yard)>> = const { std::cell::Cell::new(None) });
-    if let Some((l, y)) = LAST.get() {
-        if l == level {
-            return y;
-        }
-    }
-    let y = deal_order(level).0;
-    LAST.set(Some((level, y)));
-    y
+    campaign(level).0
 }
 
+#[cfg(test)]
 fn random_play(mut y: Yard, rng: &mut Rng) -> bool {
     while !y.won() && !y.lost() {
         let open: Vec<_> = (0..(y.w * y.h) as usize).filter(|&i| y.path(i).is_some()).collect();
@@ -183,10 +181,20 @@ fn random_play(mut y: Yard, rng: &mut Rng) -> bool {
     y.won()
 }
 
-pub fn deal_order(level: i32) -> (Yard, Vec<usize>) {
+#[cfg(test)]
+fn generate_order(level: i32) -> (Yard, Vec<usize>) {
+    if level < 3 {
+        let boards = [[1, 1, 1, 2, 3, 2, 3, 2, 3], [2, 1, 1, 1, 2, 3, 3, 3, 2], [2, 3, 1, 1, 2, 3, 3, 1, 2]];
+        let orders = [[0, 1, 2, 3, 5, 4, 7, 6, 8], [1, 2, 4, 3, 0, 5, 8, 6, 7], [2, 0, 1, 3, 4, 7, 8, 5, 6]];
+        let mut y = Yard::empty(3, 3);
+        y.cell[..9].copy_from_slice(&boards[level as usize]);
+        y.queue[..3].copy_from_slice(&[1, 2, 3]);
+        y.buses = 3;
+        return (y, orders[level as usize].to_vec());
+    }
     let (w, h, colours) = shape(level);
     let mut rng = Rng::new(0xb05a_2026 ^ (level as u32 + 1).wrapping_mul(7919));
-    let target = 0.25 + level as f32 / (LEVELS - 1) as f32 * 0.65;
+    let target = 0.20 + (level / 5) as f32 * 0.10 + (level % 5) as f32 * 0.025;
     let mut best: Option<(f32, Yard, Vec<usize>)> = None;
     for _ in 0..80 {
         let mut y = Yard::empty(w, h);
@@ -213,7 +221,7 @@ pub fn deal_order(level: i32) -> (Yard, Vec<usize>) {
         // the actual bench and automatic-boarding rules.
         for _ in 0..24 {
             let mut seq = base.clone();
-            let window = 3 + (level / 6) as u32;
+            let window = 2 + (level / 5) as u32 + (level % 5 >= 3) as u32;
             for k in 0..total {
                 let j = (k + rng.below(window) as usize).min(total - 1);
                 seq.swap(k, j);
@@ -285,5 +293,40 @@ mod tests {
         assert!(y.dispatch(0));
         assert!(y.won());
         assert!(y.valid());
+    }
+}
+
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
+
+#[cfg(test)]
+pub fn deal_order(level: i32) -> (Yard, Vec<usize>) {
+    let (y, o) = campaign(level);
+    (y, o.to_vec())
+}
+
+include!("campaign.rs");
+
+#[cfg(test)]
+mod campaign_checks {
+    use super::*;
+    #[test]
+    fn distinct_levels_teach_then_combine() {
+        let mut seen = std::collections::HashSet::new();
+        for l in 0..LEVELS {
+            let (mut y, order) = deal_order(l);
+            assert!(seen.insert((y.w, y.h, y.cell, y.queue)), "duplicate yard {}", l + 1);
+            assert_eq!((y.w, y.h), (shape(l).0, shape(l).1));
+            let mut peak = 0;
+            for i in order {
+                assert!(y.dispatch(i));
+                peak = peak.max(y.bench[..BENCH].iter().filter(|&&c| c != 0).count());
+            }
+            if l < 3 {
+                assert!(peak <= l as usize + 1, "tutorial fills the bench");
+            }
+            assert!(y.won());
+        }
     }
 }

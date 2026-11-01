@@ -66,7 +66,7 @@ Building C games requires `clang` and `wasm-ld` with `wasm32` target support (LL
 ## Gameplay checks
 
 Run `python3 check-ad-games.py` to check Pinwork, Decant, Unpark, Higher Floor,
-Flowline, Boarding, Unbolt, Hive Guard, Hexpile and Bankshot. The native Rust tests replay
+Flowline, Boarding, Unbolt, Hive Guard, Offgrid, Hexpile and Bankshot. The native Rust tests replay
 campaign solutions and check failure states, retry, saves and physics regressions.
 Pass game IDs to run only those suites, for example
 `python3 check-ad-games.py boarding flowline`.
@@ -76,8 +76,9 @@ Flowline requires a sealed route to the garden before the timer expires while
 keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floor
 reserves the marked boss for last; Pinwork seals fluid barriers and offers
 twenty distinct chambers, including twelve adaptations from the browser game
-[Hero Rescue](https://plays.org/hero-rescue/) (see [level notes](pinwork/references.md)). Decant uses increasing solution-length
-targets, and Unbolt retains a verified winning screw-removal sequence for every deal.
+[Hero Rescue](https://plays.org/hero-rescue/) (see [level notes](pinwork/references.md)). The other eight puzzle campaigns each have 30 fixed layouts with staged lessons.
+See [campaign design and editable level data](campaigns.md). Unbolt and Boarding
+retain a verified winning removal sequence for every layout.
 
 Bankshot follows [Mr Bullet](https://poki.com/en/g/mr-bullet)'s shooting rules and
 opening lessons: direct shots, aligned enemies, stairs and breakable wooden cover.

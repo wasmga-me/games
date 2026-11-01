@@ -1,6 +1,7 @@
 //! The car park: who stands where, which way each car can leave, and the
 //! levels, dealt so every car gets out.
 
+#[cfg(test)]
 use wg::Rng;
 
 pub const LEVELS: i32 = 30;
@@ -69,7 +70,10 @@ pub enum Way {
     Out,
     /// squares it can move before the thing in its way, and that thing: a
     /// car, or -1 for a prop or a barrier
-    Blocked { gap: i32, by: i32 },
+    Blocked {
+        gap: i32,
+        by: i32,
+    },
 }
 
 impl Lot {
@@ -128,6 +132,7 @@ impl Lot {
             gap += 1;
         }
     }
+    #[cfg(test)]
     pub fn free(&self, i: usize) -> bool {
         self.way(i, false) == Way::Out || self.way(i, true) == Way::Out
     }
@@ -170,14 +175,12 @@ impl Lot {
 
 /// a level's size, cars and props: width, height, how full, crate and cone
 /// count, barrier squares, buses
+#[cfg(test)]
 fn shape(level: i32) -> (i32, i32, f32, i32, i32, bool) {
-    let l = level;
-    let w = (4 + l / 6).min(MAXW as i32);
-    let h = (w + 1 + (l % 3 == 2) as i32).min(MAXH as i32);
-    let fill = 0.62 + 0.012 * l as f32;
-    let props = if l >= 3 { 1 + l / 8 } else { 0 };
-    let fence = if l >= 6 { 2 + l / 5 } else { 0 };
-    (w, h, fill.min(0.86), props, fence, l >= 9)
+    let (w, h, fill, props, fence, buses) =
+        [(4, 4, 0.42, 0, 0, false), (5, 5, 0.55, 1, 0, false), (6, 6, 0.64, 1, 3, false), (6, 7, 0.70, 2, 4, true), (7, 8, 0.76, 3, 5, true), (8, 9, 0.80, 4, 6, true)]
+            [(level / 5) as usize];
+    (w, h, fill + (level % 5) as f32 * 0.018, props, fence, buses)
 }
 
 /// Car models drawn: 10 cars, then the buses.
@@ -185,20 +188,37 @@ pub const CAR_MODELS: i8 = 10;
 pub const BUS_MODELS: i8 = 2;
 /// the models for a car (2 long) or a bus (3 long)
 fn models(len: i8) -> std::ops::Range<i8> {
-    if len == 3 { CAR_MODELS..CAR_MODELS + BUS_MODELS } else { 0..CAR_MODELS }
+    if len == 3 {
+        CAR_MODELS..CAR_MODELS + BUS_MODELS
+    } else {
+        0..CAR_MODELS
+    }
 }
 
 /// Deals a level. The same level always deals the same park.
-pub fn deal(level: i32) -> Lot {
+#[cfg(test)]
+fn generate(level: i32) -> Lot {
+    if level < 3 {
+        let mut lot = Lot::empty(4, 4);
+        let cars: &[(i8, i8, i8)] = match level {
+            0 => &[(0, 1, 1), (2, 2, 0)],
+            1 => &[(1, 1, 1), (0, 0, 2), (3, 2, 0)],
+            _ => &[(1, 1, 1), (0, 0, 2), (3, 2, 0), (0, 3, 1)],
+        };
+        for (i, &(x, y, dir)) in cars.iter().enumerate() {
+            lot.cars[i] = Car { x, y, dir, len: 2, model: i as i8, out: 0 };
+        }
+        lot.n = cars.len() as i32;
+        return lot;
+    }
     let (w, h, fill, props, fence, buses) = shape(level);
     let mut rng = Rng::new(0x5EED + level as u32 * 7919);
     let mut best: Option<(i32, Lot)> = None;
-    for _ in 0..24 {
+    for _ in 0..96 {
         let lot = attempt(&mut rng, w, h, fill, props, fence, buses);
-        // the fuller the better, and the fewer cars free from the start
-        let free = (0..lot.n as usize).filter(|&i| lot.free(i)).count() as i32;
-        let cover: i32 = lot.cars[..lot.n as usize].iter().map(|c| c.len as i32).sum();
-        let mark = cover * 4 - free * 3;
+        let (depth, free) = dependency(&lot);
+        let target = 2 + level / 5;
+        let mark = -(depth - target).abs() * 30 - free * 2 + lot.n;
         if best.as_ref().is_none_or(|b| mark > b.0) {
             best = Some((mark, lot));
         }
@@ -206,6 +226,34 @@ pub fn deal(level: i32) -> Lot {
     best.unwrap().1
 }
 
+pub fn deal(level: i32) -> Lot {
+    campaign(level)
+}
+
+/// Simultaneous removal rounds expose actual blocking depth, independent
+/// of car-array order. A row of already-free cars is only one round.
+#[cfg(test)]
+fn dependency(lot: &Lot) -> (i32, i32) {
+    let mut g = *lot;
+    let mut depth = 0;
+    let mut first = 0;
+    while g.left() > 0 {
+        let free: Vec<_> = (0..g.n as usize).filter(|&i| g.cars[i].out == 0 && g.free(i)).collect();
+        if free.is_empty() {
+            return (100, first);
+        }
+        if depth == 0 {
+            first = free.len() as i32;
+        }
+        for i in free {
+            g.cars[i].out = 1;
+        }
+        depth += 1;
+    }
+    (depth, first)
+}
+
+#[cfg(test)]
 fn attempt(rng: &mut Rng, w: i32, h: i32, fill: f32, props: i32, fence: i32, buses: bool) -> Lot {
     let mut lot = Lot::empty(w, h);
     for _ in 0..props {
@@ -275,6 +323,43 @@ mod tests {
             let free = (0..lot.n as usize).filter(|&i| lot.free(i)).count();
             let cover: i32 = lot.cars[..lot.n as usize].iter().map(|c| c.len as i32).sum();
             println!("level {:2}: {}x{} cars {:2} free {:2} cover {:.0}%", level + 1, lot.w, lot.h, lot.n, free, 100.0 * cover as f32 / (lot.w * lot.h) as f32);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
+
+include!("campaign.rs");
+
+#[cfg(test)]
+mod campaign_checks {
+    use super::*;
+    #[test]
+    fn distinct_levels_teach_then_combine() {
+        let mut seen = std::collections::HashSet::new();
+        for l in 0..LEVELS {
+            let g = deal(l);
+            let cars: Vec<_> = g.cars[..g.n as usize].iter().map(|c| (c.x, c.y, c.len, c.dir)).collect();
+            assert!(seen.insert((g.w, g.h, g.props, g.fence, cars)), "duplicate lot {}", l + 1);
+            let (depth, free) = dependency(&g);
+            assert!(depth < 100 && free > 0);
+            if l == 1 || l == 2 {
+                assert_eq!(depth, 2);
+            }
+            if l >= 5 {
+                assert!(depth >= 2, "no dependency on level {}", l + 1);
+            }
+            if l < 5 {
+                assert!(g.n <= 5 && g.props.iter().all(|&v| v == 0));
+            }
+            if l < 10 {
+                assert!(g.fence.iter().all(|&v| v == 0));
+            }
+            if l < 15 {
+                assert!(g.cars[..g.n as usize].iter().all(|c| c.len == 2));
+            }
         }
     }
 }

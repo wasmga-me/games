@@ -16,7 +16,7 @@ use puzzle::{take, Room, Tower, BRUTE, CHEST, EMPTY, KEY, LEVELS, MONSTER, POISO
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 /// options: the mode, and the level to start at
 const O_MODE: usize = 0;

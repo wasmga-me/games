@@ -1,5 +1,6 @@
 //! The board: plates held down by screws, the colour boxes the screws go
 //! into, the spare holes, and the level deals.
+#[cfg(test)]
 use wg::Rng;
 
 pub const LEVELS: i32 = 30;
@@ -210,10 +211,8 @@ impl Level {
             return false;
         }
         let in_box = |a: usize| (0..ns).filter(|&j| self.screw[j].state == IN_BOX && self.screw[j].slot as usize / 3 == a).count();
-        (0..2).all(|a| {
-            (self.open[a] == -1 && self.fill[a] == 0 || (0..self.next).contains(&self.open[a]) && (0..3).contains(&self.fill[a]))
-                && in_box(a) == self.fill[a] as usize
-        }) && self.colour[..nb].iter().all(|&c| (1..=COLOURS).contains(&c))
+        (0..2).all(|a| (self.open[a] == -1 && self.fill[a] == 0 || (0..self.next).contains(&self.open[a]) && (0..3).contains(&self.fill[a])) && in_box(a) == self.fill[a] as usize)
+            && self.colour[..nb].iter().all(|&c| (1..=COLOURS).contains(&c))
             && self.colour[nb..].iter().all(|&c| c == 0)
             && self.spare[SPARE..].iter().all(|&s| s == 0)
             && self.spare[..SPARE]
@@ -235,12 +234,15 @@ impl Level {
 }
 
 /// the level's size: layers, plates and colours grow over the 30
+#[cfg(test)]
 fn shape(level: i32) -> (u8, usize, u8) {
-    // at most six, one plate colour each
-    let layers = 3 + (level * 3 + 14) / (LEVELS - 1);
-    let plates = 6 + (level * 12 + 14) / (LEVELS - 1);
-    let colours = 5 + (level * 2 + 14) / (LEVELS - 1);
-    (layers as u8, plates as usize, colours as u8)
+    if level == 2 {
+        return (2, 3, 3);
+    }
+    if level == 3 || level == 4 {
+        return (2, 4, 4);
+    }
+    [(1, 2, 2), (3, 6, 5), (3, 8, 5), (4, 10, 5), (5, 12, 6), (6, 14, 7)][(level / 5) as usize]
 }
 
 /// The deal for a level, the same for everyone. Plates go down layer by
@@ -248,28 +250,23 @@ fn shape(level: i32) -> (u8, usize, u8) {
 /// colours are handed out along it with a little shuffling, so that order
 /// always works with the spare holes.
 pub fn deal(level: i32) -> Level {
-    // a retry deals the same level again: keep the last one
-    thread_local!(static LAST: std::cell::Cell<Option<(i32, Level)>> = const { std::cell::Cell::new(None) });
-    if let Some((l, lv)) = LAST.get() {
-        if l == level {
-            return lv;
-        }
-    }
-    let lv = choose(level).0;
-    LAST.set(Some((level, lv)));
-    lv
+    campaign(level).0
 }
 
-fn choose(level: i32) -> (Level, Vec<usize>) {
+#[cfg(test)]
+fn generate_order(level: i32) -> (Level, Vec<usize>) {
+    if level < 5 {
+        return lesson(level);
+    }
     let mut rng = Rng::new(0x5343_5257 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
-    // deals until a hasty player, taking whatever a box wants and any
-    // screw otherwise, loses close to this share of the time: now and then
+    // Select by sampled unplanned play, retaining a verified winning order.
+    // The desired loss rate rises gradually: now and then
     // at first, mostly at the end (the best found if none comes close)
     let want = TRIALS as f32 * (0.15 + 0.5 * level as f32 / (LEVELS - 1) as f32);
     let mut best: Option<(f32, Level, Vec<usize>)> = None;
     for _ in 0..DEALS {
         let (lv, order) = candidate(level, &mut rng);
-        let lost = (0..TRIALS).filter(|_| !hasty(&lv, &mut rng)).count();
+        let lost = (0..TRIALS).filter(|_| !random_play(&lv, &mut rng)).count();
         if lost == 0 {
             continue;
         }
@@ -285,26 +282,63 @@ fn choose(level: i32) -> (Level, Vec<usize>) {
     (lv, order)
 }
 
-const DEALS: usize = 60;
+/// Large, separated screws first; then an upper bridge reveals lower screws.
+#[cfg(test)]
+fn lesson(level: i32) -> (Level, Vec<usize>) {
+    let mut lv = Level::empty();
+    let rows: &[(i16, i16, i16, i16, u8, [u8; 3])] = match level {
+        0 => &[(180, 300, 820, 300, 0, [1, 1, 1]), (180, 700, 820, 700, 0, [2, 2, 2])],
+        1 => &[(180, 300, 820, 300, 0, [1, 2, 1]), (180, 700, 820, 700, 0, [2, 1, 2])],
+        2 => &[(180, 300, 820, 300, 0, [1, 3, 1]), (180, 700, 820, 700, 0, [2, 3, 2]), (500, 180, 500, 820, 1, [1, 2, 3])],
+        3 => &[(180, 250, 820, 250, 0, [1, 3, 2]), (180, 750, 820, 750, 0, [2, 4, 1]), (340, 130, 340, 870, 1, [1, 3, 4]), (660, 130, 660, 870, 1, [2, 4, 3])],
+        _ => &[(180, 250, 820, 250, 0, [3, 1, 4]), (180, 750, 820, 750, 0, [4, 2, 3]), (180, 130, 180, 870, 1, [1, 2, 4]), (820, 130, 820, 870, 1, [2, 1, 3])],
+    };
+    for (i, &(ax, ay, bx, by, layer, cs)) in rows.iter().enumerate() {
+        lv.plate[i] = Plate { ax, ay, bx, by, layer, ..Plate::default() };
+        for (j, &colour) in cs.iter().enumerate() {
+            lv.screw[i * 3 + j] = Screw { x: ax + (bx - ax) * j as i16 / 2, y: ay + (by - ay) * j as i16 / 2, plate: i as u8, colour, ..Screw::default() };
+        }
+    }
+    lv.plates = rows.len() as i32;
+    lv.screws = lv.plates * 3;
+    lv.boxes = lv.plates;
+    for i in 0..lv.boxes as usize {
+        lv.colour[i] = i as u8 + 1;
+    }
+    lv.open = [0, 1];
+    lv.next = 2;
+    fn win(g: Level, path: &mut Vec<usize>) -> bool {
+        if g.cleared() {
+            return true;
+        }
+        for i in 0..g.screws as usize {
+            let mut next = g;
+            if next.tap(i).is_some() {
+                path.push(i);
+                if win(next, path) {
+                    return true;
+                }
+                path.pop();
+            }
+        }
+        false
+    }
+    let mut order = Vec::new();
+    assert!(win(lv, &mut order), "lesson {}", level + 1);
+    (lv, order)
+}
+
+#[cfg(test)]
+const DEALS: usize = 180;
+#[cfg(test)]
 const TRIALS: usize = 32;
 
-/// A hasty player: a screw a box wants if there is one, else any screw
-/// that can go. Whether that clears the level.
-fn hasty(lv: &Level, rng: &mut Rng) -> bool {
+/// A player selecting exposed screws without planning ahead.
+#[cfg(test)]
+fn random_play(lv: &Level, rng: &mut Rng) -> bool {
     let mut g = *lv;
-    // the screws that can go, those a box wants first
-    let (mut wanted, mut any) = ([0usize; MAXS], [0usize; MAXS]);
     while !g.cleared() {
-        let (mut nw, mut na) = (0, 0);
-        for i in (0..g.screws as usize).filter(|&i| g.takes(i)) {
-            if g.box_for(g.screw[i].colour).is_some() {
-                wanted[nw] = i;
-                nw += 1;
-            }
-            any[na] = i;
-            na += 1;
-        }
-        let pick = if nw > 0 { &wanted[..nw] } else { &any[..na] };
+        let pick: Vec<_> = (0..g.screws as usize).filter(|&i| g.takes(i)).collect();
         if pick.is_empty() {
             return false;
         }
@@ -314,6 +348,7 @@ fn hasty(lv: &Level, rng: &mut Rng) -> bool {
 }
 
 /// One deal: plates layer by layer, then colours along a way off that works.
+#[cfg(test)]
 fn candidate(level: i32, rng: &mut Rng) -> (Level, Vec<usize>) {
     let (layers, want, colours) = shape(level);
     loop {
@@ -412,7 +447,7 @@ fn candidate(level: i32, rng: &mut Rng) -> (Level, Vec<usize>) {
             order.push(i);
         }
         // the colours along that order, shuffled within a window
-        let window = 8 + (level as u32) / 2;
+        let window = 8 + (level as u32) / 3;
         for _ in 0..40 {
             let mut seq: Vec<u8> = lv.colour[..nb].iter().flat_map(|&c| [c, c, c]).collect();
             for k in 0..seq.len() {
@@ -480,16 +515,64 @@ mod tests {
         }
     }
 
-    /// no level is safe to play without looking
+    /// After the introductory lessons, unplanned play can get stuck.
     #[test]
-    fn hasty_play_can_lose() {
+    fn unplanned_play_can_lose() {
         let mut rng = Rng::new(5);
-        for l in 0..LEVELS {
+        for l in 5..LEVELS {
             let lv = deal(l);
             const N: usize = 400;
-            let lost = (0..N).filter(|_| !hasty(&lv, &mut rng)).count();
-            println!("level {} hasty play loses {:.0}%", l + 1, 100.0 * lost as f32 / N as f32);
+            let lost = (0..N).filter(|_| !random_play(&lv, &mut rng)).count();
+            println!("level {} unplanned play loses {:.0}%", l + 1, 100.0 * lost as f32 / N as f32);
             assert!(lost > 0, "level {}", l + 1);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
+
+#[cfg(test)]
+fn choose(level: i32) -> (Level, Vec<usize>) {
+    let (g, o) = campaign(level);
+    (g, o.to_vec())
+}
+
+include!("campaign.rs");
+
+#[cfg(test)]
+mod campaign_checks {
+    use super::*;
+    #[test]
+    fn distinct_levels_teach_then_combine() {
+        let mut seen = std::collections::HashSet::new();
+        for l in 0..LEVELS {
+            let (g, order) = choose(l);
+            let ps: Vec<_> = g.plate[..g.plates as usize].iter().map(|p| (p.ax, p.ay, p.bx, p.by, p.layer)).collect();
+            let ss: Vec<_> = g.screw[..g.screws as usize].iter().map(|s| (s.x, s.y, s.plate, s.colour)).collect();
+            assert!(seen.insert((ps, ss, g.colour)), "duplicate screw board {}", l + 1);
+            if l < 2 {
+                assert_eq!(g.plates, 2);
+                assert_eq!(g.screws, 6);
+            }
+            if l == 2 {
+                assert!((0..g.screws as usize).any(|i| g.blocked(i)), "bridge lesson has no covered screw");
+            }
+            let mut play = g;
+            for i in order {
+                assert!(play.tap(i).is_some());
+                assert!(!play.stuck());
+            }
+            assert!(play.cleared());
+            // Distinct holes remain touchable on the smallest game canvas.
+            for i in 0..g.screws as usize {
+                for j in i + 1..g.screws as usize {
+                    let a = g.screw[i];
+                    let b = g.screw[j];
+                    assert!(((a.x - b.x) as f32).hypot((a.y - b.y) as f32) > 90., "overlapping screws at {}", l + 1);
+                }
+            }
         }
     }
 }

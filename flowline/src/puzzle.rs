@@ -1,11 +1,13 @@
 //! The pipes: each square's openings, turning, which squares the water
 //! reaches from the tap, and the level deals.
+#[cfg(test)]
 use wg::Rng;
 
 pub const MAXN: usize = 8;
 pub const LEVELS: i32 = 30;
 
 /// openings as bits: up, right, down, left
+#[cfg(test)]
 pub const UP: u8 = 1;
 pub const RIGHT: u8 = 2;
 pub const DOWN: u8 = 4;
@@ -118,88 +120,84 @@ impl Grid {
     }
 }
 
-/// the board's side in level l (0 for the first): 4 up to 8
 pub fn side(level: i32) -> i32 {
-    4 + (level * 4 + 14) / (LEVELS - 1)
+    [3, 4, 5, 6, 7, 8][(level / 5) as usize]
 }
 
-/// A random walk from the tap to the drain that doesn't cross itself,
-/// as squares in order.
-fn walk(n: i32, tap: i32, drain: i32, rng: &mut Rng, min_len: usize) -> Option<Vec<(i32, i32)>> {
-    for _ in 0..400 {
-        let mut path = vec![(0, tap)];
-        let mut seen = [false; MAXN * MAXN];
-        seen[(tap * n) as usize] = true;
-        while let Some(&(x, y)) = path.last() {
-            if (x, y) == (n - 1, drain) {
-                if path.len() >= min_len {
-                    return Some(path);
-                }
-                break;
-            }
-            let mut dirs = [0usize, 1, 2, 3];
-            rng.shuffle(&mut dirs);
-            // lean toward the right side, so walks end
-            if rng.below(3) == 0 {
-                dirs.sort_by_key(|&k| if k == 1 { 0 } else { 1 });
-            }
-            let next = dirs.iter().map(|&k| (x + DX[k], y + DY[k])).find(|&(nx, ny)| nx >= 0 && ny >= 0 && nx < n && ny < n && !seen[(ny * n + nx) as usize]);
-            match next {
-                Some((nx, ny)) => {
-                    seen[(ny * n + nx) as usize] = true;
-                    path.push((nx, ny));
-                }
-                None => break,
-            }
-        }
-    }
-    None
-}
-
-/// The deal for a level, the same for everyone: a pipe line from the tap to
-/// the drain, other pipes around it, and every pipe turned at random.
-pub fn deal(level: i32) -> Grid {
+#[cfg(test)]
+fn generate(level: i32) -> Grid {
     let n = side(level);
-    let mut rng = Rng::new(0x464c_4f57 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
-    let min_len = (n * n) as usize * (35 + level as usize) / 100;
-    loop {
-        let tap = rng.below(n as u32) as i32;
-        let drain = rng.below(n as u32) as i32;
-        let Some(path) = walk(n, tap, drain, &mut rng, min_len.max(n as usize)) else {
-            continue;
+    let lesson = level % 5;
+    let mut path = Vec::new();
+    if level == 0 {
+        path = vec![(0, 1), (1, 1), (2, 1)];
+    } else if level == 1 {
+        path = vec![(0, 0), (1, 0), (1, 1), (2, 1)];
+    } else if level == 2 {
+        path = vec![(0, 2), (0, 1), (1, 1), (1, 0), (2, 0)];
+    } else if level == 3 {
+        path = vec![(0, 0), (0, 1), (0, 2), (1, 2), (1, 1), (1, 0), (2, 0)];
+    } else {
+        // A different corridor per lesson: straight, low bend, high bend,
+        // double-back, and a full serpentine chapter finale.
+        let rows = match lesson {
+            0 => 1,
+            1 | 2 => 2,
+            3 => 3,
+            _ => n,
         };
-        let mut g = Grid { n, tap, drain, pipe: [0; MAXN * MAXN], rot: [0; MAXN * MAXN] };
-        let dir_to = |a: (i32, i32), b: (i32, i32)| (0..4).find(|&k| a.0 + DX[k] == b.0 && a.1 + DY[k] == b.1).unwrap();
-        for (i, &here) in path.iter().enumerate() {
-            let inn = if i == 0 { LEFT } else { 1 << ((dir_to(here, path[i - 1])) as u8) };
-            let out = if i + 1 == path.len() { RIGHT } else { 1 << (dir_to(here, path[i + 1]) as u8) };
-            let m = inn | out;
-            g.pipe[(here.1 * n + here.0) as usize] = m;
-        }
-        // the rest: mostly bends and straights, a few three-ways
-        for i in 0..(n * n) as usize {
-            if g.pipe[i] == 0 {
-                let m = match rng.below(10) {
-                    4..=6 => UP | DOWN,
-                    7..=8 => LEFT | RIGHT,
-                    _ => UP | RIGHT,
-                };
-                g.pipe[i] = turned(m, rng.below(4) as u8);
+        let mut x = 0;
+        for y in 0..rows {
+            let yy = if lesson == 2 { n - 1 - y } else { y };
+            let end = if y == rows - 1 {
+                n - 1
+            } else if y % 2 == 0 {
+                n - 2
+            } else {
+                1
+            };
+            if !path.is_empty() {
+                path.push((x, yy));
+            } else {
+                path.push((0, yy));
+            }
+            while x != end {
+                x += if end > x { 1 } else { -1 };
+                path.push((x, yy));
             }
         }
-        for r in g.rot[..(n * n) as usize].iter_mut() {
-            *r = rng.below(4) as u8;
-        }
-        // The player always gets a dry board to inspect before the first
-        // turn starts the clock. No randomly preconnected hazard.
-        let inlet = (tap * n) as usize;
-        while g.open(0, tap) & LEFT != 0 {
-            g.rot[inlet] = (g.rot[inlet] + 1) % 4;
-        }
-        if !g.through() {
-            return g;
+    }
+    let tap = path[0].1;
+    let drain = path.last().unwrap().1;
+    let mut g = Grid { n, tap, drain, pipe: [0; MAXN * MAXN], rot: [0; MAXN * MAXN] };
+    let dir = |a: (i32, i32), b: (i32, i32)| (0..4).find(|&k| a.0 + DX[k] == b.0 && a.1 + DY[k] == b.1).unwrap();
+    for (j, &p) in path.iter().enumerate() {
+        let inn = if j == 0 { LEFT } else { 1 << dir(p, path[j - 1]) };
+        let out = if j + 1 == path.len() { RIGHT } else { 1 << dir(p, path[j + 1]) };
+        g.pipe[(p.1 * n + p.0) as usize] = inn | out;
+    }
+    let mut rng = Rng::new(0xF10A_2026 + level as u32 * 7919);
+    for i in 0..(n * n) as usize {
+        if g.pipe[i] == 0 {
+            g.pipe[i] = turned(if rng.below(3) == 0 { UP | DOWN } else { UP | RIGHT }, rng.below(4) as u8);
         }
     }
+    // One turn, two bends, then increasing repair work. Decorative pipes
+    // are already oriented: the opening lesson has one obvious broken joint.
+    for (j, &(x, y)) in path.iter().enumerate() {
+        if j == 0 || (level > 0 && (j + lesson as usize) % 3 != 0) {
+            g.rot[(y * n + x) as usize] = if level < 5 { 3 } else { 1 + rng.below(3) as u8 };
+        }
+    }
+    let inlet = (tap * n) as usize;
+    while g.open(0, tap) & LEFT != 0 {
+        g.rot[inlet] = (g.rot[inlet] + 1) % 4;
+    }
+    g
+}
+
+pub fn deal(level: i32) -> Grid {
+    campaign(level)
 }
 
 /// The par: the clockwise quarter turns from the deal to the pipes of a
@@ -276,6 +274,36 @@ mod tests {
             let s = solve(&g).expect("solvable");
             assert!(s.through());
             println!("level {} side {} par {}", l + 1, g.n, par(&g, &s));
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
+
+include!("campaign.rs");
+
+#[cfg(test)]
+mod campaign_checks {
+    use super::*;
+    #[test]
+    fn distinct_levels_teach_then_combine() {
+        let mut seen = std::collections::HashSet::new();
+        for l in 0..LEVELS {
+            let g = deal(l);
+            assert!(seen.insert((g.n, g.tap, g.drain, g.pipe, g.rot)), "duplicate level {}", l + 1);
+            assert_eq!(g.n, side(l));
+            assert!(g.flow().iter().all(|&d| d < 0), "level {} starts wet", l + 1);
+            let s = solve(&g).unwrap();
+            assert!(s.through());
+            let turns = par(&g, &s);
+            if l == 0 {
+                assert_eq!(turns, 1, "opening should teach a single turn");
+            }
+            // Even at three seconds per clockwise turn the route fits
+            // the timer. Reading time before the first turn is unlimited.
+            assert!(turns * 3 < 40 + g.n * g.n * 2 - l / 2, "level {} is a speed test", l + 1);
         }
     }
 }

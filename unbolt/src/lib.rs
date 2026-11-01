@@ -12,7 +12,7 @@ use puzzle::{Ev, Level, DONE, IN_BOX, IN_SPARE, LEVELS, MAXS, ON_BOARD, PLATE_R,
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// options, in the catalog `setup` order
 const O_LEVEL: usize = 0;

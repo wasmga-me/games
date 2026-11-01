@@ -115,7 +115,7 @@ impl Level {
 
 const GROUND_RECT: Rect = r(-200.0, GROUND, 500.0, 520.0);
 
-/// The ten layouts: ledges, the dog's feet and facing, the hives' feet.
+/// Thirty distinct layouts: ledges, the dog's feet and facing, the hives' feet.
 fn layout(k: i32) -> (Vec<Rect>, (f32, f32, bool), Vec<(f32, f32)>) {
     match k {
         // a meadow, the hive to the left
@@ -137,20 +137,60 @@ fn layout(k: i32) -> (Vec<Rect>, (f32, f32, bool), Vec<(f32, f32)>) {
         // on a step, hives low left and high right
         8 => (vec![r(-20.0, 262.0, 92.0, GROUND), r(92.0, 304.0, 230.0, GROUND), r(206.0, 126.0, 320.0, 142.0)], (160.0, 304.0, true), vec![(40.0, 262.0), (258.0, 126.0)]),
         // on an island in the air, hives either side on the ground
-        _ => (vec![r(78.0, 238.0, 222.0, 254.0)], (150.0, 238.0, false), vec![(36.0, GROUND), (264.0, GROUND)]),
+        9 => (vec![r(78.0, 238.0, 222.0, 254.0)], (150.0, 238.0, false), vec![(36.0, GROUND), (264.0, GROUND)]),
+        10 => (vec![r(30., 270., 190., 286.), r(220., 150., 320., 166.)], (110., 270., false), vec![(260., 150.)]),
+        11 => (vec![r(-20., 210., 145., 226.), r(190., 286., 320., 302.)], (78., 210., false), vec![(255., 286.)]),
+        12 => (vec![r(70., 290., 230., 306.), r(-20., 134., 68., 150.)], (150., 290., true), vec![(30., 134.)]),
+        13 => (vec![r(92., 250., 232., 266.), r(-20., 180., 50., 196.)], (162., 250., true), vec![(25., 180.), (275., 352.)]),
+        14 => (vec![r(60., 190., 240., 206.), r(110., 290., 190., 306.)], (150., 190., false), vec![(30., 352.), (270., 352.)]),
+        15 => (vec![r(40., 280., 200., 296.), r(0., 170., 75., 186.), r(225., 220., 320., 236.)], (120., 280., false), vec![(38., 170.), (270., 220.)]),
+        16 => (vec![r(106., 210., 276., 226.), r(-20., 125., 82., 141.)], (190., 210., true), vec![(40., 125.), (40., 352.)]),
+        17 => (vec![r(48., 268., 204., 284.), r(215., 105., 320., 121.), r(65., 158., 175., 174.)], (126., 268., false), vec![(265., 105.), (265., 352.)]),
+        18 => (vec![r(75., 300., 225., 316.), r(-20., 170., 68., 186.), r(232., 220., 320., 236.)], (150., 300., true), vec![(30., 170.), (270., 220.)]),
+        19 => (vec![r(-20., 240., 150., 256.), r(165., 140., 320., 156.)], (78., 240., false), vec![(205., 140.), (270., 352.)]),
+        20 => (vec![r(70., 220., 230., 236.), r(20., 310., 65., 326.), r(235., 310., 280., 326.)], (150., 220., false), vec![(42., 310.), (258., 310.)]),
+        21 => (vec![r(110., 280., 290., 296.), r(-20., 135., 85., 151.), r(130., 170., 270., 186.)], (200., 280., true), vec![(40., 135.), (40., 352.)]),
+        22 => (vec![r(10., 265., 180., 281.), r(195., 190., 320., 206.), r(38., 145., 150., 161.)], (95., 265., false), vec![(250., 190.), (260., 352.)]),
+        23 => (vec![r(76., 190., 224., 206.), r(-20., 280., 60., 296.), r(240., 280., 320., 296.)], (150., 190., true), vec![(30., 280.), (270., 280.)]),
+        24 => {
+            (vec![r(65., 305., 235., 321.), r(-20., 150., 70., 166.), r(230., 150., 320., 166.), r(108., 205., 192., 221.)], (150., 305., false), vec![(32., 150.), (268., 150.)])
+        }
+        25 => (vec![r(-20., 215., 155., 231.), r(175., 285., 320., 301.), r(30., 110., 125., 126.)], (85., 215., false), vec![(235., 285.), (265., 352.)]),
+        26 => (vec![r(145., 200., 320., 216.), r(-20., 140., 85., 156.), r(90., 300., 130., 316.)], (225., 200., true), vec![(35., 140.), (45., 352.)]),
+        27 => (vec![r(68., 260., 232., 276.), r(90., 140., 210., 156.)], (150., 260., false), vec![(150., 140.), (32., 352.), (268., 352.)]),
+        28 => (vec![r(30., 300., 200., 316.), r(215., 190., 320., 206.), r(-20., 145., 60., 161.)], (115., 300., false), vec![(30., 145.), (265., 190.), (270., 352.)]),
+        29 => (vec![r(75., 235., 225., 251.), r(-20., 145., 55., 161.), r(245., 145., 320., 161.)], (150., 235., true), vec![(28., 145.), (272., 145.), (150., 352.)]),
+        _ => unreachable!("campaign level"),
     }
 }
 
-/// Level n: the layouts in turn, three rounds of less ink and more bees.
+/// Chapters introduce elevation, roofs, crossfire, then three-way attacks.
 pub fn level(n: i32) -> Level {
-    let (mut solids, dog, hives) = layout(n % 10);
+    let (mut solids, dog, hives) = layout(n.clamp(0, LEVELS - 1));
     solids.insert(0, GROUND_RECT);
-    let round = n / 10;
+    let round = n / 5;
     // an arch over the dog, with some to spare that shrinks round by round
     let arch = std::f32::consts::PI * DOME_R;
-    let ink = arch * [1.7, 1.4, 1.18][round as usize] + 10.0;
+    let ink = arch * [1.8, 1.65, 1.5, 1.4, 1.3, 1.22][round as usize] + 10.0;
     // the bees shared between the hives
-    let total = (12 + 6 * round + (n % 10) / 3) as u32;
+    let total = (10 + 3 * round + (n % 5) / 2) as u32;
     let bees = total.div_ceil(hives.len() as u32);
-    Level { solids, dog, hives, ink, bees, secs: [8.0, 10.0, 12.0][round as usize] }
+    Level { solids, dog, hives, ink, bees, secs: [8.0, 8.0, 9.0, 10.0, 11.0, 12.0][round as usize] }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn thirty_distinct_terrains_with_supported_dogs() {
+        let mut seen = std::collections::HashSet::new();
+        for n in 0..LEVELS {
+            let lv = level(n);
+            let terrain: Vec<_> = lv.solids.iter().map(|r| (r.x as i32, r.y as i32, r.w as i32, r.h as i32)).collect();
+            let hives: Vec<_> = lv.hives.iter().map(|&(x, y)| (x as i32, y as i32)).collect();
+            assert!(seen.insert((terrain, hives, lv.dog.0 as i32, lv.dog.1 as i32)), "repeated terrain {}", n + 1);
+            assert!(lv.solids.iter().any(|r| r.y == lv.dog.1 && lv.dog.0 > r.x && lv.dog.0 < r.x + r.w));
+            assert!(lv.ink > std::f32::consts::PI * DOME_R);
+        }
+    }
 }

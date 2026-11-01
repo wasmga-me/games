@@ -1,6 +1,8 @@
 //! The tubes and their layers: moves, the level deals and a solver that
 //! proves each deal can be finished.
+#[cfg(test)]
 use std::collections::HashSet;
+#[cfg(test)]
 use wg::Rng;
 
 /// layers a tube holds
@@ -97,6 +99,7 @@ impl Stand {
         (1..=colours).all(|c| count[c] == CAP)
     }
     /// the same position whatever order the tubes stand in
+    #[cfg(test)]
     fn key(&self) -> [u64; 3] {
         let mut tubes: Vec<u16> = (0..self.n as usize).map(|p| self.tube[p].iter().fold(0u16, |k, &c| k << 4 | c as u16)).collect();
         tubes.sort_unstable();
@@ -108,38 +111,40 @@ impl Stand {
     }
 }
 
-/// colours in level l (0 for the first): 3 up to 10
+/// Palette chapters: learn runs with two colours, then add one at a time.
 pub fn colours(level: i32) -> usize {
-    3 + ((level * 7 + 14) / (LEVELS - 1)) as usize
+    [2, 3, 4, 5, 6, 7][(level.clamp(0, LEVELS - 1) / 5) as usize]
 }
 
-/// The deal for a level, the same for everyone, and the length of a
-/// solution the solver found (the par).
-pub fn deal(level: i32) -> (Stand, i32) {
+#[cfg(test)]
+fn generate(level: i32) -> (Stand, i32) {
+    if level < 5 {
+        let rows = [[[1, 1, 2, 2], [2, 2, 1, 1]], [[1, 2, 2, 2], [2, 1, 1, 1]], [[1, 2, 1, 2], [2, 1, 2, 1]], [[1, 2, 2, 1], [2, 1, 1, 2]], [[1, 1, 2, 1], [2, 2, 1, 2]]];
+        let mut st = Stand::empty(3);
+        st.tube[..2].copy_from_slice(&rows[level as usize]);
+        let par = solve(&st, 100_000).unwrap();
+        return (st, par);
+    }
     let c = colours(level);
-    let mut rng = Rng::new(0x5249_4e47 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
-    // Select by measured solving work, not only by a shuffled colour
-    // count. Early chapters allow larger runs; later ones need more
-    // separation and recombination, without demanding reflexes.
-    let target = 6 + level * 3 / 2;
+    let mut rng = Rng::new(0xC011_2026 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
+    // New-colour lessons start with longer runs, then split into singles.
+    let target = c as i32 + 3 + (level % 5) * 2;
     let mut best: Option<(i32, Stand, i32)> = None;
-    for _ in 0..64 {
+    for _ in 0..240 {
         let mut bag: Vec<u8> = (1..=c as u8).flat_map(|k| [k; CAP]).collect();
         rng.shuffle(&mut bag);
-        let mut st = Stand::empty(c as i32 + 2);
+        let mut st = Stand::empty(c as i32 + 1);
         for (i, &k) in bag.iter().enumerate() {
             st.tube[i / CAP][i % CAP] = k;
         }
-        if st.solved() || (0..c).any(|p| st.done(p)) {
+        if (0..c).any(|p| st.done(p)) {
             continue;
         }
+        let splits = st.tube[..c].iter().map(|t| t.windows(2).filter(|w| w[0] != w[1]).count() as i32).sum::<i32>();
         if let Some(par) = solve(&st, 100_000) {
-            let off = (par - target).abs();
-            if best.as_ref().is_none_or(|b| off < b.0) {
-                best = Some((off, st, par));
-            }
-            if off == 0 {
-                break;
+            let score = (splits - target).abs() * 10 + (par - splits - c as i32).abs();
+            if best.as_ref().is_none_or(|b| score < b.0) {
+                best = Some((score, st, par));
             }
         }
     }
@@ -147,13 +152,19 @@ pub fn deal(level: i32) -> (Stand, i32) {
     (st, par)
 }
 
+pub fn deal(level: i32) -> (Stand, i32) {
+    campaign(level)
+}
+
 /// Depth first, the most useful moves first, skipping positions seen
 /// before. Some(moves) when it finds a way to finish within `limit` positions.
+#[cfg(test)]
 pub fn solve(st: &Stand, limit: usize) -> Option<i32> {
     solution(st, limit).map(|p| p.len() as i32)
 }
 
 /// the pours of a way to finish, from and to
+#[cfg(test)]
 pub fn solution(st: &Stand, limit: usize) -> Option<Vec<(usize, usize)>> {
     let mut seen = HashSet::new();
     let mut path = Vec::new();
@@ -161,6 +172,7 @@ pub fn solution(st: &Stand, limit: usize) -> Option<Vec<(usize, usize)>> {
     dfs(&mut cur, &mut seen, limit, &mut path).then_some(path)
 }
 
+#[cfg(test)]
 fn dfs(st: &mut Stand, seen: &mut HashSet<[u64; 3]>, limit: usize, path: &mut Vec<(usize, usize)>) -> bool {
     if st.solved() {
         return true;
@@ -214,10 +226,8 @@ mod tests {
                 let mut trial = st;
                 for _ in 0..100 {
                     let n = trial.n as usize;
-                    let moves: Vec<_> = (0..n)
-                        .flat_map(|a| (0..n).map(move |b| (a, b)))
-                        .filter(|&(a, b)| trial.can(a, b) > 0 && !(trial.len(b) == 0 && trial.run(a) == trial.len(a)))
-                        .collect();
+                    let moves: Vec<_> =
+                        (0..n).flat_map(|a| (0..n).map(move |b| (a, b))).filter(|&(a, b)| trial.can(a, b) > 0 && !(trial.len(b) == 0 && trial.run(a) == trial.len(a))).collect();
                     if moves.is_empty() {
                         lost |= !trial.solved();
                         break;
@@ -245,6 +255,32 @@ mod tests {
             assert!(!st.solved());
             assert!(par > 0);
             println!("level {} colours {} par {}", l + 1, colours(l), par);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
+
+include!("campaign.rs");
+
+#[cfg(test)]
+mod campaign_checks {
+    use super::*;
+    #[test]
+    fn distinct_levels_teach_then_combine() {
+        let mut seen = std::collections::HashSet::new();
+        for l in 0..LEVELS {
+            let (s, par) = deal(l);
+            assert!(seen.insert(s.key()), "duplicate tube arrangement at {}", l + 1);
+            assert_eq!(s.n as usize, colours(l) + 1);
+            if l < 5 {
+                assert_eq!(colours(l), 2);
+                assert!(par <= 8);
+            }
+            let solution = solution(&s, 100_000).unwrap();
+            assert_eq!(solution.len() as i32, par, "stale target at {}", l + 1);
         }
     }
 }

@@ -11,7 +11,7 @@ use puzzle::{Grid, DX, DY, LEVELS, MAXN};
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// options, in the catalog `setup` order
 const O_LEVEL: usize = 0;

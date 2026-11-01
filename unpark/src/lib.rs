@@ -11,7 +11,7 @@ mod puzzle;
 use puzzle::{Lot, Way, CONE, DX, DY, EMPTY, LEVELS};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 const PLAY: i32 = 0;
 const CLEARED: i32 = 1;

@@ -9,7 +9,7 @@ mod puzzle;
 use puzzle::{Stand, CAP, LEVELS, MAXP};
 use wg::{hex, mix, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// options, in the catalog `setup` order
 const O_LEVEL: usize = 0;

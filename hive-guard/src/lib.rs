@@ -22,7 +22,7 @@ enum Tool {
     Go,
 }
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// drawing the line
 const DRAW: i32 = 0;
