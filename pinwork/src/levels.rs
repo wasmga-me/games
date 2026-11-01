@@ -35,8 +35,8 @@ struct Layout {
 
 const FLOORS: (f32, f32, f32, f32) = (FRAME_L, 290.0, FRAME_R, FLOOR);
 
-/// Eight distinct layouts, easiest first. Each stage introduces the next
-/// mechanism; mirrored copies do not count as additional puzzles.
+/// Eight introductory chambers followed by twelve adaptations of Hero Rescue
+/// layouts. See references.md for the source and the mechanical adaptations.
 const LAYOUT: &[Layout] = &[
     // gold or lava, the lava over the knight
     Layout {
@@ -114,6 +114,90 @@ const LAYOUT: &[Layout] = &[
         orc: Some((258.0, GROUND)),
         zone: FLOORS,
     },
+    // Hero Rescue 2: separate gold/lava pockets on the two arms of a V.
+    Layout {
+        walls: &[(150., 55., 150., 238.)],
+        pins: &[(150., 236., 22., 160.), (150., 236., 278., 160.), (8., 294., 278., 294.)],
+        fills: &[(GOLD, 35., 105., 137., 160.), (LAVA, 164., 120., 235., 154.)],
+        knight: 90., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 1: two upper reservoirs feed a shared cooling chamber.
+    Layout {
+        walls: &[(150., 55., 150., 144.), (80., 160., 80., 268.), (220., 160., 220., 268.)],
+        pins: &[(156., 150., 22., 150.), (144., 150., 278., 150.), (74., 274., 246., 274.)],
+        fills: &[(GOLD, 30., 100., 140., 142.), (WATER, 160., 80., 278., 142.), (LAVA, 88., 225., 212., 264.)],
+        knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 3: a zigzag route with a separately held lava pocket.
+    Layout {
+        walls: &[(80., 60., 80., 168.), (220., 60., 220., 168.), (14., 236., 110., 270.), (220., 180., 220., 260.)],
+        pins: &[(74., 174., 246., 174.), (114., 276., 278., 210.), (214., 270., 278., 270.)],
+        fills: &[(GOLD, 90., 115., 210., 164.), (LAVA, 232., 220., 276., 262.)],
+        knight: 100., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 4: a side reservoir must cool the lower tank before its exit opens.
+    Layout {
+        walls: &[(100., 50., 100., 164.), (200., 50., 200., 274.), (100., 210., 100., 274.), (14., 170., 94., 206.)],
+        pins: &[(94., 156., 226., 156.), (106., 166., 22., 166.), (94., 280., 226., 280.)],
+        fills: &[(GOLD, 110., 105., 190., 148.), (WATER, 22., 95., 90., 158.), (LAVA, 108., 236., 192., 268.)],
+        knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 5: gold above a V of lava, with water released from the side.
+    Layout {
+        walls: &[(110., 50., 110., 124.), (190., 50., 190., 124.), (228., 80., 228., 168.)],
+        pins: &[(104., 130., 216., 130.), (150., 270., 22., 200.), (150., 270., 278., 200.), (222., 174., 278., 174.)],
+        fills: &[(GOLD, 118., 80., 182., 120.), (LAVA, 100., 195., 200., 222.), (WATER, 238., 104., 278., 164.)],
+        knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 7: a central divider keeps the lava on its own side.
+    Layout {
+        walls: &[(150., 55., 150., 150.)],
+        pins: &[(6., 156., 278., 156.), (150., 166., 150., 382.), (144., 300., 278., 300.)],
+        fills: &[(LAVA, 24., 95., 140., 148.), (GOLD, 162., 95., 278., 148.)],
+        knight: 230., orc: None, zone: (156., 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 8: gold takes the side route around a fixed central obstruction.
+    Layout {
+        walls: &[(130., 50., 130., 158.), (14., 220., 186., 270.), (180., 276., 180., 290.)],
+        pins: &[(136., 164., 22., 164.), (124., 164., 278., 164.), (180., 296., 278., 296.)],
+        fills: &[(LAVA, 25., 120., 112., 156.), (GOLD, 200., 108., 276., 156.)],
+        knight: 235., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 11: two independently gated hazards on a descending route.
+    Layout {
+        walls: &[(110., 50., 110., 142.), (200., 50., 200., 142.), (210., 180., 210., 252.)],
+        pins: &[(104., 148., 226., 148.), (116., 148., 22., 148.), (204., 258., 278., 258.), (8., 310., 278., 310.)],
+        fills: &[(GOLD, 120., 95., 190., 138.), (LAVA, 22., 100., 100., 138.), (LAVA, 222., 205., 276., 248.)],
+        knight: 150., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 12: burn the monster, cool its chamber, then release the treasure.
+    Layout {
+        walls: &[(100., 50., 100., 100.), (200., 50., 200., 100.), (190., 125., 190., 190.), (70., 120., 70., 280.), (14., 206., 64., 230.)],
+        pins: &[(94., 106., 226., 106.), (184., 196., 278., 196.), (64., 286., 278., 286.)],
+        fills: &[(WATER, 110., 60., 190., 100.), (LAVA, 200., 136., 278., 188.), (GOLD, 80., 250., 180., 278.)],
+        knight: 150., orc: Some((130., 246.)), zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 18: neighbouring water/lava tanks above the gold's final gate.
+    Layout {
+        walls: &[(150., 50., 150., 190.)],
+        pins: &[(156., 196., 22., 196.), (144., 196., 278., 196.), (8., 276., 278., 276.)],
+        fills: &[(WATER, 24., 120., 140., 188.), (LAVA, 162., 142., 276., 188.), (GOLD, 162., 102., 276., 136.)],
+        knight: 150., orc: None, zone: (FRAME_L, 300., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 23: crossed sloping supports, choosing the safe descent.
+    Layout {
+        walls: &[(110., 50., 110., 138.), (190., 50., 190., 138.), (220., 160., 220., 214.), (14., 286., 120., 318.)],
+        pins: &[(104., 144., 216., 144.), (214., 220., 278., 220.), (126., 324., 278., 250.)],
+        fills: &[(GOLD, 120., 88., 180., 132.), (LAVA, 232., 170., 276., 208.)],
+        knight: 180., orc: None, zone: (FRAME_L, 340., FRAME_R, FLOOR),
+    },
+    // Hero Rescue 30: two lava reservoirs must be mixed before the final release.
+    Layout {
+        walls: &[(105., 50., 105., 132.), (195., 50., 195., 132.), (150., 156., 150., 226.)],
+        pins: &[(99., 138., 221., 138.), (156., 232., 22., 232.), (144., 232., 278., 232.), (8., 280., 278., 280.)],
+        fills: &[(WATER, 114., 60., 186., 126.), (LAVA, 24., 188., 140., 224.), (LAVA, 162., 188., 276., 224.), (GOLD, 24., 152., 140., 180.), (GOLD, 162., 152., 276., 180.)],
+        knight: 150., orc: None, zone: (FRAME_L, 300., FRAME_R, FLOOR),
+    },
 ];
 
 #[derive(Clone)]
@@ -139,7 +223,8 @@ pub const DROP_R: f32 = 2.5;
 /// how far apart rows of drops start: packed as tight as they go
 pub const ROW_RISE: f32 = SPACING * 0.866;
 
-/// Level n, needing a larger share of its gold the further on it is.
+/// The introductory quota rises from 50% to 65%; later chambers keep 65%.
+/// Keeping the first eight quotas unchanged preserves existing saved attempts.
 pub fn level(n: i32) -> Level {
     let l = &LAYOUT[n as usize];
     let mut walls = vec![(FRAME_L, FRAME_TOP, FRAME_L, FLOOR), (FRAME_R, FRAME_TOP, FRAME_R, FLOOR), (FRAME_L, FLOOR, FRAME_R, FLOOR)];
@@ -164,7 +249,7 @@ pub fn level(n: i32) -> Level {
             row += 1;
         }
     }
-    let share = 0.5 + 0.15 * n as f32 / (LEVELS - 1) as f32;
+    let share = 0.5 + 0.15 * n.min(7) as f32 / 7.0;
     Level { walls, pins, grains, knight: l.knight, orc: l.orc, zone: l.zone, need: (gold as f32 * share).ceil() as usize }
 }
 
@@ -191,8 +276,26 @@ mod tests {
     }
 
     #[test]
+    fn added_chambers_keep_their_handles_visible() {
+        for n in 8..LEVELS {
+            let mut handles: Vec<(f32, f32)> = Vec::new();
+            for &(ax, ay, bx, by) in &level(n).pins {
+                let length = (bx - ax).hypot(by - ay);
+                let x = bx + (bx - ax) / length * crate::sim::RING;
+                let y = by + (by - ay) / length * crate::sim::RING;
+                let margin = crate::sim::RING;
+                assert!(handles.iter().all(|&(hx, hy)| (x - hx).hypot(y - hy) >= 2.0 * margin + 2.0),
+                    "level {} has overlapping handles", n + 1);
+                handles.push((x, y));
+                assert!(x >= margin && x <= 300.0 - margin && y >= 40.0 + margin && y <= 400.0 - margin,
+                    "level {} has an off-screen handle at {}, {}", n + 1, x, y);
+            }
+        }
+    }
+
+    #[test]
     fn campaign_has_no_repeated_or_mirrored_chambers() {
-        assert_eq!(LEVELS, 8);
+        assert_eq!(LEVELS, 20);
         for a in 0..LEVELS {
             for b in 0..a {
                 for flip in [false, true] {

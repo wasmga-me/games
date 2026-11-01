@@ -27,7 +27,7 @@ dependencies = [
 [[package]]
 name = "wg"
 version = "0.1.0"
-source = "git+https://github.com/wasmga-me/wasmgame-wg#7399dec6eb89d5e5705f8c8e2694d57794f3decb"
+source = "git+https://github.com/wasmga-me/wasmgame-wg#8ea677f436b4f7d5f42bf6a708a0c265601b65df"
 dependencies = [
  "miniz_oxide",
 ]

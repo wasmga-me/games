@@ -74,8 +74,9 @@ Pass game IDs to run only those suites, for example
 Boarding moves passengers into matching buses through a five-seat waiting bench.
 Flowline requires a sealed route to the garden before the timer expires while
 keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floor
-reserves the marked boss for last; Pinwork seals fluid barriers and teaches its
-eight mechanisms in eight distinct chambers. Decant uses increasing solution-length
+reserves the marked boss for last; Pinwork seals fluid barriers and offers
+twenty distinct chambers, including twelve adaptations from the browser game
+[Hero Rescue](https://plays.org/hero-rescue/) (see [level notes](pinwork/references.md)). Decant uses increasing solution-length
 targets, and Unbolt retains a verified winning screw-removal sequence for every deal.
 
 Bankshot follows [Mr Bullet](https://poki.com/en/g/mr-bullet)'s shooting rules and
