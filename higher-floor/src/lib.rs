@@ -16,7 +16,7 @@ use puzzle::{take, Room, Tower, BRUTE, CHEST, EMPTY, KEY, LEVELS, MONSTER, POISO
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// options: the mode, and the level to start at
 const O_MODE: usize = 0;
@@ -564,6 +564,9 @@ impl Game for HigherFloor {
             if !open {
                 s.rect(ix, iy, iw, ih, 3.0, hex(0x0b0d18), 0.5);
             }
+            if r + 1 == t.n() {
+                s.text_c(tr(&["BOSS", "首领"]), x, iy + 9.0, 9.0, hex(0xffcc50), 1.0);
+            }
             if t.locked(self.s.taken, r) {
                 self.put(s, art::LOCK, b.0 + b.2 * 0.2, b.1 + b.3 - 7.0, u * 0.75, false, 1.0);
             }
@@ -939,7 +942,21 @@ impl wg::Board for HigherFloor {
                 };
                 out.push_str(&format!("{} {}", name, v));
                 if room.kind == BRUTE {
-                    out.push_str(&tr(&[", grows # with every room", "，每进一个房间长 #", "、部屋ごとに # 強くなる", ", 방마다 # 성장", ", crece # con cada sala", ", cresce # a cada sala", ", grandit de # à chaque salle", ", wächst mit jedem Raum um #", ", растёт на # с каждой комнатой", "，每進一個房間長 #"]).replace('#', &room.grow.to_string()));
+                    out.push_str(
+                        &tr(&[
+                            ", grows # with every room",
+                            "，每进一个房间长 #",
+                            "、部屋ごとに # 強くなる",
+                            ", 방마다 # 성장",
+                            ", crece # con cada sala",
+                            ", cresce # a cada sala",
+                            ", grandit de # à chaque salle",
+                            ", wächst mit jedem Raum um #",
+                            ", растёт на # с каждой комнатой",
+                            "，每進一個房間長 #",
+                        ])
+                        .replace('#', &room.grow.to_string()),
+                    );
                 }
                 out.push_str(", ");
                 out.push_str(if self.s.power > v {
@@ -950,11 +967,53 @@ impl wg::Board for HigherFloor {
                     tr(&["too strong", "太强了", "強すぎる", "너무 강함", "demasiado fuerte", "forte demais", "trop fort", "zu stark", "слишком силён", "太強了"])
                 });
             }
-            POTION => out.push_str(&tr(&["Potion, +#", "药水，+#", "ポーション、+#", "물약, +#", "Poción, +#", "Poção, +#", "Potion, +#", "Trank, +#", "Зелье, +#", "藥水，+#"]).replace('#', &room.val.to_string())),
-            POISON => out.push_str(&tr(&["Poison, -#", "毒药，-#", "毒、-#", "독, -#", "Veneno, -#", "Veneno, -#", "Poison, -#", "Gift, -#", "Яд, -#", "毒藥，-#"]).replace('#', &room.val.to_string())),
-            KEY => out.push_str(tr(&["Key, opens the locked rooms", "钥匙，打开上锁的房间", "鍵、閉ざされた部屋を開ける", "열쇠, 잠긴 방을 엶", "Llave, abre las salas cerradas", "Chave, abre as salas trancadas", "Clé, ouvre les salles fermées", "Schlüssel, öffnet die verschlossenen Räume", "Ключ, открывает запертые комнаты", "鑰匙，打開上鎖的房間"])),
-            CHEST => out.push_str(tr(&["Chest, doubles your power", "宝箱，力量翻倍", "宝箱、パワー 2 倍", "상자, 힘 두 배", "Cofre, duplica tu poder", "Baú, dobra seu poder", "Coffre, double votre puissance", "Truhe, verdoppelt deine Stärke", "Сундук, удваивает силу", "寶箱，力量翻倍"])),
-            _ => out.push_str(tr(&["Trap, halves your power", "陷阱，力量减半", "罠、パワー半分", "함정, 힘 절반", "Trampa, reduce tu poder a la mitad", "Armadilha, corta seu poder pela metade", "Piège, divise votre puissance par deux", "Falle, halbiert deine Stärke", "Ловушка, вдвое уменьшает силу", "陷阱，力量減半"])),
+            POTION => out.push_str(
+                &tr(&["Potion, +#", "药水，+#", "ポーション、+#", "물약, +#", "Poción, +#", "Poção, +#", "Potion, +#", "Trank, +#", "Зелье, +#", "藥水，+#"])
+                    .replace('#', &room.val.to_string()),
+            ),
+            POISON => out.push_str(
+                &tr(&["Poison, -#", "毒药，-#", "毒、-#", "독, -#", "Veneno, -#", "Veneno, -#", "Poison, -#", "Gift, -#", "Яд, -#", "毒藥，-#"])
+                    .replace('#', &room.val.to_string()),
+            ),
+            KEY => out.push_str(tr(&[
+                "Key, opens the locked rooms",
+                "钥匙，打开上锁的房间",
+                "鍵、閉ざされた部屋を開ける",
+                "열쇠, 잠긴 방을 엶",
+                "Llave, abre las salas cerradas",
+                "Chave, abre as salas trancadas",
+                "Clé, ouvre les salles fermées",
+                "Schlüssel, öffnet die verschlossenen Räume",
+                "Ключ, открывает запертые комнаты",
+                "鑰匙，打開上鎖的房間",
+            ])),
+            CHEST => out.push_str(tr(&[
+                "Chest, doubles your power",
+                "宝箱，力量翻倍",
+                "宝箱、パワー 2 倍",
+                "상자, 힘 두 배",
+                "Cofre, duplica tu poder",
+                "Baú, dobra seu poder",
+                "Coffre, double votre puissance",
+                "Truhe, verdoppelt deine Stärke",
+                "Сундук, удваивает силу",
+                "寶箱，力量翻倍",
+            ])),
+            _ => out.push_str(tr(&[
+                "Trap, halves your power",
+                "陷阱，力量减半",
+                "罠、パワー半分",
+                "함정, 힘 절반",
+                "Trampa, reduce tu poder a la mitad",
+                "Armadilha, corta seu poder pela metade",
+                "Piège, divise votre puissance par deux",
+                "Falle, halbiert deine Stärke",
+                "Ловушка, вдвое уменьшает силу",
+                "陷阱，力量減半",
+            ])),
+        }
+        if r + 1 == t.n() {
+            out.push_str(tr(&[", boss: clear every other room first", "，首领：先清完其他房间"]));
         }
         if t.locked(self.s.taken, r) {
             out.push_str(", ");

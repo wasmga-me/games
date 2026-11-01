@@ -11,11 +11,13 @@ mod puzzle;
 use puzzle::{Lot, Way, CONE, DX, DY, EMPTY, LEVELS};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 const PLAY: i32 = 0;
 const CLEARED: i32 = 1;
 const DONE: i32 = 2;
+const FAILED: i32 = 3;
+const LIVES: i32 = 3;
 
 /// the board's tilt: the ground's depth shows at this fraction of its width
 const TILT: f32 = 0.848;
@@ -113,6 +115,7 @@ enum Hit {
     None,
     Car(usize),
     Next,
+    Restart,
 }
 
 struct Unpark {
@@ -165,7 +168,7 @@ impl Unpark {
 
     fn card(&self) -> (f32, f32, f32, f32) {
         let (w, h) = self.plan_wh();
-        let (pw, ph) = (248.0, if self.s.phase == CLEARED { 158.0 } else { 96.0 });
+        let (pw, ph) = (248.0, if matches!(self.s.phase, CLEARED | FAILED) { 158.0 } else { 96.0 });
         (w / 2.0 - pw / 2.0, h / 2.0 - ph / 2.0, pw, ph)
     }
     fn next_box(&self) -> (f32, f32, f32, f32) {
@@ -200,13 +203,26 @@ impl Unpark {
 
     fn hit(&self, x: f32, y: f32) -> Hit {
         let inside = |(bx, by, bw, bh): (f32, f32, f32, f32)| x >= bx && x < bx + bw && y >= by && y < by + bh;
+        if self.s.phase == PLAY && self.controls().hit(x, y).is_some() {
+            return Hit::Restart;
+        }
         match self.s.phase {
             PLAY => self.car_at(x, y).map_or(Hit::None, Hit::Car),
-            CLEARED if inside(self.next_box()) => Hit::Next,
+            CLEARED | FAILED if inside(self.next_box()) => Hit::Next,
             _ => Hit::None,
         }
     }
 
+    fn controls(&self) -> wg::controls::Row {
+        wg::controls::row(&[wg::controls::Icon::Restart], self.plan_wh().0 - 8.0, 20.0)
+    }
+    fn restart(&mut self) -> u32 {
+        if !matches!(self.s.phase, PLAY | FAILED) {
+            return 0;
+        }
+        self.begin(self.s.level);
+        wg::EV_BLIP
+    }
     fn begin(&mut self, level: i32) {
         let s = &mut self.s;
         s.level = level;
@@ -227,7 +243,7 @@ impl Unpark {
 
     /// Sends car i its front's way, or backing up.
     fn send(&mut self, i: usize, back: bool) -> u32 {
-        if self.s.phase != PLAY || i >= self.s.lot.n as usize || self.s.lot.cars[i].out != 0 || self.busy(i) {
+        if self.s.phase != PLAY || i >= self.s.lot.n as usize || self.s.lot.cars[i].out != 0 || self.busy(i) || self.s.bumps >= LIVES {
             return 0;
         }
         let c = self.s.lot.cars[i];
@@ -330,6 +346,9 @@ impl Unpark {
     }
 
     fn next(&mut self) -> u32 {
+        if self.s.phase == FAILED {
+            return self.restart();
+        }
         if self.s.phase != CLEARED {
             return 0;
         }
@@ -458,6 +477,11 @@ impl Game for Unpark {
                 self.bump = None;
             }
         }
+        if self.s.phase == PLAY && self.s.bumps >= LIVES && self.bump.is_none() {
+            self.s.phase = FAILED;
+            self.press = None;
+            ev |= wg::EV_LOSE;
+        }
         // the level clears once the last car has driven away, or on loading
         // a save made while it drove
         if self.s.phase == PLAY && self.s.lot.left() == 0 && self.drives.is_empty() {
@@ -485,12 +509,15 @@ impl Game for Unpark {
                     ev |= self.send(i, pick & wg::A == 0);
                 }
             }
-        } else if self.s.phase == CLEARED && input.pressed & wg::A != 0 {
+        } else if matches!(self.s.phase, CLEARED | FAILED) && input.pressed & wg::A != 0 {
             ev |= self.next();
         }
         ev
     }
 
+    fn key(&mut self, code: i32) -> bool {
+        wg::controls::is_restart_key(code) && self.restart() != 0
+    }
     fn pointer(&mut self, p: &Pointer) -> u32 {
         let mut ev = 0;
         if let Some((i, x0, y0)) = self.press {
@@ -529,6 +556,7 @@ impl Game for Unpark {
                     self.press = Some((i, p.x, p.y));
                 }
                 Hit::Next => ev |= self.next(),
+                Hit::Restart => ev |= self.restart(),
                 Hit::None => {}
             }
         }
@@ -540,6 +568,7 @@ impl Game for Unpark {
             Hit::None => -1,
             Hit::Car(i) => i as i32,
             Hit::Next => 1000,
+            Hit::Restart => 1001,
         };
         let shown = [hv, self.keys as i32, self.tall as i32];
         let mut c = self.s;
@@ -666,7 +695,13 @@ impl Game for Unpark {
             }
         };
         shaded(s, &format!("{} {}", level_l, self.s.level + 1), 14.0, 20.0, 17.0, th.text, false);
-        shaded(s, &format!("{} {}", left_l, lot.left()), w - 14.0, 20.0, 15.0, th.dim, true);
+        shaded(s, &format!("{} {}", left_l, lot.left()), w - 48.0, 20.0, 15.0, th.dim, true);
+        if self.s.phase == PLAY {
+            self.controls().draw(s, None, |_| true, w);
+        }
+        for i in 0..LIVES {
+            s.disc(18.0 + i as f32 * 14.0, 39.0, 4.0, hex(if i < LIVES - self.s.bumps { 0xe95557 } else { 0x829293 }), 1.0);
+        }
         if self.s.bumps > 0 {
             let bumps_l = tr(&["Bumps", "碰撞", "衝突", "충돌", "Choques", "Batidas", "Chocs", "Rempler", "Удары", "碰撞"]);
             shaded(s, &format!("{} {}", bumps_l, self.s.bumps), w - 14.0, 38.0, 12.0, th.dim, true);
@@ -703,7 +738,7 @@ impl Game for Unpark {
         let ok = s.version == VERSION
             && (0..LEVELS).contains(&s.opt[0])
             && (0..LEVELS).contains(&s.level)
-            && (PLAY..=DONE).contains(&s.phase)
+            && (PLAY..=FAILED).contains(&s.phase)
             && s.lot.valid()
             && (0..s.lot.w).contains(&s.cx)
             && (0..s.lot.h).contains(&s.cy);
@@ -914,7 +949,19 @@ impl Unpark {
         let (px, py, pw, ph) = self.card();
         s.shadow(px, py + 4.0, pw, ph, 16.0, 14.0, 0, 0.45);
         s.rect(px, py, pw, ph, 16.0, hex(th.card), 1.0);
-        let title = tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"]);
+        let title = tr(&[
+            "Level cleared",
+            "过关",
+            "クリア",
+            "레벨 클리어",
+            "Nivel superado",
+            "Nível concluído",
+            "Niveau réussi",
+            "Level geschafft",
+            "Уровень пройден",
+            "過關",
+        ]);
+        let title = if self.s.phase == FAILED { tr(&["Too many collisions", "碰撞次数用完了"]) } else { title };
         let size = s.fit_size(title, 21.0, pw - 32.0);
         s.text_c(title, w / 2.0, py + 34.0, size, hex(th.text), 1.0);
         let score_l = tr(&["Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки", "得分"]);
@@ -922,9 +969,21 @@ impl Unpark {
         let line = format!("{} +{}    {} {}", score_l, self.s.cleared_score, bumps_l, self.s.bumps);
         let size = s.fit_size(&line, 14.0, pw - 32.0);
         s.text_c(&line, w / 2.0, py + 64.0, size, hex(0xb9c2cf), 1.0);
-        if self.s.phase == CLEARED {
+        if matches!(self.s.phase, CLEARED | FAILED) {
             let b = self.next_box();
-            let label = tr(&["Next level", "下一关", "次のレベル", "다음 레벨", "Siguiente nivel", "Próximo nível", "Niveau suivant", "Nächstes Level", "Следующий уровень", "下一關"]);
+            let label = tr(&[
+                "Next level",
+                "下一关",
+                "次のレベル",
+                "다음 레벨",
+                "Siguiente nivel",
+                "Próximo nível",
+                "Niveau suivant",
+                "Nächstes Level",
+                "Следующий уровень",
+                "下一關",
+            ]);
+            let label = if self.s.phase == FAILED { tr(&["Retry level", "重试本关"]) } else { label };
             let hv = self.hover == Hit::Next;
             let fill = hex(th.accent);
             s.rect(b.0, b.1, b.2, b.3, b.3 / 2.0, if hv { mix(hex(0xffffff), fill, 0.15) } else { fill }, 1.0);
@@ -944,9 +1003,11 @@ const WAYS: [[&str; 10]; 4] = [
 /// The accessible board: the park's squares, each saying what stands on it.
 impl wg::Board for Unpark {
     fn grid(&self) -> Option<(i32, i32)> {
+        if matches!(self.s.phase, CLEARED | FAILED) { return Some((1, 1)); }
         Some((self.s.lot.w, self.s.lot.h))
     }
     fn cursor(&self) -> (i32, i32) {
+        if matches!(self.s.phase, CLEARED | FAILED) { return (0, 0); }
         (self.s.cx, self.s.cy)
     }
     fn focus(&mut self, x: i32, y: i32) {
@@ -960,11 +1021,16 @@ impl wg::Board for Unpark {
         (v.x, v.y, v.s)
     }
     fn cell_box(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
+        if matches!(self.s.phase, CLEARED | FAILED) { return Some(self.next_box()); }
         let v = self.view();
         let (px, py) = v.at(x as f32, y as f32);
         Some((px, py, v.s, v.s * TILT))
     }
     fn cell(&self, x: i32, y: i32, out: &mut String) {
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            out.push_str(if self.s.phase == FAILED { tr(&["Retry level", "重试本关"]) } else { tr(&["Next level", "下一关"]) });
+            return;
+        }
         let lot = &self.s.lot;
         if let Some(i) = lot.car_at(x, y) {
             let c = &lot.cars[i];
@@ -1015,7 +1081,10 @@ impl wg::Board for Unpark {
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
         let left_l = tr(&["cars left", "辆车待开出", "台残り", "대 남음", "coches por sacar", "carros restantes", "voitures restantes", "Autos übrig", "машин осталось", "輛車待開出"]);
         let bumps_l = tr(&["bumps", "次碰撞", "回衝突", "번 충돌", "choques", "batidas", "chocs", "Rempler", "ударов", "次碰撞"]);
-        out.push_str(&format!("{} {}, {} {}, {} {}", level_l, self.s.level + 1, self.s.lot.left(), left_l, self.s.bumps, bumps_l));
+        out.push_str(&format!("{} {}, {} {}, {}/{} {}", level_l, self.s.level + 1, self.s.lot.left(), left_l, self.s.bumps, LIVES, bumps_l));
+        if self.s.phase == FAILED {
+            out.push_str(tr(&[". Failed. Space retries.", "。失败，按空格重试。"]));
+        }
     }
     fn keys(&self) -> &'static str {
         tr(&[
@@ -1032,7 +1101,7 @@ impl wg::Board for Unpark {
         ])
     }
     fn act(&mut self, x: i32, y: i32, a: i32, said: &mut String) -> u32 {
-        if self.s.phase == CLEARED {
+        if matches!(self.s.phase, CLEARED | FAILED) {
             let ev = self.next();
             self.status(said);
             return ev;
@@ -1084,6 +1153,28 @@ mod tests {
             ev |= g.update(&Input { held: 0, pressed: 0, dt: 16 });
         }
         ev
+    }
+
+    #[test]
+    fn collisions_lose_and_retry_restores_the_lot() {
+        for level in 0..LEVELS {
+            let mut g = Unpark::new();
+            g.begin(level);
+            let lot = g.s.lot;
+            let (i, back) = (0..lot.n as usize)
+                .find_map(|i| [false, true].into_iter().find(|&b| lot.way(i, b) != Way::Out).map(|b| (i, b)))
+                .expect("a collision is possible");
+            for _ in 0..LIVES {
+                g.send(i, back);
+                run(&mut g, 600);
+            }
+            assert_eq!(g.s.phase, FAILED);
+            assert_eq!(g.send(i, back), 0);
+            g.next();
+            assert_eq!(g.s.level, level);
+            assert_eq!(g.s.bumps, 0);
+            assert!(g.s.lot.cars == lot.cars);
+        }
     }
 
     #[test]

@@ -11,7 +11,7 @@ use puzzle::{Grid, DX, DY, LEVELS, MAXN};
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// options, in the catalog `setup` order
 const O_LEVEL: usize = 0;
@@ -21,6 +21,7 @@ const THEMES: usize = 3;
 const PLAY: i32 = 0;
 const CLEARED: i32 = 1;
 const DONE: i32 = 2;
+const FAILED: i32 = 3;
 
 /// a quarter turn, and water filling one pipe, ms
 const TURN_MS: f32 = 130.0;
@@ -113,7 +114,7 @@ impl Flowline {
     /// the board's box: x, y, side, and a square's side
     fn board_box(&self) -> (f32, f32, f32, f32) {
         let w = self.plan_wh().0;
-        let side = if self.tall { 220.0 } else { 236.0 };
+        let side = if self.tall { 220.0 } else { 206.0 };
         let (x, y) = ((w - side) / 2.0, if self.tall { 92.0 } else { 46.0 });
         (x, y, side, side / self.s.grid.n as f32)
     }
@@ -138,16 +139,23 @@ impl Flowline {
         if self.tall { 26.0 } else { 22.0 }
     }
     fn can_restart(&self) -> bool {
-        self.s.phase == PLAY && self.s.through == 0 && self.s.grid.rot != self.dealt
+        matches!(self.s.phase, PLAY | FAILED) && self.s.through == 0 && self.s.turns > 0
+    }
+    fn limit_ms(&self) -> i32 {
+        // Larger boards need more reading time; later chapters allow less
+        // time per cell. The clock starts only on the first turn.
+        let cells = self.s.grid.n * self.s.grid.n;
+        1000 * (40 + cells * 2 - self.s.level / 2)
+    }
+    fn remaining(&self) -> i32 {
+        (self.limit_ms() - self.s.level_ms).max(0)
     }
     /// The pipes as dealt; the turns made so far still count.
     fn restart(&mut self) -> u32 {
         if !self.can_restart() {
             return 0;
         }
-        self.s.grid.rot = self.dealt;
-        self.spin = [0.0; MAXN * MAXN];
-        self.wet = [0.0; MAXN * MAXN];
+        self.begin(self.s.level);
         wg::EV_BLIP
     }
 
@@ -158,7 +166,7 @@ impl Flowline {
         if self.s.phase != PLAY {
             let b = self.next_box();
             let on = x >= b.0 && x < b.0 + b.2 && y >= b.1 && y < b.1 + b.3;
-            return if self.s.phase == CLEARED && on { Hit::Next } else { Hit::None };
+            return if matches!(self.s.phase, CLEARED | FAILED) && on { Hit::Next } else { Hit::None };
         }
         let (bx, by, _, c) = self.board_box();
         let (gx, gy) = (((x - bx) / c).floor() as i32, ((y - by) / c).floor() as i32);
@@ -194,6 +202,7 @@ impl Flowline {
         let r = &mut self.s.grid.rot[i];
         *r = (*r + if back { 3 } else { 1 }) % 4;
         self.spin[i] += if back { -1.0 } else { 1.0 };
+        self.wet.fill(0.0);
         self.s.turns += 1;
         self.s.all_turns += 1;
         if self.s.grid.through() {
@@ -219,10 +228,10 @@ impl Flowline {
     }
 
     fn next(&mut self) -> u32 {
-        if self.s.phase != CLEARED {
+        if !matches!(self.s.phase, CLEARED | FAILED) {
             return 0;
         }
-        self.begin(self.s.level + 1);
+        self.begin(self.s.level + (self.s.phase == CLEARED) as i32);
         wg::EV_BLIP
     }
 
@@ -238,6 +247,10 @@ impl Flowline {
             for x in 0..n {
                 let i = (y * n + x) as usize;
                 if dist[i] < 0 {
+                    wet[i] = 0.0;
+                    continue;
+                }
+                if self.spin[i].abs() > 0.05 {
                     wet[i] = 0.0;
                     continue;
                 }
@@ -339,7 +352,15 @@ fn draw_pipe(s: &mut Screen, th: &Theme, cx: f32, cy: f32, c: f32, open: u8, ang
     if wet >= 1.0 {
         for &k in &arms {
             let (dx, dy) = arm(k);
-            s.line(cx + dx * half * 0.2, cy + dy * half * 0.2 - inner * 0.35, cx + dx * half * 0.8, cy + dy * half * 0.8 - inner * 0.35, inner * 0.22, hex(th.water_hi), 0.6);
+            s.line(
+                cx + dx * half * 0.2,
+                cy + dy * half * 0.2 - inner * 0.35,
+                cx + dx * half * 0.8,
+                cy + dy * half * 0.8 - inner * 0.35,
+                inner * 0.22,
+                hex(th.water_hi),
+                0.6,
+            );
         }
     }
 }
@@ -406,7 +427,9 @@ impl Game for Flowline {
                 *sp = 0.0;
             }
         }
-        self.flow(dt);
+        if self.s.phase == PLAY {
+            self.flow(dt);
+        }
         if self.s.through != 0 && self.s.phase == PLAY {
             let g = &self.s.grid;
             let last = ((g.drain * g.n) + g.n - 1) as usize;
@@ -417,9 +440,18 @@ impl Game for Flowline {
                 }
             }
         }
-        if self.s.phase == PLAY && self.s.turns > 0 {
+        if self.s.phase == PLAY && self.s.turns > 0 && self.s.through == 0 {
             self.s.level_ms = self.s.level_ms.saturating_add(input.dt);
             self.s.time_ms = self.s.time_ms.saturating_add(input.dt);
+        }
+        if self.s.phase == PLAY && self.s.turns > 0 && self.s.through == 0 {
+            let g = &self.s.grid;
+            let hero = g.n / 2;
+            let wet_hero = self.wet[((g.n - 1) * g.n + hero) as usize] >= 1.0 && g.open(hero, g.n - 1) & puzzle::DOWN != 0;
+            if wet_hero || self.remaining() == 0 {
+                self.s.phase = FAILED;
+                ev |= wg::EV_LOSE;
+            }
         }
         let dirs = self.s.rep.dirs(input);
         if dirs != 0 {
@@ -440,7 +472,7 @@ impl Game for Flowline {
                 self.keys = true;
                 ev |= self.turn(self.s.cx, self.s.cy, true);
             }
-        } else if self.s.phase == CLEARED && input.pressed & wg::A != 0 {
+        } else if matches!(self.s.phase, CLEARED | FAILED) && input.pressed & wg::A != 0 {
             ev |= self.next();
         }
         ev
@@ -481,13 +513,16 @@ impl Game for Flowline {
             Hit::Next => 1000,
             Hit::Ctl(i) => 1001 + i as i32,
         };
-        let shown = [hv, self.keys as i32, self.tall as i32];
+        let shown = [hv, self.keys as i32, self.tall as i32, (self.remaining() + 999) / 1000];
         let mut c = self.s;
         c.level_ms = 0;
         c.time_ms = 0;
         wg::hash(wg::hash(0, wg::bytes_of(&c)), wg::bytes_of(&shown))
     }
     fn moving(&self) -> bool {
+        if self.s.phase != PLAY {
+            return false;
+        }
         let dist = self.s.grid.flow();
         let settling = self.wet.iter().zip(dist.iter()).any(|(&w, &d)| d >= 0 && w < 1.0);
         self.spin.iter().any(|&s| s != 0.0) || settling || (self.s.through != 0 && self.basin < 1.0)
@@ -571,9 +606,46 @@ impl Game for Flowline {
         s.text(&format!("{} {}", level_l, self.s.level + 1), 14.0, ty, 17.0, hex(th.text), 1.0);
         let hover = if let Hit::Ctl(i) = self.hover { Some(i) } else { None };
         let right = self.controls().draw(s, hover, |_| self.can_restart(), w);
-        s.text_r(&format!("{} {}", turns_l, self.s.turns), right - 14.0, ty, 15.0, hex(th.dim), 1.0);
+        s.text_r(
+            &format!("{} {}  ·  {}s", turns_l, self.s.turns, (self.remaining() + 999) / 1000),
+            right - 10.0,
+            ty,
+            13.0,
+            hex(if self.remaining() < 15000 { 0xe85b53 } else { th.dim }),
+            1.0,
+        );
+        // The danger port is visibly connected to the person below it.
+        let hx = bx + (n / 2) as f32 * c + c / 2.0;
+        let hy = by + side + 11.0;
+        s.line(hx, by + side, hx, hy, 2.0, hex(0xe85b53), 1.0);
+        s.disc(hx, hy + 5.0, 4.0, hex(0xffd2a0), 1.0);
+        s.line(hx, hy + 10.0, hx, hy + 18.0, 3.0, hex(0xe85b53), 1.0);
+        s.line(hx - 7.0, hy + 16.0, hx, hy + 11.0, 2.0, hex(0xe85b53), 1.0);
+        s.line(hx + 7.0, hy + 16.0, hx, hy + 11.0, 2.0, hex(0xe85b53), 1.0);
+        s.line(hx, hy + 18.0, hx - 5.0, hy + 26.0, 2.0, hex(th.pipe), 1.0);
+        s.line(hx, hy + 18.0, hx + 5.0, hy + 26.0, 2.0, hex(th.pipe), 1.0);
+        // A dry plant is the destination, turning green as water arrives.
+        let plant = hex(if self.basin > 0.0 { 0x59bc6b } else { 0xb69a60 });
+        s.line(qx + qw / 2.0, dy - 16.0, qx + qw / 2.0, dy - 34.0, 1.5, plant, 1.0);
+        s.ellipse(qx + qw / 2.0 - 5.0, dy - 28.0, 6.0, 3.0, plant, 1.0);
+        s.ellipse(qx + qw / 2.0 + 5.0, dy - 33.0, 6.0, 3.0, plant, 1.0);
+        if self.tall {
+            s.text_c(tr(&["Water the garden. Keep the hero dry.", "给花园浇水，别淋到英雄。"]), w / 2.0, 367.0, 12.0, hex(th.dim), 1.0);
+        }
+        // Show the actual open ends that currently spill, not water that
+        // appears to cross disconnected or rotating pipe pieces.
+        for (x, y, k) in g.leaks() {
+            let i = (y * n + x) as usize;
+            if self.wet[i] < 1.0 || self.spin[i].abs() > 0.05 {
+                continue;
+            }
+            let ex = bx + (x as f32 + 0.5) * c + DX[k] as f32 * c * 0.48;
+            let ey = by + (y as f32 + 0.5) * c + DY[k] as f32 * c * 0.48;
+            s.disc(ex, ey, c * 0.075, hex(th.water), 1.0);
+            s.disc(ex + DX[k] as f32 * 4.0, ey + DY[k] as f32 * 4.0, 1.5, hex(th.water), 0.8);
+        }
 
-        if self.s.phase == CLEARED {
+        if matches!(self.s.phase, CLEARED | FAILED) {
             self.draw_cleared(s, th, w);
         }
     }
@@ -605,11 +677,14 @@ impl Game for Flowline {
         let ok = s.version == VERSION
             && s.opt.iter().zip(Self::CHOICES).all(|(&v, &c)| (0..c).contains(&v))
             && (0..LEVELS).contains(&s.level)
-            && (PLAY..=DONE).contains(&s.phase)
+            && (PLAY..=FAILED).contains(&s.phase)
             && s.grid.valid()
             && n == puzzle::side(s.level)
             && (0..n).contains(&s.cx)
             && (0..n).contains(&s.cy);
+        if !ok {
+            return false;
+        }
         self.s.through = self.s.grid.through() as i32;
         if ok {
             self.dealt = puzzle::deal(self.s.level).rot;
@@ -634,15 +709,43 @@ impl Flowline {
         s.shadow(px, py + 4.0, pw, ph, 16.0, 14.0, 0, 0.45);
         s.rect(px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 17.0, hex(th.text), 0.1);
         s.rect(px, py, pw, ph, 16.0, hex(th.bg), 1.0);
-        let title = tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"]);
+        let title = tr(&[
+            "Level cleared",
+            "过关",
+            "クリア",
+            "레벨 클리어",
+            "Nivel superado",
+            "Nível concluído",
+            "Niveau réussi",
+            "Level geschafft",
+            "Уровень пройден",
+            "過關",
+        ]);
+        let title = if self.s.phase == FAILED { tr(&["Try again", "再试一次"]) } else { title };
         s.text_c(title, w / 2.0, py + 34.0, 21.0, hex(th.text), 1.0);
         let score_l = tr(&["Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки", "得分"]);
         let turns_l = tr(&["Turns", "旋转", "回転", "회전", "Giros", "Giros", "Rotations", "Drehungen", "Повороты", "旋轉"]);
-        let line = format!("{} +{}    {} {}", score_l, self.s.cleared_score, turns_l, self.s.turns);
+        let line = if self.s.phase == FAILED {
+            if self.remaining() == 0 { tr(&["Time ran out", "时间到了"]) } else { tr(&["Water reached the hero", "水淋到了英雄"]) }.to_owned()
+        } else {
+            format!("{} +{}    {} {}", score_l, self.s.cleared_score, turns_l, self.s.turns)
+        };
         let size = s.fit_size(&line, 14.0, pw - 32.0);
         s.text_c(&line, w / 2.0, py + 64.0, size, hex(th.dim), 1.0);
         let b = self.next_box();
-        let label = tr(&["Next level", "下一关", "次のレベル", "다음 레벨", "Siguiente nivel", "Próximo nível", "Niveau suivant", "Nächstes Level", "Следующий уровень", "下一關"]);
+        let label = tr(&[
+            "Next level",
+            "下一关",
+            "次のレベル",
+            "다음 레벨",
+            "Siguiente nivel",
+            "Próximo nível",
+            "Niveau suivant",
+            "Nächstes Level",
+            "Следующий уровень",
+            "下一關",
+        ]);
+        let label = if self.s.phase == FAILED { tr(&["Retry level", "重试本关"]) } else { label };
         let hv = self.hover == Hit::Next;
         let fill = hex(th.button);
         s.rect(b.0, b.1, b.2, b.3, b.3 / 2.0, if hv { mix(fill, hex(0xffffff), 0.15) } else { fill }, 1.0);
@@ -655,9 +758,11 @@ impl Flowline {
 /// readers, keyboards and switches.
 impl wg::Board for Flowline {
     fn grid(&self) -> Option<(i32, i32)> {
+        if matches!(self.s.phase, CLEARED | FAILED) { return Some((1, 1)); }
         Some((self.s.grid.n, self.s.grid.n))
     }
     fn cursor(&self) -> (i32, i32) {
+        if matches!(self.s.phase, CLEARED | FAILED) { return (0, 0); }
         (self.s.cx, self.s.cy)
     }
     fn focus(&mut self, x: i32, y: i32) {
@@ -672,7 +777,16 @@ impl wg::Board for Flowline {
         let (bx, by, _, c) = self.board_box();
         (bx, by, c)
     }
+    fn cell_box(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
+        if matches!(self.s.phase, CLEARED | FAILED) { return Some(self.next_box()); }
+        let (bx, by, _, c) = self.board_box();
+        Some((bx + x as f32 * c, by + y as f32 * c, c, c))
+    }
     fn cell(&self, x: i32, y: i32, out: &mut String) {
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            out.push_str(if self.s.phase == FAILED { tr(&["Retry level", "重试本关"]) } else { tr(&["Next level", "下一关"]) });
+            return;
+        }
         let g = &self.s.grid;
         if !g.inside(x, y) {
             return;
@@ -709,7 +823,10 @@ impl wg::Board for Flowline {
     fn status(&self, out: &mut String) {
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
         let turns_l = tr(&["turns", "旋转", "回転", "회전", "giros", "giros", "rotations", "Drehungen", "повороты", "旋轉"]);
-        out.push_str(&format!("{} {}, {} {}", level_l, self.s.level + 1, turns_l, self.s.turns));
+        out.push_str(&format!("{} {}, {} {}, {}s", level_l, self.s.level + 1, turns_l, self.s.turns, (self.remaining() + 999) / 1000));
+        if self.s.phase == FAILED {
+            out.push_str(tr(&[". Failed. Press Space to retry.", "。失败，按空格重试。"]));
+        }
     }
     fn keys(&self) -> &'static str {
         tr(&[
@@ -726,7 +843,7 @@ impl wg::Board for Flowline {
         ])
     }
     fn act(&mut self, x: i32, y: i32, a: i32, said: &mut String) -> u32 {
-        if self.s.phase == CLEARED {
+        if matches!(self.s.phase, CLEARED | FAILED) {
             let ev = self.next();
             self.status(said);
             return ev;
@@ -759,6 +876,60 @@ mod tests {
             ev |= g.update(&Input { held: 0, pressed: 0, dt: 16 });
         }
         ev
+    }
+
+    #[test]
+    fn stationary_clock_redraws_and_failure_freezes_water() {
+        let mut g = Flowline::new();
+        g.start(1);
+        g.s.turns = 1;
+        let before = g.picture();
+        run(&mut g, 1100);
+        assert_ne!(g.picture(), before);
+        g.s.phase = FAILED;
+        let wet = g.wet;
+        run(&mut g, 1100);
+        assert_eq!(g.wet, wet);
+        assert!(!g.moving());
+    }
+
+    #[test]
+    fn timeout_and_water_at_hero_lose_then_retry() {
+        let mut g = Flowline::new();
+        g.start(1);
+        let dealt = g.s.grid;
+        g.turn(0, 0, false);
+        g.s.level_ms = g.limit_ms();
+        assert!(run(&mut g, 16) & wg::EV_LOSE != 0);
+        assert_eq!(g.s.phase, FAILED);
+        assert_eq!(g.turn(0, 0, false), 0);
+        g.next();
+        assert!(g.s.grid == dealt);
+        assert_eq!(g.s.level_ms, 0);
+        // A continuous down-going pipe deliberately feeds the hero port.
+        let n = g.s.grid.n;
+        let x = n / 2;
+        g.s.grid.tap = 0;
+        g.s.grid.pipe.fill(0);
+        g.s.grid.rot.fill(0);
+        for cx in 0..x {
+            g.s.grid.pipe[cx as usize] = puzzle::LEFT | puzzle::RIGHT;
+        }
+        g.s.grid.pipe[x as usize] = puzzle::LEFT | puzzle::DOWN;
+        for y in 1..n {
+            g.s.grid.pipe[(y * n + x) as usize] = puzzle::UP | puzzle::DOWN;
+        }
+        g.s.turns = 1;
+        assert!(run(&mut g, 5000) & wg::EV_LOSE != 0);
+        assert_eq!(g.s.phase, FAILED);
+    }
+
+    #[test]
+    fn invalid_save_does_not_index_a_grid() {
+        let mut g = Flowline::new();
+        g.start(1);
+        g.s.grid.n = -1;
+        assert!(!g.loaded());
     }
 
     #[test]

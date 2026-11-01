@@ -568,46 +568,13 @@ fn line(s: &mut Screen, pts: &[(f32, f32)]) {
 /// A round top-bar button with its icon: a hooked arrow back for undo, a
 /// circling arrow for restart, a play mark for go.
 fn tool_button(s: &mut Screen, t: Tool, x: f32, y: f32, r: f32, on: bool, hover: bool) {
-    use std::f32::consts::PI;
-    let a = if on { 1.0 } else { 0.45 };
-    let (fill, ink) = match t {
-        Tool::Go => (0xffc928, 0x2a1810),
-        _ => (0xffffff, 0x2b3a55),
+    use wg::controls::{Button, Icon};
+    let icon = match t {
+        Tool::Undo => Icon::Undo,
+        Tool::Restart => Icon::Restart,
+        Tool::Go => Icon::Go,
     };
-    let fill = if hover { mix(hex(0xffffff), hex(fill), 0.25) } else { hex(fill) };
-    s.disc(x, y + 1.5, r, hex(0x1d2a44), 0.3 * a);
-    s.disc(x, y, r, fill, 0.92 * a);
-    let k = r / 13.0;
-    let ink = hex(ink);
-    let arc = |s: &mut Screen, (cx, cy): (f32, f32), from: f32, to: f32, rad: f32| {
-        let n = 10;
-        for i in 0..n {
-            let (a0, a1) = (from + (to - from) * i as f32 / n as f32, from + (to - from) * (i + 1) as f32 / n as f32);
-            s.line(cx + rad * a0.cos(), cy + rad * a0.sin(), cx + rad * a1.cos(), cy + rad * a1.sin(), 1.4 * k, ink, a);
-        }
-    };
-    match t {
-        Tool::Go => {
-            let h = 7.5 * k;
-            s.tri((x - h * 0.6, y - h), (x - h * 0.6, y + h), (x + h, y), ink, a);
-        }
-        Tool::Restart => {
-            let rad = 6.0 * k;
-            arc(s, (x, y), -PI * 0.35, PI * 1.45, rad);
-            // the arrowhead at the arc's start, pointing along it
-            let (ex, ey) = (x + rad * (-PI * 0.35_f32).cos(), y + rad * (-PI * 0.35_f32).sin());
-            s.tri((ex - 4.0 * k, ey - 3.6 * k), (ex + 3.0 * k, ey - 3.0 * k), (ex + 0.4 * k, ey + 3.6 * k), ink, a);
-        }
-        Tool::Undo => {
-            // a hook from the right curving back over to the left, arrowhead there
-            let (cx, cy, rad) = (x + 1.0 * k, y + 1.0 * k, 5.0 * k);
-            arc(s, (cx, cy), -PI * 0.5, PI * 0.5, rad);
-            s.line(cx, cy + rad, cx - 4.0 * k, cy + rad, 1.4 * k, ink, a);
-            s.line(cx, cy - rad, cx - 3.0 * k, cy - rad, 1.4 * k, ink, a);
-            let (ax, ay) = (cx - 3.0 * k, cy - rad);
-            s.tri((ax - 4.0 * k, ay), (ax + 0.5 * k, ay - 4.0 * k), (ax + 0.5 * k, ay + 4.0 * k), ink, a);
-        }
-    }
+    Button { icon, x, y, r }.draw(s, hover, on);
 }
 
 fn blank() -> Save {

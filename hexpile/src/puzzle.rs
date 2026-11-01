@@ -54,10 +54,7 @@ pub fn neighbours(radius: i32, i: usize) -> Vec<usize> {
     let all = cells(radius);
     let (q, r) = all[i];
     const AROUND: [(i32, i32); 6] = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
-    AROUND
-        .iter()
-        .filter_map(|&(dq, dr)| all.iter().position(|&c| c == (q + dq, r + dr)))
-        .collect()
+    AROUND.iter().filter_map(|&(dq, dr)| all.iter().position(|&c| c == (q + dq, r + dr))).collect()
 }
 
 impl Board {
@@ -69,7 +66,11 @@ impl Board {
     }
     pub fn top(&self, i: usize) -> u8 {
         let h = self.h[i] as usize;
-        if h == 0 { 0 } else { self.tile[i][h - 1] }
+        if h == 0 {
+            0
+        } else {
+            self.tile[i][h - 1]
+        }
     }
     /// how many tiles of the top colour sit together on top
     pub fn run(&self, i: usize) -> usize {
@@ -132,6 +133,16 @@ impl Board {
                 continue;
             }
             let c = self.top(i);
+            // A chain can expose a complete run even without a matching
+            // neighbour. Clear it before looking for the next transfer.
+            let n = self.run(i);
+            if n >= CLEAR {
+                chain += 1;
+                steps.push(Step::Clear { cell: i, n, c, points: n as i32 * chain });
+                self.take(i, n);
+                queue.push(i);
+                continue;
+            }
             let near: Vec<usize> = neighbours(self.radius, i).into_iter().filter(|&j| self.h[j] > 0 && self.top(j) == c).collect();
             if near.is_empty() {
                 continue;
@@ -154,6 +165,12 @@ impl Board {
                 }
                 i
             };
+            // Follow the colour across the entire connected group, not just
+            // the six cells around the original placement. Each successful
+            // transfer removes a run, so this cannot oscillate indefinitely.
+            if self.run(target) > n || target != i {
+                queue.push(target);
+            }
             let n = self.run(target);
             if n >= CLEAR {
                 chain += 1;
@@ -172,9 +189,7 @@ impl Board {
             && self._pad == [0; 3]
             && (0..MAXC).all(|i| {
                 let h = self.h[i] as usize;
-                (i < n || h == 0)
-                    && h <= MAXH
-                    && self.tile[i].iter().enumerate().all(|(k, &t)| if k < h { (1..=COLOURS).contains(&t) } else { t == 0 })
+                (i < n || h == 0) && h <= MAXH && self.tile[i].iter().enumerate().all(|(k, &t)| if k < h { (1..=COLOURS).contains(&t) } else { t == 0 })
             })
     }
 }
@@ -247,5 +262,33 @@ mod tests {
         assert_eq!((b.h[mid], b.top(mid)), (3, 3));
         assert_eq!((b.h[near[0]], b.h[near[1]], b.h[near[2]]), (1, 0, 0));
         assert!(b.valid());
+    }
+
+    #[test]
+    fn merge_reaches_beyond_the_placement_and_replays_exactly() {
+        let mut b = Board::new(2);
+        // Three cells in a straight line; the last isn't next to the first.
+        let all = cells(2);
+        let ids: Vec<_> = [(-2, 0), (-1, 0), (0, 0)].map(|p| all.iter().position(|&q| p == q).unwrap()).into();
+        b.put(ids[0], &[2, 1, 1]);
+        b.put(ids[1], &[1, 1, 1, 1]);
+        b.put(ids[2], &[1, 1, 1, 1]);
+        let mut replay = b;
+        let steps = b.settle(ids[0]);
+        for step in &steps {
+            replay.apply(step);
+        }
+        assert!(replay == b);
+        assert_eq!(b.h.iter().map(|&h| h as usize).sum::<usize>(), 1);
+        assert!(b.valid());
+    }
+
+    #[test]
+    fn exposed_complete_run_clears_without_a_neighbour() {
+        let mut b = Board::new(2);
+        b.put(9, &[2; CLEAR]);
+        let steps = b.settle(9);
+        assert!(matches!(steps.as_slice(), [Step::Clear { n: CLEAR, .. }]));
+        assert_eq!(b.empty_cells(), b.cells());
     }
 }

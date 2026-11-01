@@ -51,7 +51,11 @@ impl Room {
     }
     /// a monster's power once the hero has taken `moves` rooms
     pub fn strength(&self, moves: u32) -> i32 {
-        if self.kind == BRUTE { self.val.saturating_add(self.grow as i32 * moves as i32) } else { self.val }
+        if self.kind == BRUTE {
+            self.val.saturating_add(self.grow as i32 * moves as i32)
+        } else {
+            self.val
+        }
     }
 }
 
@@ -78,7 +82,7 @@ pub fn take(power: i32, room: &Room, moves: u32) -> Option<i32> {
         POTION => Some(power.saturating_add(room.val)),
         POISON => Some(power - room.val).filter(|&p| p > 0),
         CHEST => Some(power.saturating_mul(2)),
-        TRAP => Some((power + 1) / 2),
+        TRAP => Some(power / 2 + power % 2),
         _ => Some(power),
     }
 }
@@ -110,6 +114,11 @@ impl Tower {
             return false;
         }
         if self.locked(taken, r) {
+            return false;
+        }
+        // The top-right room is the boss. Clearing the tower opens its
+        // door; a potion or a trap can no longer occupy the final room.
+        if r + 1 == self.n() && (0..r).any(|i| self.rooms[i].kind != EMPTY && taken & 1 << i == 0) {
             return false;
         }
         let (f, c) = self.place(r);
@@ -173,20 +182,8 @@ impl Tower {
 
 /// The rooms besides monsters a tower can hold, each from the level (from
 /// 0) it joins at; a kind listed twice can come twice from the later level.
-const ITEMS: [(i8, i32); 12] = [
-    (TRAP, 0),
-    (POTION, 1),
-    (CHEST, 2),
-    (POISON, 4),
-    (BRUTE, 6),
-    (KEY, 9),
-    (TRAP, 12),
-    (POTION, 14),
-    (BRUTE, 16),
-    (CHEST, 18),
-    (POISON, 21),
-    (TRAP, 24),
-];
+const ITEMS: [(i8, i32); 12] =
+    [(TRAP, 0), (POTION, 1), (CHEST, 2), (POISON, 4), (BRUTE, 6), (KEY, 9), (TRAP, 12), (POTION, 14), (BRUTE, 16), (CHEST, 18), (POISON, 21), (TRAP, 24)];
 
 /// A tower's floors at difficulty `d` (the level from 0, going on past the
 /// last level in endless mode): a floor more about every seven levels.
@@ -259,7 +256,7 @@ fn build(rng: &mut Rng, d: i32) -> Option<Tower> {
     // at least a third of the rooms (and two) are monsters
     let mut kinds = items(rng, d, n - (n / 3).max(2));
     kinds.resize(n, MONSTER);
-    rng.shuffle(&mut kinds);
+    rng.shuffle(&mut kinds[..n - 1]);
     for r in 0..n {
         t.rooms[r].kind = kinds[r];
     }
@@ -307,6 +304,7 @@ fn build(rng: &mut Rng, d: i32) -> Option<Tower> {
             t.rooms[r].look = (rank * LOOKS as usize / vals.len().max(1)) as i8;
         }
     }
+    t.rooms[n - 1].look = LOOKS - 1;
     Some(t)
 }
 

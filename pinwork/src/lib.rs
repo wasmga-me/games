@@ -15,7 +15,7 @@ use sim::World;
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen, Sprite};
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 const PLAY: i32 = 0;
 const CLEARED: i32 = 1;

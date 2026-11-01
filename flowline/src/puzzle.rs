@@ -80,7 +80,33 @@ impl Grid {
     /// whether the water reaches the drain
     pub fn through(&self) -> bool {
         let x = self.n - 1;
-        self.flow()[(self.drain * self.n + x) as usize] >= 0 && self.open(x, self.drain) & RIGHT != 0
+        self.flow()[(self.drain * self.n + x) as usize] >= 0 && self.open(x, self.drain) & RIGHT != 0 && self.leaks().is_empty()
+    }
+    /// Unsealed openings on the live network. Unconnected decorative
+    /// pipes don't leak; the inlet and garden outlet are intentional ports.
+    pub fn leaks(&self) -> Vec<(i32, i32, usize)> {
+        let flow = self.flow();
+        let mut leaks = Vec::new();
+        for y in 0..self.n {
+            for x in 0..self.n {
+                if flow[(y * self.n + x) as usize] < 0 {
+                    continue;
+                }
+                for k in 0..4 {
+                    if self.open(x, y) & (1 << k) == 0 {
+                        continue;
+                    }
+                    if (x == 0 && y == self.tap && k == 3) || (x == self.n - 1 && y == self.drain && k == 1) {
+                        continue;
+                    }
+                    let (nx, ny) = (x + DX[k], y + DY[k]);
+                    if !self.inside(nx, ny) || self.open(nx, ny) & (1 << ((k + 2) % 4)) == 0 {
+                        leaks.push((x, y, k));
+                    }
+                }
+            }
+        }
+        leaks
     }
     pub fn valid(&self) -> bool {
         let cells = (self.n * self.n) as usize;
@@ -117,9 +143,7 @@ fn walk(n: i32, tap: i32, drain: i32, rng: &mut Rng, min_len: usize) -> Option<V
             if rng.below(3) == 0 {
                 dirs.sort_by_key(|&k| if k == 1 { 0 } else { 1 });
             }
-            let next = dirs.iter().map(|&k| (x + DX[k], y + DY[k])).find(|&(nx, ny)| {
-                nx >= 0 && ny >= 0 && nx < n && ny < n && !seen[(ny * n + nx) as usize]
-            });
+            let next = dirs.iter().map(|&k| (x + DX[k], y + DY[k])).find(|&(nx, ny)| nx >= 0 && ny >= 0 && nx < n && ny < n && !seen[(ny * n + nx) as usize]);
             match next {
                 Some((nx, ny)) => {
                     seen[(ny * n + nx) as usize] = true;
@@ -149,11 +173,7 @@ pub fn deal(level: i32) -> Grid {
         for (i, &here) in path.iter().enumerate() {
             let inn = if i == 0 { LEFT } else { 1 << ((dir_to(here, path[i - 1])) as u8) };
             let out = if i + 1 == path.len() { RIGHT } else { 1 << (dir_to(here, path[i + 1]) as u8) };
-            let mut m = inn | out;
-            // now and then a branch off the line, to mislead
-            if level > 4 && rng.below(6) == 0 {
-                m |= [UP, RIGHT, DOWN, LEFT][rng.below(4) as usize];
-            }
+            let m = inn | out;
             g.pipe[(here.1 * n + here.0) as usize] = m;
         }
         // the rest: mostly bends and straights, a few three-ways
@@ -161,7 +181,7 @@ pub fn deal(level: i32) -> Grid {
             if g.pipe[i] == 0 {
                 let m = match rng.below(10) {
                     4..=6 => UP | DOWN,
-                    7..=8 => UP | RIGHT | DOWN,
+                    7..=8 => LEFT | RIGHT,
                     _ => UP | RIGHT,
                 };
                 g.pipe[i] = turned(m, rng.below(4) as u8);
@@ -169,6 +189,12 @@ pub fn deal(level: i32) -> Grid {
         }
         for r in g.rot[..(n * n) as usize].iter_mut() {
             *r = rng.below(4) as u8;
+        }
+        // The player always gets a dry board to inspect before the first
+        // turn starts the clock. No randomly preconnected hazard.
+        let inlet = (tap * n) as usize;
+        while g.open(0, tap) & LEFT != 0 {
+            g.rot[inlet] = (g.rot[inlet] + 1) % 4;
         }
         if !g.through() {
             return g;
@@ -230,6 +256,19 @@ pub fn solve(g: &Grid) -> Option<Grid> {
 mod tests {
     use super::*;
     #[test]
+    fn connected_outlet_with_an_open_branch_is_not_a_win() {
+        let mut g = Grid { n: 4, tap: 0, drain: 0, pipe: [0; MAXN * MAXN], rot: [0; MAXN * MAXN] };
+        g.pipe[..4].fill(LEFT | RIGHT);
+        assert!(g.through());
+        g.pipe[1] |= UP;
+        assert!(!g.through());
+        assert_eq!(g.leaks(), vec![(1, 0, 0)]);
+        // A neighbouring pipe with its opening facing away cannot carry water.
+        g.pipe[1] = UP | DOWN;
+        assert_eq!(g.flow()[1], -1);
+    }
+
+    #[test]
     fn every_level_deals() {
         for l in 0..LEVELS {
             let g = deal(l);
@@ -240,4 +279,3 @@ mod tests {
         }
     }
 }
-

@@ -210,13 +210,16 @@ impl Level {
             return false;
         }
         let in_box = |a: usize| (0..ns).filter(|&j| self.screw[j].state == IN_BOX && self.screw[j].slot as usize / 3 == a).count();
-        (0..2).all(|a| (self.open[a] == -1 && self.fill[a] == 0 || (0..self.next).contains(&self.open[a]) && (0..3).contains(&self.fill[a])) && in_box(a) == self.fill[a] as usize)
-            && self.colour[..nb].iter().all(|&c| (1..=COLOURS).contains(&c))
+        (0..2).all(|a| {
+            (self.open[a] == -1 && self.fill[a] == 0 || (0..self.next).contains(&self.open[a]) && (0..3).contains(&self.fill[a]))
+                && in_box(a) == self.fill[a] as usize
+        }) && self.colour[..nb].iter().all(|&c| (1..=COLOURS).contains(&c))
             && self.colour[nb..].iter().all(|&c| c == 0)
             && self.spare[SPARE..].iter().all(|&s| s == 0)
-            && self.spare[..SPARE].iter().enumerate().all(|(k, &s)| {
-                s == 0 || (s as usize <= ns && self.screw[s as usize - 1].state == IN_SPARE && self.screw[s as usize - 1].slot as usize == k)
-            })
+            && self.spare[..SPARE]
+                .iter()
+                .enumerate()
+                .all(|(k, &s)| s == 0 || (s as usize <= ns && self.screw[s as usize - 1].state == IN_SPARE && self.screw[s as usize - 1].slot as usize == k))
             && (0..ns).all(|j| {
                 let s = &self.screw[j];
                 (s.plate as usize) < np
@@ -252,30 +255,34 @@ pub fn deal(level: i32) -> Level {
             return lv;
         }
     }
-    let lv = choose(level);
+    let lv = choose(level).0;
     LAST.set(Some((level, lv)));
     lv
 }
 
-fn choose(level: i32) -> Level {
+fn choose(level: i32) -> (Level, Vec<usize>) {
     let mut rng = Rng::new(0x5343_5257 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
     // deals until a hasty player, taking whatever a box wants and any
     // screw otherwise, loses close to this share of the time: now and then
     // at first, mostly at the end (the best found if none comes close)
     let want = TRIALS as f32 * (0.15 + 0.5 * level as f32 / (LEVELS - 1) as f32);
-    let mut best: Option<(f32, Level)> = None;
+    let mut best: Option<(f32, Level, Vec<usize>)> = None;
     for _ in 0..DEALS {
-        let lv = candidate(level, &mut rng);
+        let (lv, order) = candidate(level, &mut rng);
         let lost = (0..TRIALS).filter(|_| !hasty(&lv, &mut rng)).count();
+        if lost == 0 {
+            continue;
+        }
         let off = (lost as f32 - want).abs();
         if best.as_ref().is_none_or(|b| off < b.0) {
-            best = Some((off, lv));
+            best = Some((off, lv, order));
         }
         if off < TRIALS as f32 * 0.15 {
             break;
         }
     }
-    best.unwrap().1
+    let (_, lv, order) = best.unwrap();
+    (lv, order)
 }
 
 const DEALS: usize = 60;
@@ -307,7 +314,7 @@ fn hasty(lv: &Level, rng: &mut Rng) -> bool {
 }
 
 /// One deal: plates layer by layer, then colours along a way off that works.
-fn candidate(level: i32, rng: &mut Rng) -> Level {
+fn candidate(level: i32, rng: &mut Rng) -> (Level, Vec<usize>) {
     let (layers, want, colours) = shape(level);
     loop {
         let mut lv = Level::empty();
@@ -330,9 +337,7 @@ fn candidate(level: i32, rng: &mut Rng) -> Level {
                     holes.push(((p.ax + p.bx) / 2, (p.ay + p.by) / 2));
                 }
                 // screws keep apart, and plates on one layer don't touch
-                let apart = holes.iter().all(|&(x, y)| {
-                    lv.screw[..lv.screws as usize].iter().all(|s| ((s.x - x) as f32).hypot((s.y - y) as f32) > 92.0)
-                });
+                let apart = holes.iter().all(|&(x, y)| lv.screw[..lv.screws as usize].iter().all(|s| ((s.x - x) as f32).hypot((s.y - y) as f32) > 92.0));
                 let clear = lv.plate[..placed].iter().filter(|q| q.layer == layer).all(|q| {
                     (0..=8).all(|t| {
                         let f = t as f32 / 8.0;
@@ -420,7 +425,7 @@ fn candidate(level: i32, rng: &mut Rng) -> Level {
             }
             let mut play = test;
             if order.iter().all(|&i| play.tap(i).is_some()) && play.cleared() {
-                return test;
+                return (test, order);
             }
         }
     }
@@ -462,7 +467,13 @@ mod tests {
     #[test]
     fn every_level_deals() {
         for l in 0..LEVELS {
-            let lv = deal(l);
+            let (lv, order) = choose(l);
+            let mut play = lv;
+            for i in order {
+                assert!(play.tap(i).is_some());
+                assert!(play.valid());
+            }
+            assert!(play.cleared(), "level {} has no witnessed win", l + 1);
             assert!(lv.valid(), "level {}", l + 1);
             let (layers, _, colours) = shape(l);
             println!("level {} layers {} colours {} plates {} screws {}", l + 1, layers, colours, lv.plates, lv.screws);

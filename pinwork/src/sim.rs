@@ -282,6 +282,71 @@ fn capsule(p: (f32, f32), pr: f32, a: (f32, f32), b: (f32, f32), r: f32) -> Opti
     Some(if d > 1e-4 { ((dx / d, dy / d), reach - d) } else { ((0.0, -1.0), reach) })
 }
 
+/// First contact along a circle's entire motion, including the round ends
+/// of a wall. Overlap-only collision misses particles pushed through a pin
+/// by fluid pressure or a rigid stone's shape correction.
+fn sweep(from: (f32, f32), to: (f32, f32), pr: f32, seg: &Seg) -> Option<(f32, (f32, f32))> {
+    let (a, b, r, (x0, y0, x1, y1)) = *seg;
+    if from.0.max(to.0) + pr < x0 || from.0.min(to.0) - pr > x1 || from.1.max(to.1) + pr < y0 || from.1.min(to.1) - pr > y1 {
+        return None;
+    }
+    let radius = pr + r;
+    let v = (to.0 - from.0, to.1 - from.1);
+    let vv = v.0 * v.0 + v.1 * v.1;
+    if vv < 1e-10 {
+        return None;
+    }
+    let mut hit: Option<(f32, (f32, f32))> = None;
+    let mut keep = |t: f32, n: (f32, f32)| {
+        if (0.0..=1.0).contains(&t) && v.0 * n.0 + v.1 * n.1 < -1e-6 && hit.is_none_or(|h| t < h.0) {
+            hit = Some((t, n));
+        }
+    };
+    let len = dist(a, b);
+    if len > 1e-6 {
+        let axis = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+        let n = (-axis.1, axis.0);
+        let d = (from.0 - a.0) * n.0 + (from.1 - a.1) * n.1;
+        let speed = v.0 * n.0 + v.1 * n.1;
+        if speed.abs() > 1e-6 {
+            for sign in [-1.0, 1.0] {
+                let t = (sign * radius - d) / speed;
+                let along = (from.0 + v.0 * t - a.0) * axis.0 + (from.1 + v.1 * t - a.1) * axis.1;
+                if (0.0..=len).contains(&along) {
+                    keep(t, (sign * n.0, sign * n.1));
+                }
+            }
+        }
+    }
+    for c in [a, b] {
+        let q = (from.0 - c.0, from.1 - c.1);
+        let dot = q.0 * v.0 + q.1 * v.1;
+        let disc = dot * dot - vv * (q.0 * q.0 + q.1 * q.1 - radius * radius);
+        if disc >= 0.0 {
+            let t = (-dot - disc.sqrt()) / vv;
+            keep(t, ((q.0 + t * v.0) / radius, (q.1 + t * v.1) / radius));
+        }
+    }
+    hit
+}
+
+fn seal(g: &mut Grain, safe: &mut (f32, f32), segs: &[Seg]) {
+    let r = radius(g.kind);
+    for _ in 0..4 {
+        let hit = segs.iter().filter_map(|s| sweep(*safe, g.p, r, s)).min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((t, n)) = hit else { break };
+        let v = (g.p.0 - safe.0, g.p.1 - safe.1);
+        let contact = (safe.0 + v.0 * t + n.0 * 0.001, safe.1 + v.1 * t + n.1 * 0.001);
+        let remain = (v.0 * (1.0 - t), v.1 * (1.0 - t));
+        let into = (remain.0 * n.0 + remain.1 * n.1).min(0.0);
+        g.p = (contact.0 + remain.0 - into * n.0, contact.1 + remain.1 - into * n.1);
+        // Remove the normal velocity as well as the positional error.
+        slide(g, n, 0.0);
+        *safe = contact;
+    }
+    *safe = g.p;
+}
+
 /// The way out of a box for a circle, and how deep it is in.
 fn boxed(p: (f32, f32), pr: f32, r: (f32, f32, f32, f32)) -> Option<((f32, f32), f32)> {
     let q = (p.0.clamp(r.0, r.2), p.1.clamp(r.1, r.3));
@@ -347,7 +412,8 @@ fn lattice_density() -> f32 {
 
 impl World {
     pub fn new(lv: &Level) -> World {
-        let grains = lv.grains.iter().map(|&(x, y, kind)| Grain { p: (x, y), prev: (x, y), kind, heat: 0.0, mark: (x, y), fell: y, held: false, lump: LOOSE }).collect();
+        let grains =
+            lv.grains.iter().map(|&(x, y, kind)| Grain { p: (x, y), prev: (x, y), kind, heat: 0.0, mark: (x, y), fell: y, held: false, lump: LOOSE }).collect();
         let pins = lv.pins.iter().map(|&(ax, ay, bx, by)| Pin { a: (ax, ay), b: (bx, by), out: 0.0, goal: 0.0, jam: 0.0, moved: false }).collect();
         let orc = lv.orc.map(|(x, feet)| Orc { p: (x, feet - ORC_UP), prev: (x, feet - ORC_UP), alive: true, start: (x, feet - ORC_UP) });
         World {
@@ -401,6 +467,7 @@ impl World {
 
     /// One step.
     pub fn step(&mut self, lv: &Level) {
+        let mut safe: Vec<_> = self.grains.iter().map(|g| g.p).collect();
         // the pins slide toward where the player wants them, until one
         // runs into another
         for pin in self.pins.iter_mut() {
@@ -486,16 +553,18 @@ impl World {
         }
         // then the fluid pushes apart where it is crowded, and lava meeting
         // water turns to stone
+        // Rebuild before finding neighbours: a closed pin also separates
+        // pressure, viscosity and water/lava reactions on its two sides.
+        let walls = lv.walls.iter().map(|&(ax, ay, bx, by)| ((ax, ay), (bx, by), WALL_R));
+        let pins = self.pins.iter().filter(|p| !p.gone()).map(|p| (p.now().0, p.now().1, PIN_R));
+        self.segs.clear();
+        self.segs.extend(walls.chain(pins).map(|(a, b, r)| (a, b, r, (a.0.min(b.0) - r, a.1.min(b.1) - r, a.0.max(b.0) + r, a.1.max(b.1) + r))));
         self.find_pairs();
         self.react();
         self.fuse();
         self.relax();
         // the walls and the pins still in, with the boxes round them
-        let walls = lv.walls.iter().map(|&(ax, ay, bx, by)| ((ax, ay), (bx, by), WALL_R));
-        let pins = self.pins.iter().filter(|p| !p.gone()).map(|p| (p.now().0, p.now().1, PIN_R));
-        let mut segs = std::mem::take(&mut self.segs);
-        segs.clear();
-        segs.extend(walls.chain(pins).map(|(a, b, r)| (a, b, r, (a.0.min(b.0) - r, a.1.min(b.1) - r, a.0.max(b.0) + r, a.1.max(b.1) + r))));
+        let segs = std::mem::take(&mut self.segs);
         let solid = |p: (f32, f32), pr: f32| -> Option<((f32, f32), f32)> {
             let mut best: Option<((f32, f32), f32)> = None;
             for &(a, b, r, (x0, y0, x1, y1)) in &segs {
@@ -514,8 +583,9 @@ impl World {
         for _ in 0..3 {
             self.collide();
             self.keep_shapes();
-            for g in self.grains.iter_mut().filter(|g| g.kind != GONE) {
+            for (i, g) in self.grains.iter_mut().enumerate().filter(|(_, g)| g.kind != GONE) {
                 let r = radius(g.kind);
+                seal(g, &mut safe[i], &segs);
                 // a few passes, as a particle can sit in a corner
                 for _ in 0..2 {
                     match solid(g.p, r) {
@@ -534,6 +604,7 @@ impl World {
                         g.p = (g.p.0 + dx * k, g.p.1 + dy * k);
                     }
                 }
+                seal(g, &mut safe[i], &segs);
             }
             if let Some(o) = &mut self.orc {
                 if let Some((n, d)) = solid(o.p, ORC_R) {
@@ -607,7 +678,7 @@ impl World {
                         continue;
                     }
                     let q = self.grains[ju].p;
-                    if (q.0 - p.0).powi(2) + (q.1 - p.1).powi(2) < H * H {
+                    if (q.0 - p.0).powi(2) + (q.1 - p.1).powi(2) < H * H && !self.segs.iter().any(|s| sweep(p, q, 0.0, s).is_some()) {
                         let wet = liquid(self.grains[i].kind) && liquid(self.grains[ju].kind);
                         (if wet { &mut self.wet } else { &mut self.dry }).push((i as u32, ju as u32));
                     }
@@ -873,4 +944,47 @@ impl World {
 fn centre(grains: &[Grain], of: &[u32]) -> (f32, f32) {
     let n = of.len() as f32;
     of.iter().fold((0.0, 0.0), |c, &g| (c.0 + grains[g as usize].p.0 / n, c.1 + grains[g as usize].p.1 / n))
+}
+
+#[cfg(test)]
+mod collision_tests {
+    use super::*;
+
+    fn segment(a: (f32, f32), b: (f32, f32), r: f32) -> Seg {
+        (a, b, r, (a.0.min(b.0) - r, a.1.min(b.1) - r, a.0.max(b.0) + r, a.1.max(b.1) + r))
+    }
+
+    #[test]
+    fn fast_motion_and_pressure_cannot_cross_a_pin() {
+        for (a, b, from, to) in [
+            ((0.0, 100.0), (100.0, 100.0), (50.0, 80.0), (50.0, 130.0)),
+            ((100.0, 0.0), (100.0, 100.0), (80.0, 50.0), (130.0, 50.0)),
+            ((0.0, 0.0), (100.0, 100.0), (20.0, 60.0), (70.0, 30.0)),
+        ] {
+            let barrier = segment(a, b, PIN_R);
+            let (t, _) = sweep(from, to, DROP_R, &barrier).expect("swept contact");
+            assert!(t > 0.0 && t < 1.0);
+        }
+        let bar = segment((0.0, 100.0), (100.0, 100.0), PIN_R);
+        assert!(sweep((110.0, 80.0), (110.0, 130.0), DROP_R, &bar).is_none(), "open gap must pass fluid");
+        assert!(sweep((103.0, 80.0), (103.0, 130.0), DROP_R, &bar).is_some(), "round pin tip must seal");
+    }
+
+    #[test]
+    fn untouched_chambers_hold_their_contents() {
+        for k in 0..crate::levels::LEVELS {
+            let lv = crate::levels::level(k);
+            let mut world = World::new(&lv);
+            for _ in 0..360 {
+                world.step(&lv);
+            }
+            assert!(!world.burned && !world.caught, "level {} fails without input", k + 1);
+            assert!(world.grains.iter().all(|g| g.p.0.is_finite() && g.p.1.is_finite()));
+            for g in &world.grains {
+                for &(ax, ay, bx, by) in &lv.walls {
+                    assert!(seg_dist(g.p, (ax, ay), (bx, by)) + 0.1 >= WALL_R + radius(g.kind), "level {} leaks into a wall", k + 1);
+                }
+            }
+        }
+    }
 }

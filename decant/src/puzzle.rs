@@ -27,7 +27,11 @@ impl Stand {
     }
     pub fn top(&self, p: usize) -> u8 {
         let l = self.len(p);
-        if l == 0 { 0 } else { self.tube[p][l - 1] }
+        if l == 0 {
+            0
+        } else {
+            self.tube[p][l - 1]
+        }
     }
     /// how many layers of the top colour lie together at the top of tube p
     pub fn run(&self, p: usize) -> usize {
@@ -94,9 +98,7 @@ impl Stand {
     }
     /// the same position whatever order the tubes stand in
     fn key(&self) -> [u64; 3] {
-        let mut tubes: Vec<u16> = (0..self.n as usize)
-            .map(|p| self.tube[p].iter().fold(0u16, |k, &c| k << 4 | c as u16))
-            .collect();
+        let mut tubes: Vec<u16> = (0..self.n as usize).map(|p| self.tube[p].iter().fold(0u16, |k, &c| k << 4 | c as u16)).collect();
         tubes.sort_unstable();
         let mut k = [0u64; 3];
         for (i, v) in tubes.iter().enumerate() {
@@ -116,23 +118,33 @@ pub fn colours(level: i32) -> usize {
 pub fn deal(level: i32) -> (Stand, i32) {
     let c = colours(level);
     let mut rng = Rng::new(0x5249_4e47 ^ (level as u32 + 1).wrapping_mul(2_654_435_761));
-    loop {
+    // Select by measured solving work, not only by a shuffled colour
+    // count. Early chapters allow larger runs; later ones need more
+    // separation and recombination, without demanding reflexes.
+    let target = 6 + level * 3 / 2;
+    let mut best: Option<(i32, Stand, i32)> = None;
+    for _ in 0..64 {
         let mut bag: Vec<u8> = (1..=c as u8).flat_map(|k| [k; CAP]).collect();
         rng.shuffle(&mut bag);
         let mut st = Stand::empty(c as i32 + 2);
         for (i, &k) in bag.iter().enumerate() {
             st.tube[i / CAP][i % CAP] = k;
         }
-        // no layer already on one of its own colour, so nothing comes for free
-        let together = (0..c).any(|p| (1..CAP).any(|i| st.tube[p][i] == st.tube[p][i - 1]));
-        // the first levels may keep a pair together, later ones never
-        if together && level >= 6 {
+        if st.solved() || (0..c).any(|p| st.done(p)) {
             continue;
         }
-        if let Some(par) = solve(&st, 400_000) {
-            return (st, par);
+        if let Some(par) = solve(&st, 100_000) {
+            let off = (par - target).abs();
+            if best.as_ref().is_none_or(|b| off < b.0) {
+                best = Some((off, st, par));
+            }
+            if off == 0 {
+                break;
+            }
         }
     }
+    let (_, st, par) = best.expect("solvable water-sort deal");
+    (st, par)
 }
 
 /// Depth first, the most useful moves first, skipping positions seen
@@ -191,6 +203,40 @@ fn dfs(st: &mut Stand, seen: &mut HashSet<[u64; 3]>, limit: usize, path: &mut Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pours_conserve_volume_and_dead_ends_are_reachable() {
+        let mut rng = Rng::new(91);
+        let mut losing_levels = 0;
+        for l in 0..LEVELS {
+            let (st, _) = deal(l);
+            let mut lost = false;
+            for _ in 0..120 {
+                let mut trial = st;
+                for _ in 0..100 {
+                    let n = trial.n as usize;
+                    let moves: Vec<_> = (0..n)
+                        .flat_map(|a| (0..n).map(move |b| (a, b)))
+                        .filter(|&(a, b)| trial.can(a, b) > 0 && !(trial.len(b) == 0 && trial.run(a) == trial.len(a)))
+                        .collect();
+                    if moves.is_empty() {
+                        lost |= !trial.solved();
+                        break;
+                    }
+                    let (a, b) = moves[rng.below(moves.len() as u32) as usize];
+                    trial.shift(a, b, trial.can(a, b));
+                    assert!(trial.valid(colours(l)), "volume changed on level {}", l + 1);
+                }
+                if lost {
+                    break;
+                }
+            }
+            losing_levels += lost as usize;
+        }
+        // Small opening lessons may allow every sensible move. Most of
+        // the campaign must require planning, not just repeated pouring.
+        assert!(losing_levels >= 20, "only {losing_levels} levels have a dead end");
+    }
+
     #[test]
     fn every_level_deals() {
         for l in 0..LEVELS {

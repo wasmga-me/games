@@ -63,6 +63,21 @@ sh build.sh
 
 Building C games requires `clang` and `wasm-ld` with `wasm32` target support (LLVM 15+), and building Rust games requires Cargo with `rustup target add wasm32-unknown-unknown`. Compiled binaries are written to `out/<id>/<id>.wasm`.
 
+## Gameplay checks
+
+Run `python3 check-ad-games.py` to check Pinwork, Decant, Unpark, Higher Floor,
+Flowline, Boarding, Unbolt, Hive Guard and Hexpile. The native Rust tests replay
+campaign solutions and check failure states, retry, saves and physics regressions.
+Pass game IDs to run only those suites, for example
+`python3 check-ad-games.py boarding flowline`.
+
+Boarding moves passengers into matching buses through a five-seat waiting bench.
+Flowline requires a sealed route to the garden before the timer expires while
+keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floor
+reserves the marked boss for last; Pinwork seals fluid barriers and teaches its
+eight mechanisms in original/mirrored pairs. Decant uses increasing solution-length
+targets, and Unbolt retains a verified winning screw-removal sequence for every deal.
+
 ## Licence
 
 MIT; see [LICENSE](LICENSE). In-game Latin text is rendered from [Inter](https://rsms.me/inter/) glyphs and Simplified Chinese text from [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) glyphs (`.zh.h` and `zh_glyphs` files), both licensed under the SIL Open Font License 1.1. The Zork story files (`zork1.z3`, `zork2.z3`, `zork3.z3`) are unmodified Infocom originals from [historicalsource](https://github.com/historicalsource), released by Microsoft under the MIT License (see `STORY-LICENSE` in each game directory).
