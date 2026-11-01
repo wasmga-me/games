@@ -16,10 +16,8 @@ const PULL_MS: f32 = 240.0;
 pub const JAM_MS: f32 = 260.0;
 /// ms a new stone joins the stones it touches into one lump
 const HEAT_MS: f32 = 220.0;
-/// drops of lava each drop of water sets to stone, and how far from the
-/// water they may be (through the stone it has made)
+/// drops of connected lava each drop of water sets to stone
 const COLD: usize = 3;
-const CHILL: f32 = 12.0 * SPACING;
 /// a drop of water that boiled away
 const GONE: u8 = 255;
 /// ms a puff of steam lasts
@@ -232,10 +230,6 @@ pub struct World {
     rest_density: f32,
     /// lumps of stone; one that joined another is left empty
     lumps: Vec<Lump>,
-    /// drops of water boiling away this step, and which drops of lava
-    /// touch water or stone (where the cold gets in)
-    boil: Vec<usize>,
-    edge: Vec<bool>,
 }
 
 /// the neighbour grid, cells as wide as a drop's reach
@@ -434,8 +428,6 @@ impl World {
             density: Vec::new(),
             rest_density: lattice_density(),
             lumps: Vec::new(),
-            boil: Vec::new(),
-            edge: Vec::new(),
         }
     }
 
@@ -596,7 +588,7 @@ impl World {
                 if let Some((n, d)) = boxed(g.p, r, knight) {
                     slide(g, n, d);
                 }
-                if let Some(o) = &self.orc {
+                if let Some(o) = self.orc.as_ref().filter(|o| o.alive) {
                     let (dx, dy) = (g.p.0 - o.p.0, g.p.1 - o.p.1);
                     let d = (dx * dx + dy * dy).sqrt();
                     if d < ORC_R + r && d > 1e-4 {
@@ -678,7 +670,10 @@ impl World {
                         continue;
                     }
                     let q = self.grains[ju].p;
-                    if (q.0 - p.0).powi(2) + (q.1 - p.1).powi(2) < H * H && !self.segs.iter().any(|s| sweep(p, q, 0.0, s).is_some()) {
+                    if (q.0 - p.0).powi(2) + (q.1 - p.1).powi(2) < H * H && !self.segs.iter().any(|&(a, b, r, (x0, y0, x1, y1))| {
+                        p.0.max(q.0) >= x0 && p.0.min(q.0) <= x1 && p.1.max(q.1) >= y0 && p.1.min(q.1) <= y1
+                            && seg_seg_dist(p, q, a, b) <= r
+                    }) {
                         let wet = liquid(self.grains[i].kind) && liquid(self.grains[ju].kind);
                         (if wet { &mut self.wet } else { &mut self.dry }).push((i as u32, ju as u32));
                     }
@@ -797,83 +792,56 @@ impl World {
         }
     }
 
-    /// Water that touches lava (or stone with lava under it) boils away in
-    /// a puff of steam, and sets the COLD drops of lava nearest it that
-    /// touch water or stone to stone: water hardens as much lava as there
-    /// is water for, from where they meet.
+    /// Cooling travels through a connected lava/stone pool. A crust must
+    /// not insulate an arbitrary pocket just because it exceeds a radius.
+    /// The neighbour graph already excludes contacts across closed barriers.
     fn react(&mut self) {
-        // water on stone looks for lava under it now and then, while there
-        // is lava left
-        let mark = self.steps.is_multiple_of(MARK) && self.grains.iter().any(|g| g.kind == LAVA);
-        let World { grains, wet, dry, steam, boil, edge, head, next, .. } = self;
-        edge.clear();
-        edge.resize(grains.len(), false);
-        for &(i, j) in wet.iter().chain(dry.iter()) {
+        if !self.grains.iter().any(|g| g.kind == LAVA) { return; }
+        fn root(parent: &mut [usize], mut i: usize) -> usize {
+            while parent[i] != i {
+                parent[i] = parent[parent[i]];
+                i = parent[i];
+            }
+            i
+        }
+        let mut parent: Vec<_> = (0..self.grains.len()).collect();
+        // Coins conduct heat too: they must not insulate trapped lava
+        // from water sitting directly on the pile.
+        let rock = |k| k == LAVA || k == STONE || k == GOLD;
+        for &(i, j) in self.wet.iter().chain(&self.dry) {
             let (i, j) = (i as usize, j as usize);
-            for (x, y) in [(i, j), (j, i)] {
-                let (g, h) = (grains[x], grains[y]);
-                if g.kind == WATER && (h.kind == LAVA || (h.kind == STONE && (h.heat > 0.0 || mark))) && dist(g.p, h.p) < TOUCH {
-                    boil.push(x);
-                }
-                // lava the cold can reach: at the water or the stone
-                if g.kind == LAVA && (h.kind == WATER || h.kind == STONE) && dist(g.p, h.p) < TOUCH {
-                    edge[x] = true;
-                }
+            let (a, b) = (self.grains[i], self.grains[j]);
+            if rock(a.kind) && rock(b.kind) && dist(a.p, b.p) < radius(a.kind) + radius(b.kind) + 1.0 {
+                let (a, b) = (root(&mut parent, i), root(&mut parent, j));
+                parent[a] = b;
             }
         }
-        // each drop of water that met lava, or stone over lava, boils away
-        // and sets the COLD drops of lava nearest it to stone
-        for &w in boil.iter() {
-            // (a drop met twice has boiled already)
-            if grains[w].kind != WATER {
-                continue;
-            }
-            let p = grains[w].p;
-            let mut near: [(f32, usize); COLD] = [(f32::MAX, 0); COLD];
-            let (cx, cy) = cell(p);
-            let span = (CHILL / CELL).ceil() as i32;
-            for ny in (cy - span).max(0)..=(cy + span).min(ROWS - 1) {
-                for nx in (cx - span).max(0)..=(cx + span).min(COLS - 1) {
-                    let mut k = head[(ny * COLS + nx) as usize];
-                    while k >= 0 {
-                        let g = &grains[k as usize];
-                        let d = (g.p.0 - p.0).powi(2) + (g.p.1 - p.1).powi(2);
-                        if g.kind == LAVA && edge[k as usize] && d < CHILL * CHILL && d < near[COLD - 1].0 {
-                            // into its place among the nearest so far
-                            let mut at = COLD - 1;
-                            while at > 0 && near[at - 1].0 > d {
-                                near[at] = near[at - 1];
-                                at -= 1;
-                            }
-                            near[at] = (d, k as usize);
-                        }
-                        k = next[k as usize];
-                    }
+        let mut pools = vec![Vec::new(); self.grains.len()];
+        for (i, g) in self.grains.iter().enumerate() {
+            if g.kind == LAVA { pools[root(&mut parent, i)].push(i); }
+        }
+        for &(i, j) in self.wet.iter().chain(&self.dry) {
+            for (w, r) in [(i as usize, j as usize), (j as usize, i as usize)] {
+                let (water, stone) = (self.grains[w], self.grains[r]);
+                if water.kind != WATER || !rock(stone.kind) || dist(water.p, stone.p) >= DROP_R + radius(stone.kind) + 1.0 { continue; }
+                let pool = &mut pools[root(&mut parent, r)];
+                if pool.is_empty() { continue; }
+                // Work inward from the contact. Each consumed water drop
+                // still has a finite cooling capacity.
+                pool.sort_by(|&a, &b| dist(self.grains[b].p, water.p).total_cmp(&dist(self.grains[a].p, water.p)));
+                for _ in 0..COLD {
+                    let Some(k) = pool.pop() else { break };
+                    self.grains[k].kind = STONE;
+                    self.grains[k].heat = HEAT_MS;
                 }
-            }
-            let found = near.iter().filter(|n| n.0 < f32::MAX);
-            if found.clone().count() == 0 {
-                continue;
-            }
-            for &(_, k) in found {
-                grains[k].kind = STONE;
-                grains[k].heat = HEAT_MS;
-                edge[k] = false;
-            }
-            grains[w].kind = GONE;
-            if steam.len() < 40 {
-                steam.push(Steam { p, age: 0.0 });
+                self.grains[w].kind = GONE;
+                if self.steam.len() < 40 { self.steam.push(Steam { p: water.p, age: 0.0 }); }
             }
         }
-        boil.clear();
-        // pairs with a new stone collide from now on, and boiled water
-        // leaves them
-        wet.retain(|&(i, j)| {
-            let (a, b) = (grains[i as usize].kind, grains[j as usize].kind);
+        self.wet.retain(|&(i, j)| {
+            let (a, b) = (self.grains[i as usize].kind, self.grains[j as usize].kind);
             let both = liquid(a) && liquid(b);
-            if !both && a != GONE && b != GONE {
-                dry.push((i, j));
-            }
+            if !both && a != GONE && b != GONE { self.dry.push((i, j)); }
             both
         });
     }
@@ -949,6 +917,63 @@ fn centre(grains: &[Grain], of: &[u32]) -> (f32, f32) {
 #[cfg(test)]
 mod collision_tests {
     use super::*;
+
+    #[test]
+    fn dead_orc_does_not_displace_liquid() {
+        let lv = crate::levels::level(3);
+        let mut corpse = World::new(&lv);
+        let mut absent = World::new(&lv);
+        corpse.orc.as_mut().unwrap().alive = false;
+        absent.orc = None;
+        for w in [&mut corpse, &mut absent] {
+            w.pins.iter_mut().for_each(|p| { p.out = 1.0; p.goal = 1.0; });
+        }
+        for _ in 0..600 { corpse.step(&lv); absent.step(&lv); }
+        for (a, b) in corpse.grains.iter().zip(&absent.grains) {
+            assert_eq!(a.p, b.p, "a corpse must not act as a dam");
+        }
+    }
+
+    #[test]
+    fn chute_water_cools_the_whole_connected_lava_pool() {
+        let lv = crate::levels::level(5);
+        for order in [[0, 2], [2, 0]] {
+            let mut w = World::new(&lv);
+            for pin in order {
+                w.slide(pin, 1.0);
+                for _ in 0..600 { w.step(&lv); }
+            }
+            for _ in 0..1200 { w.step(&lv); }
+            let lava = w.grains.iter().filter(|g| g.kind == LAVA).count();
+            let water = w.grains.iter().filter(|g| g.kind == WATER).count();
+            assert_eq!(lava, 0, "order {order:?}: {lava} lava remains with {water} water");
+            assert_eq!(w.grains.iter().filter(|g| g.kind == GOLD).count(), lv.grains.iter().filter(|g| g.2 == GOLD).count());
+        }
+    }
+
+    #[test]
+    fn cooling_respects_barriers_and_water_capacity() {
+        let mut lv = crate::levels::level(0);
+        lv.grains = vec![(100.0, 97.5, WATER), (100.0, 102.5, LAVA)];
+        let mut w = World::new(&lv);
+        w.segs = vec![segment((80.0, 100.0), (120.0, 100.0), PIN_R)];
+        w.find_pairs();
+        w.react();
+        assert_eq!(w.grains[0].kind, WATER);
+        assert_eq!(w.grains[1].kind, LAVA);
+        w.segs.clear();
+        w.find_pairs();
+        w.react();
+        assert_eq!(w.grains[0].kind, GONE);
+        assert_eq!(w.grains[1].kind, STONE);
+
+        lv.grains = vec![(100.0, 100.0, WATER)];
+        lv.grains.extend((1..=5).map(|i| (100.0 + i as f32 * 5.0, 100.0, LAVA)));
+        let mut w = World::new(&lv);
+        for _ in 0..5 { w.find_pairs(); w.react(); }
+        assert_eq!(w.grains.iter().filter(|g| g.kind == STONE).count(), COLD);
+        assert_eq!(w.grains.iter().filter(|g| g.kind == LAVA).count(), 5 - COLD);
+    }
 
     fn segment(a: (f32, f32), b: (f32, f32), r: f32) -> Seg {
         (a, b, r, (a.0.min(b.0) - r, a.1.min(b.1) - r, a.0.max(b.0) + r, a.1.max(b.1) + r))

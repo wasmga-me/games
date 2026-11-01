@@ -92,6 +92,8 @@ struct Pinwork {
     /// the pin held by the pointer, and ms the pull key has been held
     grab: Option<Grab>,
     held_ms: Option<i32>,
+    /// One pull sound per pointer/key gesture, including blocked attempts.
+    pull_sounded: bool,
     /// the level control under the mouse
     hover_ctl: Option<Icon>,
     liquids: liquid::Liquids,
@@ -162,6 +164,7 @@ impl Pinwork {
         self.chosen = self.chosen.map(|_| 0);
         self.grab = None;
         self.held_ms = None;
+        self.pull_sounded = false;
     }
 
     /// The pin nearest (x, y) still in, if near enough.
@@ -189,7 +192,12 @@ impl Pinwork {
         }
         self.since_pull = 0.0;
         self.rest = 0.0;
-        0
+        if self.pull_sounded {
+            0
+        } else {
+            self.pull_sounded = true;
+            wg::EV_BLIP
+        }
     }
     fn pull(&mut self, i: usize) -> u32 {
         self.slide(i, 1.0)
@@ -215,18 +223,12 @@ impl Pinwork {
     /// Runs the physics, then sees whether the level is won or lost.
     fn simulate(&mut self, dt: f32) -> u32 {
         let gone = self.world.pins.iter().filter(|p| p.gone()).count();
-        let touched = self.world.pins.iter().filter(|p| p.touched()).count();
         self.owed = (self.owed + dt).min(100.0);
         while self.owed >= sim::STEP_MS {
             self.owed -= sim::STEP_MS;
-            // nothing moves once settled, until the next pull
-            if self.rest < SETTLE_MS {
-                self.world.step(&self.lv);
-            }
+            // Slow lava and cooling must continue after coarse rest detection.
+            self.world.step(&self.lv);
         }
-        // A blocked drag can request the same pull every frame. Sound
-        // belongs to the first actual movement, not each rejected request.
-        let ev = if self.world.pins.iter().filter(|p| p.touched()).count() > touched { wg::EV_BLIP } else { 0 };
         // a pin counts as pulled once it is out for good; the keys then
         // move on from it
         self.s.pulled += (self.world.pins.iter().filter(|p| p.gone()).count() - gone) as i32;
@@ -237,22 +239,22 @@ impl Pinwork {
         self.since_pull += dt;
         self.rest = if self.world.resting() { self.rest + dt } else { 0.0 };
         if self.world.burned {
-            return ev | self.fail(BURNED);
+            return self.fail(BURNED);
         }
         if self.world.caught {
-            return ev | self.fail(CAUGHT);
+            return self.fail(CAUGHT);
         }
         if self.rest < SETTLE_MS && self.since_pull < WAIT_MS {
-            return ev;
+            return 0;
         }
         let gold = self.gold_in();
         if gold >= self.lv.need && !self.world.orc_coming() {
-            return ev | self.clear_level(gold);
+            return self.clear_level(gold);
         }
         if self.world.pins.iter().all(|p| p.gone()) {
-            return ev | self.fail(if self.world.orc_coming() { ORC_LIVES } else { SHORT });
+            return self.fail(if self.world.orc_coming() { ORC_LIVES } else { SHORT });
         }
-        ev
+        0
     }
 
     fn fail(&mut self, why: i32) -> u32 {
@@ -332,6 +334,7 @@ impl Game for Pinwork {
             hover_button: false,
             grab: None,
             held_ms: None,
+            pull_sounded: false,
             hover_ctl: None,
             liquids: liquid::Liquids::new(),
             coins: Default::default(),
@@ -367,6 +370,9 @@ impl Game for Pinwork {
         }
         if self.s.phase == PLAY {
             // arrows choose a pin, A pulls it
+            if input.pressed & (wg::A | wg::B) != 0 {
+                self.pull_sounded = false;
+            }
             let dir = if input.pressed & (wg::RIGHT | wg::DOWN) != 0 {
                 1
             } else if input.pressed & (wg::LEFT | wg::UP) != 0 {
@@ -429,6 +435,7 @@ impl Game for Pinwork {
                 return self.restart_button();
             }
             if let Some(i) = self.pin_at(p.x, p.y) {
+                self.pull_sounded = false;
                 self.chosen = None;
                 self.held_ms = None;
                 let offset = self.world.pins[i].out - self.along(i, p.x, p.y);
@@ -461,7 +468,7 @@ impl Game for Pinwork {
         wg::hash(wg::hash(0, wg::bytes_of(&c)), wg::bytes_of(&shown))
     }
     fn moving(&self) -> bool {
-        self.s.phase == PLAY && self.rest < SETTLE_MS
+        self.s.phase == PLAY
     }
 
     fn draw(&mut self, s: &mut Screen) {
@@ -478,6 +485,9 @@ impl Game for Pinwork {
         let chest_x = (knight + side * 40.0).clamp(levels::FRAME_L + 22.0, levels::FRAME_R - 22.0);
         let chest = if matches!(self.s.phase, CLEARED | DONE) { art::CHEST_OPEN } else { art::CHEST };
         self.put(s, chest, chest_x, GROUND, side < 0.0);
+        if let Some(o) = self.world.orc.as_ref().filter(|o| !o.alive) {
+            self.put(s, art::ORC_BURNT, o.p.0, o.p.1 + sim::ORC_UP, o.p.0 < knight);
+        }
         self.liquids.draw(s, &self.world.grains);
         let half = COIN_BOX / 2.0;
         for (i, g) in self.world.grains.iter().enumerate().filter(|(_, g)| g.kind == GOLD) {
@@ -493,10 +503,8 @@ impl Game for Pinwork {
             _ => art::KNIGHT_IDLE,
         };
         self.put(s, pose, knight, GROUND, side < 0.0);
-        if let Some(o) = &self.world.orc {
-            let sprite = if !o.alive {
-                art::ORC_BURNT
-            } else if self.world.caught {
+        if let Some(o) = self.world.orc.as_ref().filter(|o| o.alive) {
+            let sprite = if self.world.caught {
                 art::ORC_SWING
             } else {
                 art::ORC_IDLE
@@ -774,7 +782,16 @@ mod tests {
                 sounds += (ev & wg::EV_BLIP != 0) as usize;
             }
             assert_eq!(g.world.pins[0].out, 0.0, "the pin must remain blocked");
-            assert!(sounds <= 1, "one blocked drag emitted {sounds} pull sounds");
+            assert_eq!(sounds, 1, "each blocked drag needs one audible acknowledgement");
+            p.held = 0;
+            g.pointer(&p);
+            p.x = ring.0;
+            p.held = wg::M_LEFT;
+            p.pressed = wg::M_LEFT;
+            g.pointer(&p);
+            p.x += 30.0;
+            p.pressed = 0;
+            assert_eq!(g.pointer(&p) & wg::EV_BLIP, wg::EV_BLIP, "a new attempt must sound again");
         }
         let mut g = Pinwork::new();
         g.begin(2);
@@ -787,16 +804,16 @@ mod tests {
         }
         // A slow key pull can move a fraction before reaching the stop.
         assert!(g.world.pins[0].out < 0.03);
-        assert!(sounds <= 1, "a held key emitted {sounds} pull sounds");
+        assert_eq!(sounds, 1, "a held key needs one acknowledgement");
     }
 
     #[test]
-    fn pull_sound_follows_motion_and_resets_on_retry() {
+    fn pull_sound_is_once_per_gesture_and_resets_on_retry() {
         let mut g = Pinwork::new();
         g.begin(0);
         for _ in 0..2 {
-            assert_eq!(g.slide(0, 0.2), 0, "requesting motion alone makes no sound");
-            let mut sounds = 0;
+            assert_eq!(g.slide(0, 0.2), wg::EV_BLIP, "a new pull must sound immediately");
+            let mut sounds = 1;
             for i in 0..120 {
                 // Moving out, back in, and out again is still one pin.
                 if i == 30 { g.slide(0, 0.0); }
