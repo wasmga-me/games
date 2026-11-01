@@ -8,6 +8,7 @@ mod glyphs;
 mod puzzle;
 
 use puzzle::{Grid, DX, DY, LEVELS, MAXN};
+use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Input, KeyRepeat, Pointer, Screen};
 
 const VERSION: u32 = 1;
@@ -85,6 +86,7 @@ enum Hit {
     None,
     Cell(i32, i32),
     Next,
+    Ctl(Icon),
 }
 
 struct Flowline {
@@ -97,6 +99,8 @@ struct Flowline {
     spin: [f32; MAXN * MAXN],
     wet: [f32; MAXN * MAXN],
     basin: f32,
+    /// the pipes' turns as dealt, for Restart
+    dealt: [u8; MAXN * MAXN],
 }
 
 impl Flowline {
@@ -125,7 +129,32 @@ impl Flowline {
         let (bw, bh) = (pw - 48.0, 42.0);
         (px + (pw - bw) / 2.0, py + ph - bh - 20.0, bw, bh)
     }
+    /// Restart, in the top bar while a level is on
+    fn controls(&self) -> Row {
+        let row = controls::row(&[Icon::Restart], self.plan_wh().0 - 8.0, self.top_y());
+        if self.s.phase == PLAY { row } else { row.hidden() }
+    }
+    fn top_y(&self) -> f32 {
+        if self.tall { 26.0 } else { 22.0 }
+    }
+    fn can_restart(&self) -> bool {
+        self.s.phase == PLAY && self.s.through == 0 && self.s.grid.rot != self.dealt
+    }
+    /// The pipes as dealt; the turns made so far still count.
+    fn restart(&mut self) -> u32 {
+        if !self.can_restart() {
+            return 0;
+        }
+        self.s.grid.rot = self.dealt;
+        self.spin = [0.0; MAXN * MAXN];
+        self.wet = [0.0; MAXN * MAXN];
+        wg::EV_BLIP
+    }
+
     fn hit(&self, x: f32, y: f32) -> Hit {
+        if let Some(i) = self.controls().hit(x, y) {
+            return Hit::Ctl(i);
+        }
         if self.s.phase != PLAY {
             let b = self.next_box();
             let on = x >= b.0 && x < b.0 + b.2 && y >= b.1 && y < b.1 + b.3;
@@ -153,6 +182,7 @@ impl Flowline {
         self.spin = [0.0; MAXN * MAXN];
         self.wet = [0.0; MAXN * MAXN];
         self.basin = 0.0;
+        self.dealt = g.rot;
     }
 
     /// turns the pipe on (x, y) a quarter, clockwise or back
@@ -347,6 +377,7 @@ impl Game for Flowline {
             spin: [0.0; MAXN * MAXN],
             wet: [0.0; MAXN * MAXN],
             basin: 0.0,
+            dealt: [0; MAXN * MAXN],
         }
     }
     fn save(&mut self) -> &mut Save {
@@ -415,6 +446,10 @@ impl Game for Flowline {
         ev
     }
 
+    fn key(&mut self, code: i32) -> bool {
+        controls::is_restart_key(code) && self.restart() != 0
+    }
+
     fn pointer(&mut self, p: &Pointer) -> u32 {
         if !p.inside {
             self.hover = Hit::None;
@@ -432,6 +467,7 @@ impl Game for Flowline {
                     self.turn(x, y, pressed & wg::M_RIGHT != 0)
                 }
                 Hit::Next if pressed & wg::M_LEFT != 0 => self.next(),
+                Hit::Ctl(_) if pressed & wg::M_LEFT != 0 => self.restart(),
                 _ => 0,
             };
         }
@@ -443,6 +479,7 @@ impl Game for Flowline {
             Hit::None => -1,
             Hit::Cell(x, y) => y * 16 + x,
             Hit::Next => 1000,
+            Hit::Ctl(i) => 1001 + i as i32,
         };
         let shown = [hv, self.keys as i32, self.tall as i32];
         let mut c = self.s;
@@ -530,9 +567,11 @@ impl Game for Flowline {
         // the top bar: level and turns
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
         let turns_l = tr(&["Turns", "旋转", "回転", "회전", "Giros", "Giros", "Rotations", "Drehungen", "Повороты", "旋轉"]);
-        let ty = if self.tall { 26.0 } else { 22.0 };
+        let ty = self.top_y();
         s.text(&format!("{} {}", level_l, self.s.level + 1), 14.0, ty, 17.0, hex(th.text), 1.0);
-        s.text_r(&format!("{} {}", turns_l, self.s.turns), w - 14.0, ty, 15.0, hex(th.dim), 1.0);
+        let hover = if let Hit::Ctl(i) = self.hover { Some(i) } else { None };
+        let right = self.controls().draw(s, hover, |_| self.can_restart(), w);
+        s.text_r(&format!("{} {}", turns_l, self.s.turns), right - 14.0, ty, 15.0, hex(th.dim), 1.0);
 
         if self.s.phase == CLEARED {
             self.draw_cleared(s, th, w);
@@ -572,6 +611,9 @@ impl Game for Flowline {
             && (0..n).contains(&s.cx)
             && (0..n).contains(&s.cy);
         self.s.through = self.s.grid.through() as i32;
+        if ok {
+            self.dealt = puzzle::deal(self.s.level).rot;
+        }
         self.spin = [0.0; MAXN * MAXN];
         // the water stands where it reaches
         let dist = self.s.grid.flow();
@@ -657,7 +699,7 @@ impl wg::Board for Flowline {
         }
         if x == 0 && y == g.tap {
             out.push_str(", ");
-            out.push_str(tr(&["tap on the left", "左边是水龙头", "左に蛇口", "왼쪽에 수도꼭지", "grifo a la izquierda", "torneira à esquerda", "robinet à gauche", "Hahn links", "слева кран", "左邊是水龍頭"]));
+            out.push_str(tr(&["inlet valve on the left", "左边是水龙头", "左に蛇口", "왼쪽에 수도꼭지", "grifo a la izquierda", "torneira à esquerda", "robinet à gauche", "Hahn links", "слева кран", "左邊是水龍頭"]));
         }
         if x == g.n - 1 && y == g.drain {
             out.push_str(", ");
@@ -671,16 +713,16 @@ impl wg::Board for Flowline {
     }
     fn keys(&self) -> &'static str {
         tr(&[
-            "Arrows move, Space turns a pipe clockwise, X turns it back, I reads the level and turns. Join the tap on the left to the drain on the right.",
-            "方向键移动，空格顺时针旋转管道，X 逆时针旋转，I 读出关卡和旋转次数。把左边的水龙头接到右边的出水口。",
-            "矢印で移動、スペースで管を右回り、X で左回り、I でレベルと回転数。左の蛇口を右の排水口につなぎます。",
-            "화살표로 이동, 스페이스로 관을 시계 방향으로, X로 반대로 회전, I로 레벨과 회전 수. 왼쪽 수도꼭지를 오른쪽 배수구에 이으세요.",
-            "Flechas para moverte, Espacio gira el tubo a la derecha, X lo gira de vuelta, I lee nivel y giros. Une el grifo de la izquierda con el desagüe de la derecha.",
-            "Setas movem, Espaço gira o cano no sentido horário, X gira de volta, I lê nível e giros. Ligue a torneira à esquerda ao ralo à direita.",
-            "Flèches pour bouger, Espace tourne le tuyau dans le sens horaire, X le tourne dans l'autre sens, I lit niveau et rotations. Reliez le robinet à gauche à l'évacuation à droite.",
-            "Pfeiltasten bewegen, Leertaste dreht ein Rohr im Uhrzeigersinn, X zurück, I liest Level und Drehungen vor. Verbinde den Hahn links mit dem Abfluss rechts.",
-            "Стрелки двигают, пробел поворачивает трубу по часовой, X обратно, I читает уровень и повороты. Соедините кран слева со стоком справа.",
-            "方向鍵移動，空白鍵順時針旋轉管道，X 逆時針旋轉，I 讀出關卡和旋轉次數。把左邊的水龍頭接到右邊的出水口。",
+            "Arrow keys move cursor, Space rotates clockwise, X rotates counterclockwise, I announces the level and turn count. Connect the inlet valve on the left to the drain on the right. R restarts the level.",
+            "方向键移动，空格顺时针旋转管道，X 逆时针旋转，I 读出关卡和旋转次数。把左边的水龙头接到右边的出水口。R 重新开始本关。",
+            "矢印で移動、スペースで管を右回り、X で左回り、I でレベルと回転数。左の蛇口を右の排水口につなぎます。R でレベルをやり直し。",
+            "화살표로 이동, 스페이스로 관을 시계 방향으로, X로 반대로 회전, I로 레벨과 회전 수. 왼쪽 수도꼭지를 오른쪽 배수구에 이으세요. R로 레벨 다시 시작.",
+            "Flechas para moverte, Espacio gira el tubo a la derecha, X lo gira de vuelta, I lee nivel y giros. Une el grifo de la izquierda con el desagüe de la derecha. R reinicia el nivel.",
+            "Setas movem, Espaço gira o cano no sentido horário, X gira de volta, I lê nível e giros. Ligue a torneira à esquerda ao ralo à direita. R reinicia o nível.",
+            "Flèches pour bouger, Espace tourne le tuyau dans le sens horaire, X le tourne dans l'autre sens, I lit niveau et rotations. Reliez le robinet à gauche à l'évacuation à droite. R recommence le niveau.",
+            "Pfeiltasten bewegen, Leertaste dreht ein Rohr im Uhrzeigersinn, X zurück, I liest Level und Drehungen vor. Verbinde den Hahn links mit dem Abfluss rechts. R startet das Level neu.",
+            "Стрелки двигают, пробел поворачивает трубу по часовой, X обратно, I читает уровень и повороты. Соедините кран слева со стоком справа. R начинает уровень заново.",
+            "方向鍵移動，空白鍵順時針旋轉管道，X 逆時針旋轉，I 讀出關卡和旋轉次數。把左邊的水龍頭接到右邊的出水口。R 重新開始本關。",
         ])
     }
     fn act(&mut self, x: i32, y: i32, a: i32, said: &mut String) -> u32 {
@@ -694,7 +736,7 @@ impl wg::Board for Flowline {
         self.cell(x, y, said);
         if ev != 0 && self.s.through != 0 {
             said.push_str(". ");
-            said.push_str(tr(&["The water is through! Space for the next level.", "水流通了！按空格进入下一关。", "水が通った！スペースで次のレベル。", "물이 통했습니다! 스페이스로 다음 레벨.", "¡El agua pasa! Espacio para el siguiente nivel.", "A água passou! Espaço para o próximo nível.", "L'eau passe ! Espace pour le niveau suivant.", "Das Wasser fließt durch! Leertaste für das nächste Level.", "Вода прошла! Пробел для следующего уровня.", "水流通了！按空白鍵進入下一關。"]));
+            said.push_str(tr(&["Pipe connected! Press Space for the next level.", "水流通了！按空格进入下一关。", "水が通った！スペースで次のレベル。", "물이 통했습니다! 스페이스로 다음 레벨.", "¡El agua pasa! Espacio para el siguiente nivel.", "A água passou! Espaço para o próximo nível.", "L'eau passe ! Espace pour le niveau suivant.", "Das Wasser fließt durch! Leertaste für das nächste Level.", "Вода прошла! Пробел для следующего уровня.", "水流通了！按空白鍵進入下一關。"]));
         }
         ev
     }

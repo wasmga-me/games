@@ -12,6 +12,7 @@ mod sim;
 
 use levels::{Level, GOLD, GROUND, LAVA, LEVELS};
 use sim::World;
+use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen, Sprite};
 
 const VERSION: u32 = 1;
@@ -72,6 +73,8 @@ struct Pinwork {
     chosen: Option<usize>,
     hover_pin: Option<usize>,
     hover_button: bool,
+    /// the level control under the mouse
+    hover_ctl: Option<Icon>,
     liquids: liquid::Liquids,
     /// the coins, each way up, drawn once at the screen's scale
     coins: [Sprite; 3],
@@ -96,6 +99,27 @@ impl Pinwork {
         matches!(self.s.phase, CLEARED | FAILED) && x >= b.0 && x < b.0 + b.2 && y >= b.1 && y < b.1 + b.3
     }
 
+    /// Restart, in the top bar while a level is on
+    fn controls(&self) -> Row {
+        let row = controls::row(&[Icon::Restart], PLAN.0 - 8.0, 22.0);
+        if self.s.phase == PLAY { row } else { row.hidden() }
+    }
+    fn can_restart(&self) -> bool {
+        self.s.phase == PLAY && self.started()
+    }
+    /// a pin was pulled this try
+    fn started(&self) -> bool {
+        self.world.pins.iter().any(|p| p.pulled)
+    }
+
+    fn restart_button(&mut self) -> u32 {
+        if !self.can_restart() {
+            return 0;
+        }
+        self.retry();
+        wg::EV_BLIP
+    }
+
     fn begin(&mut self, level: i32) {
         self.s.level = level;
         self.s.level_ms = 0;
@@ -104,7 +128,7 @@ impl Pinwork {
     }
     /// The same level again, counted as a retry once a pin was pulled.
     fn retry(&mut self) {
-        if self.world.pins.iter().any(|p| p.pulled) || self.s.phase != PLAY {
+        if self.started() || self.s.phase != PLAY {
             self.s.retries += 1;
         }
         self.restart();
@@ -270,6 +294,7 @@ impl Game for Pinwork {
             chosen: None,
             hover_pin: None,
             hover_button: false,
+            hover_ctl: None,
             liquids: liquid::Liquids::new(),
             coins: Default::default(),
             walls: Vec::new(),
@@ -324,12 +349,21 @@ impl Game for Pinwork {
         ev
     }
 
+    fn key(&mut self, code: i32) -> bool {
+        controls::is_restart_key(code) && self.restart_button() != 0
+    }
+
     fn pointer(&mut self, p: &Pointer) -> u32 {
         self.hover_button = !p.touch && p.inside && self.on_button(p.x, p.y);
-        self.hover_pin = if !p.touch && p.inside && self.s.phase == PLAY { self.pin_at(p.x, p.y) } else { None };
+        let ctl = self.controls().hit(p.x, p.y);
+        self.hover_ctl = if !p.touch && p.inside { ctl } else { None };
+        self.hover_pin = if !p.touch && p.inside && self.s.phase == PLAY && ctl.is_none() { self.pin_at(p.x, p.y) } else { None };
         if p.pressed & wg::M_LEFT != 0 {
             if self.on_button(p.x, p.y) {
                 return self.press_button();
+            }
+            if ctl == Some(Icon::Restart) {
+                return self.restart_button();
             }
             if let Some(i) = self.pin_at(p.x, p.y) {
                 self.chosen = None;
@@ -340,7 +374,7 @@ impl Game for Pinwork {
     }
 
     fn picture(&mut self) -> u32 {
-        let shown = [self.hover_button as i32, self.hover_pin.map_or(-1, |i| i as i32), self.chosen.map_or(-1, |i| i as i32)];
+        let shown = [self.hover_button as i32, self.hover_pin.map_or(-1, |i| i as i32), self.chosen.map_or(-1, |i| i as i32), self.hover_ctl.map_or(-1, |i| i as i32)];
         let mut c = self.s;
         c.level_ms = 0;
         c.time_ms = 0;
@@ -412,15 +446,16 @@ impl Game for Pinwork {
         // the top bar: the level, and the gold that has reached the knight
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
         let (level, gold, need) = (self.s.level + 1, self.gold_in().min(self.lv.need) as i32, self.lv.need as i32);
+        let right = self.controls().draw(s, self.hover_ctl, |_| self.can_restart(), w);
         let [level_sp, gold_sp] = &mut self.hud;
         s.sprite_make_alpha(level_sp, wg::hash(wg::hash(0, level_l.as_bytes()), wg::bytes_of(&level)), 0.0, 8.0, w / 2.0, 28.0, |s| {
             shadow_text(s, &format!("{} {}", level_l, level), 14.0, 17.0, hex(0xffffff));
         });
         s.sprite(level_sp, 0.0, 8.0);
         let sprites = &self.sprites;
-        s.sprite_make_alpha(gold_sp, wg::hash(0, wg::bytes_of(&[gold, need])), w / 2.0, 8.0, w / 2.0, 28.0, |s| {
+        s.sprite_make_alpha(gold_sp, wg::hash(0, wg::bytes_of(&[gold, need, right as i32])), w / 2.0, 8.0, w / 2.0, 28.0, |s| {
             let text = format!("{}/{}", gold, need);
-            let x = w - 14.0 - s.text_width(&text, 16.0);
+            let x = right - 14.0 - s.text_width(&text, 16.0);
             put_image(s, sprites, art::COIN_A, x - 12.0, 22.0, 1.5, false);
             shadow_text(s, &text, x, 16.0, hex(0xffe08a));
         });
@@ -599,8 +634,8 @@ impl Pinwork {
         } else {
             match self.s.why {
                 BURNED => tr(&["Burned by lava", "被岩浆烧到", "溶岩でやけど", "용암에 데었어요", "Quemado por lava", "Queimado pela lava", "Brûlé par la lave", "Von Lava verbrannt", "Обжёгся лавой", "被岩漿燒到"]),
-                CAUGHT => tr(&["The orc got him", "被兽人抓住", "オークにやられた", "오크에게 당했어요", "El orco lo atrapó", "O orc o pegou", "L'orc l'a eu", "Der Ork hat ihn erwischt", "Орк его настиг", "被獸人抓住"]),
-                ORC_LIVES => tr(&["The orc still stands", "兽人还活着", "オークが残っている", "오크가 아직 살아 있어요", "El orco sigue en pie", "O orc continua de pé", "L'orc est toujours debout", "Der Ork steht noch", "Орк ещё стоит", "獸人還活著"]),
+                CAUGHT => tr(&["Slain by the orc", "被兽人抓住", "オークにやられた", "오크에게 당했어요", "El orco lo atrapó", "O orc o pegou", "L'orc l'a eu", "Der Ork hat ihn erwischt", "Орк его настиг", "被獸人抓住"]),
+                ORC_LIVES => tr(&["Orc still standing", "兽人还活着", "オークが残っている", "오크가 아직 살아 있어요", "El orco sigue en pie", "O orc continua de pé", "L'orc est toujours debout", "Der Ork steht noch", "Орк ещё стоит", "獸人還活著"]),
                 _ => tr(&["Not enough gold", "金币不够", "金貨が足りない", "금화가 부족해요", "No hay suficiente oro", "Ouro insuficiente", "Pas assez d'or", "Nicht genug Gold", "Мало золота", "金幣不夠"]),
             }
         };

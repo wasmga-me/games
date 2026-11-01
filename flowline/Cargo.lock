@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "flowline"
 version = "0.1.0"
 dependencies = [
@@ -10,6 +16,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "miniz_oxide"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
+dependencies = [
+ "adler2",
+]
+
+[[package]]
 name = "wg"
 version = "0.1.0"
-source = "git+https://github.com/wasmga-me/wasmgame-wg#30aaeb48b9babd3c1c5dbdf06c55f0fe489fd0ee"
+source = "git+https://github.com/wasmga-me/wasmgame-wg#7399dec6eb89d5e5705f8c8e2694d57794f3decb"
+dependencies = [
+ "miniz_oxide",
+]
