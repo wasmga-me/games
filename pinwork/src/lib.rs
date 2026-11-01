@@ -3,7 +3,7 @@
 //! Pins hold gold, lava and water in a dungeon's chambers. Pull them in the
 //! right order: the liquids flow and pool, lava burns the knight and kills
 //! the orc, water turns lava to stone, and the gold has to reach the
-//! knight. 24 levels.
+//! knight. Eight distinct levels.
 mod art;
 mod glyphs;
 mod levels;
@@ -184,13 +184,12 @@ impl Pinwork {
 
     /// Slides pin i toward `goal` (1 all the way out).
     fn slide(&mut self, i: usize, goal: f32) -> u32 {
-        let first = !self.world.pins[i].touched();
         if self.s.phase != PLAY || !self.world.slide(i, goal) {
             return 0;
         }
         self.since_pull = 0.0;
         self.rest = 0.0;
-        if first { wg::EV_BLIP } else { 0 }
+        0
     }
     fn pull(&mut self, i: usize) -> u32 {
         self.slide(i, 1.0)
@@ -216,6 +215,7 @@ impl Pinwork {
     /// Runs the physics, then sees whether the level is won or lost.
     fn simulate(&mut self, dt: f32) -> u32 {
         let gone = self.world.pins.iter().filter(|p| p.gone()).count();
+        let touched = self.world.pins.iter().filter(|p| p.touched()).count();
         self.owed = (self.owed + dt).min(100.0);
         while self.owed >= sim::STEP_MS {
             self.owed -= sim::STEP_MS;
@@ -224,6 +224,9 @@ impl Pinwork {
                 self.world.step(&self.lv);
             }
         }
+        // A blocked drag can request the same pull every frame. Sound
+        // belongs to the first actual movement, not each rejected request.
+        let ev = if self.world.pins.iter().filter(|p| p.touched()).count() > touched { wg::EV_BLIP } else { 0 };
         // a pin counts as pulled once it is out for good; the keys then
         // move on from it
         self.s.pulled += (self.world.pins.iter().filter(|p| p.gone()).count() - gone) as i32;
@@ -234,22 +237,22 @@ impl Pinwork {
         self.since_pull += dt;
         self.rest = if self.world.resting() { self.rest + dt } else { 0.0 };
         if self.world.burned {
-            return self.fail(BURNED);
+            return ev | self.fail(BURNED);
         }
         if self.world.caught {
-            return self.fail(CAUGHT);
+            return ev | self.fail(CAUGHT);
         }
         if self.rest < SETTLE_MS && self.since_pull < WAIT_MS {
-            return 0;
+            return ev;
         }
         let gold = self.gold_in();
         if gold >= self.lv.need && !self.world.orc_coming() {
-            return self.clear_level(gold);
+            return ev | self.clear_level(gold);
         }
         if self.world.pins.iter().all(|p| p.gone()) {
-            return self.fail(if self.world.orc_coming() { ORC_LIVES } else { SHORT });
+            return ev | self.fail(if self.world.orc_coming() { ORC_LIVES } else { SHORT });
         }
-        0
+        ev
     }
 
     fn fail(&mut self, why: i32) -> u32 {
@@ -752,6 +755,59 @@ wg::game!(Pinwork);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocked_drag_does_not_repeat_the_pull_sound() {
+        // The gold pin's handle hits the vertical water pin before it can
+        // move: level 5 in the old paired campaign, now level 3.
+        for touch in [false, true] {
+            let mut g = Pinwork::new();
+            g.begin(2);
+            let ring = g.world.pins[0].ring(0.0);
+            let mut p = Pointer { x: ring.0, y: ring.1, inside: true, held: wg::M_LEFT, pressed: wg::M_LEFT, touch, ..Pointer::default() };
+            g.pointer(&p);
+            p.pressed = 0;
+            p.x += 30.0;
+            let mut sounds = 0;
+            for _ in 0..180 {
+                let ev = g.pointer(&p) | g.update(&Input { dt: 16, ..Input::default() });
+                sounds += (ev & wg::EV_BLIP != 0) as usize;
+            }
+            assert_eq!(g.world.pins[0].out, 0.0, "the pin must remain blocked");
+            assert!(sounds <= 1, "one blocked drag emitted {sounds} pull sounds");
+        }
+        let mut g = Pinwork::new();
+        g.begin(2);
+        g.chosen = Some(0);
+        g.held_ms = Some(TAP_MS + 1);
+        let mut sounds = 0;
+        for _ in 0..180 {
+            let ev = g.update(&Input { dt: 16, held: wg::A, pressed: 0 });
+            sounds += (ev & wg::EV_BLIP != 0) as usize;
+        }
+        // A slow key pull can move a fraction before reaching the stop.
+        assert!(g.world.pins[0].out < 0.03);
+        assert!(sounds <= 1, "a held key emitted {sounds} pull sounds");
+    }
+
+    #[test]
+    fn pull_sound_follows_motion_and_resets_on_retry() {
+        let mut g = Pinwork::new();
+        g.begin(0);
+        for _ in 0..2 {
+            assert_eq!(g.slide(0, 0.2), 0, "requesting motion alone makes no sound");
+            let mut sounds = 0;
+            for i in 0..120 {
+                // Moving out, back in, and out again is still one pin.
+                if i == 30 { g.slide(0, 0.0); }
+                if i == 60 { g.slide(0, 0.2); }
+                sounds += (g.update(&Input { dt: 16, ..Input::default() }) & wg::EV_BLIP != 0) as usize;
+            }
+            assert!(g.world.pins[0].touched());
+            assert_eq!(sounds, 1);
+            g.retry();
+        }
+    }
 
     /// Plays a level pulling pins in this order, each once all is at rest;
     /// the phase it ends in. Fails if a pull never comes to rest.
