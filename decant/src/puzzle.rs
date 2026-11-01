@@ -8,7 +8,7 @@ use wg::Rng;
 /// layers a tube holds
 pub const CAP: usize = 4;
 pub const MAXP: usize = 12;
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 
 /// Tubes, bottom layer first; 0 is empty, colours are 1 and up.
 #[repr(C)]
@@ -113,7 +113,11 @@ impl Stand {
 
 /// Palette chapters: learn runs with two colours, then add one at a time.
 pub fn colours(level: i32) -> usize {
-    [2, 3, 4, 5, 6, 7][(level.clamp(0, LEVELS - 1) / 5) as usize]
+    if level < 30 {
+        [2, 3, 4, 5, 6, 7][(level.max(0) / 5) as usize]
+    } else {
+        6 + ((level - 30) / 25) as usize
+    }
 }
 
 #[cfg(test)]

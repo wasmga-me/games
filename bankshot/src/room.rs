@@ -1,8 +1,11 @@
 //! The rooms: walls, ledges and steel plates, where everyone stands, how a
 //! shot bounces through it all, and a fixed campaign teaching one idea at a time.
 
-
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
+include!("campaign.rs");
+#[cfg(test)]
+#[path = "curation.rs"]
+mod curation;
 /// the room, plan units: the walls bullets bounce off
 pub const LEFT: f32 = 0.0;
 pub const RIGHT: f32 = 300.0;
@@ -25,7 +28,9 @@ pub const ANGLES: usize = 1440;
 /// A forgiving three-degree solution window, including on the last level.
 /// Extra targets and cover add difficulty; smaller aim tolerances do not.
 #[cfg(test)]
-pub fn window(_level: i32) -> usize { 13 }
+pub fn window(_level: i32) -> usize {
+    13
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -104,18 +109,19 @@ pub struct Room {
 /// Objects that absorb a shot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Hit {
+    Agent,
     Hostage(usize),
     Crate(usize),
 }
 
 /// A shot's way through the room: the points it turns at, and who it hits
-/// how far along. It ends at a hostage, a wooden crate, or its range limit.
+/// how far along. It ends at the returning shooter, a hostage, a crate, or its range limit.
 #[derive(Clone, Default)]
 pub struct Path {
     pub pts: Vec<(f32, f32)>,
     /// each foe hit and the distance there
     pub foes: Vec<(usize, f32)>,
-    /// A hostage or crate hit, if any: the path ends there
+    /// A shooter, hostage or crate hit: the path ends there
     pub hit: Option<Hit>,
     pub len: f32,
 }
@@ -231,10 +237,17 @@ impl Room {
             let (t, n) = best.unwrap_or((left, (0.0, 0.0)));
             let t = t.min(left);
             let q = (p.0 + d.0 * t, p.1 + d.1 * t);
-            // Hostages and intact wooden cover stop the bullet.
-            let mut stop: Option<(Hit, f32)> = None;
-            for (who, r) in self.hostages.iter().enumerate().map(|(i, h)| (Hit::Hostage(i), h.rect()))
-                .chain(self.crates.iter().enumerate().filter(|(i, _)| broken & (1 << i) == 0).map(|(i, r)| (Hit::Crate(i), *r))) {
+            // Only the outgoing segment ignores the shooter at the muzzle.
+            // Every reflected segment can hit the agent.
+            let agent = Person { x: self.agent.0, feet: self.agent.1, look: 0 };
+            let mut stop = if bounce > 0 { agent.rect().enter(p, q).map(|t| (Hit::Agent, t)) } else { None };
+            for (who, r) in self
+                .hostages
+                .iter()
+                .enumerate()
+                .map(|(i, h)| (Hit::Hostage(i), h.rect()))
+                .chain(self.crates.iter().enumerate().filter(|(i, _)| broken & (1 << i) == 0).map(|(i, r)| (Hit::Crate(i), *r)))
+            {
                 if let Some(s) = r.enter(p, q) {
                     if stop.is_none_or(|st| s < st.1) {
                         stop = Some((who, s));
@@ -297,59 +310,55 @@ impl Room {
                         direct |= 1 << i;
                     }
                 }
-                (path.mask(), path.hit.is_some() && path.mask() != self.all_foes())
+                (path.mask(), path.hit.is_some())
             })
             .collect();
         (shots, direct)
     }
 
-    /// The foes the shot at aim step k hits, as bits, if it hits some,
-    /// spares the hostages and hits the same for `w` aim steps in a row.
+    /// The shared target mask and whether any aim in the window ends in
+    /// harm. A harmful return is usable only as the campaign's final hit:
+    /// play ends immediately when the last living foe goes down.
     #[cfg(test)]
-    fn steady(survey: &[(u32, bool)], k: usize, w: usize) -> Option<u32> {
-        let n = survey.len();
-        let mut m = u32::MAX;
+    fn steady(survey: &[(u32, bool)], k: usize, w: usize) -> Option<(u32, bool)> {
+        let mut mask = u32::MAX;
+        let mut harm = false;
         for j in 0..w {
-            let (hits, blocked) = survey[(k + j) % n];
-            if blocked { return None; }
-            m &= hits;
+            let (hits, blocked) = survey[(k + j) % survey.len()];
+            mask &= hits;
+            harm |= blocked;
         }
-        (m != 0).then_some(m)
+        (mask != 0).then_some((mask, harm))
     }
 
-    /// The shots steady over `w` aim steps: their foe bits.
     #[cfg(test)]
-    fn good_shots(survey: &[(u32, bool)], w: usize) -> Vec<u32> {
+    fn good_shots(survey: &[(u32, bool)], w: usize) -> Vec<(u32, bool)> {
         let mut out = Vec::new();
-        for m in (0..survey.len()).filter_map(|k| Room::steady(survey, k, w)) {
-            if !out.contains(&m) {
-                out.push(m);
+        for shot in (0..survey.len()).filter_map(|k| Room::steady(survey, k, w)) {
+            if !out.contains(&shot) {
+                out.push(shot);
             }
         }
         out
     }
 
-    /// An aim on a way to down every foe in the fewest shots, safely and
-    /// within a fixed window of aim steps.
     #[cfg(test)]
     pub fn best_shot(&self, down: u32, w: usize) -> Option<f32> {
         let (survey, _) = self.survey();
         let good = Room::good_shots(&survey, w);
         (0..survey.len())
-            .filter_map(|k| Room::steady(&survey, k, w).filter(|m| m & !down != 0).map(|m| (m, k)))
+            .filter_map(|k| Room::steady(&survey, k, w).filter(|&(m, h)| m & !down != 0 && (!h || down | m == self.all_foes())).map(|(m, _)| (m, k)))
             .filter_map(|(m, k)| Room::shots_needed(&good, self.all_foes(), down | m).map(|left| (left, k)))
             .min()
             .map(|(_, k)| Room::step_angle(k + w / 2))
     }
 
-    /// How few shots clear the room from foes `down` (as bits), using
-    /// these shots; None if some foe cannot be hit.
     #[cfg(test)]
-    fn shots_needed(good: &[u32], all: u32, down: u32) -> Option<i32> {
+    fn shots_needed(good: &[(u32, bool)], all: u32, down: u32) -> Option<i32> {
         if down == all {
             return Some(0);
         }
-        good.iter().filter(|&&m| m & !down != 0).filter_map(|&m| Room::shots_needed(good, all, down | m)).min().map(|n| n + 1)
+        good.iter().filter(|&&(m, h)| m & !down != 0 && (!h || down | m == all)).filter_map(|&(m, _)| Room::shots_needed(good, all, down | m)).min().map(|n| n + 1)
     }
 }
 
@@ -357,44 +366,72 @@ impl Room {
 /// a line of targets, stairs, then bank shots and finally hostage avoidance.
 /// Coordinates are original. Every entry has a fixed four-shot allowance.
 pub fn level(level: i32) -> Room {
+    if level >= 30 {
+        return extended(level);
+    }
     let mut r = Room { agent: (35.0, FLOOR), shots: 4, ..Room::empty() };
-    let (blocks, plates, foes, hostages, agent, par): (&[(f32,f32,f32,f32)], &[(f32,f32,f32,f32)], &[(f32,f32)], &[(f32,f32)], (f32,f32), i32) = match level {
-        0 => (&[], &[], &[(235.,352.)], &[], (35.,352.), 1),
-        1 => (&[], &[], &[(180.,352.),(255.,352.)], &[], (35.,352.), 1),
-        2 => (&[(120.,312.,60.,40.),(180.,272.,60.,80.),(240.,232.,60.,120.)], &[], &[(145.,312.),(205.,272.),(265.,232.)], &[], (65.,352.), 1),
-        3 => (&[], &[], &[(250.,352.)], &[], (35.,352.), 1),
-        4 => (&[(0.,272.,70.,80.),(215.,272.,85.,80.)], &[], &[(250.,272.),(150.,352.)], &[], (35.,272.), 2),
-        5 => (&[(135.,252.,25.,100.)], &[], &[(240.,352.)], &[], (35.,352.), 1),
-        6 => (&[(130.,282.,25.,70.)], &[], &[(210.,352.),(265.,352.)], &[], (35.,352.), 2),
-        7 => (&[(115.,222.,25.,130.),(200.,282.,100.,70.)], &[], &[(250.,282.)], &[], (35.,352.), 1),
-        8 => (&[(120.,48.,25.,160.)], &[], &[(230.,352.),(265.,352.)], &[], (35.,352.), 1),
-        9 => (&[(125.,242.,30.,110.),(215.,212.,85.,12.)], &[], &[(250.,212.),(250.,352.)], &[], (35.,352.), 2),
-        10 => (&[], &[], &[(240.,352.)], &[(140.,352.)], (35.,352.), 1),
-        11 => (&[(210.,252.,90.,100.)], &[], &[(250.,252.)], &[(155.,352.)], (35.,352.), 1),
-        12 => (&[(0.,232.,75.,120.),(210.,272.,90.,12.)], &[], &[(250.,272.),(155.,352.)], &[(250.,352.)], (35.,232.), 2),
-        13 => (&[(125.,252.,25.,100.)], &[], &[(240.,352.)], &[(90.,352.)], (35.,352.), 1),
-        14 => (&[(120.,48.,25.,150.),(215.,252.,85.,12.)], &[], &[(250.,252.),(250.,352.)], &[(155.,352.)], (35.,352.), 2),
-        15 => (&[(125.,262.,25.,90.)], &[(140.,172.,220.,188.)], &[(240.,352.)], &[], (35.,352.), 1),
-        16 => (&[(125.,302.,25.,50.),(210.,232.,90.,12.)], &[(140.,165.,220.,195.)], &[(250.,232.),(180.,352.)], &[], (35.,352.), 2),
-        17 => (&[(110.,302.,25.,50.),(220.,232.,80.,120.)], &[(140.,165.,220.,195.)], &[(255.,232.),(180.,352.)], &[], (35.,352.), 2),
-        18 => (&[(0.,232.,70.,120.),(125.,252.,25.,100.)], &[(210.,112.,270.,172.)], &[(240.,352.),(180.,352.)], &[], (35.,232.), 2),
-        19 => (&[(125.,262.,25.,90.)], &[(140.,172.,220.,188.)], &[(255.,352.)], &[(85.,352.)], (35.,352.), 1),
-        20 => (&[(95.,292.,50.,60.),(160.,232.,50.,120.),(225.,172.,75.,180.)], &[], &[(120.,292.),(185.,232.),(260.,172.)], &[], (35.,352.), 2),
-        21 => (&[(0.,192.,75.,160.),(220.,252.,80.,100.)], &[], &[(250.,252.),(140.,352.),(190.,352.)], &[], (35.,192.), 2),
-        22 => (&[(120.,302.,25.,50.),(240.,212.,60.,140.)], &[], &[(265.,212.),(175.,352.),(215.,352.)], &[], (35.,352.), 3),
-        23 => (&[(0.,252.,75.,100.),(135.,292.,25.,60.),(225.,232.,75.,12.)], &[], &[(250.,232.),(200.,352.),(265.,352.)], &[(110.,352.)], (35.,252.), 2),
-        24 => (&[(100.,48.,25.,130.),(200.,262.,25.,90.)], &[], &[(160.,352.),(260.,352.)], &[(60.,352.)], (35.,252.), 2),
-        25 => (&[(0.,252.,70.,100.),(110.,292.,25.,60.),(205.,232.,95.,12.)], &[(120.,155.,180.,95.)], &[(250.,232.),(170.,352.),(265.,352.)], &[], (35.,252.), 2),
-        26 => (&[(125.,302.,25.,50.),(210.,232.,90.,12.),(0.,192.,60.,12.),(65.,110.,50.,12.)], &[(140.,165.,220.,195.)], &[(250.,232.),(180.,352.)], &[(90.,110.),(30.,192.)], (35.,352.), 2),
-        27 => (&[(0.,172.,75.,180.),(130.,272.,30.,80.),(250.,232.,50.,120.)], &[], &[(275.,232.),(100.,352.),(190.,352.),(230.,352.)], &[], (35.,172.), 3),
-        28 => (&[(100.,292.,40.,60.),(175.,232.,40.,120.),(250.,172.,50.,180.)], &[(20.,125.,80.,75.)], &[(120.,292.),(195.,232.),(275.,172.)], &[(155.,352.)], (35.,352.), 2),
-        29 => (&[(0.,252.,75.,100.),(135.,302.,25.,50.),(225.,212.,75.,12.),(0.,110.,70.,12.)], &[(125.,145.,185.,85.)], &[(250.,212.),(200.,352.),(265.,352.)], &[(110.,352.),(30.,110.)], (35.,252.), 3),
+    let (blocks, plates, foes, hostages, agent, par): (&[(f32, f32, f32, f32)], &[(f32, f32, f32, f32)], &[(f32, f32)], &[(f32, f32)], (f32, f32), i32) = match level {
+        0 => (&[], &[], &[(235., 352.)], &[], (35., 352.), 1),
+        1 => (&[], &[], &[(180., 352.), (255., 352.)], &[], (35., 352.), 1),
+        2 => (&[(120., 312., 60., 40.), (180., 272., 60., 80.), (240., 232., 60., 120.)], &[], &[(145., 312.), (205., 272.), (265., 232.)], &[], (65., 352.), 1),
+        3 => (&[], &[], &[(250., 352.)], &[], (35., 352.), 1),
+        4 => (&[(0., 272., 70., 80.), (215., 272., 85., 80.)], &[], &[(250., 272.), (150., 352.)], &[], (35., 272.), 2),
+        5 => (&[(135., 252., 25., 100.)], &[], &[(240., 352.)], &[], (35., 352.), 1),
+        6 => (&[(130., 282., 25., 70.)], &[], &[(210., 352.), (265., 352.)], &[], (35., 352.), 2),
+        7 => (&[(115., 222., 25., 130.), (200., 282., 100., 70.)], &[], &[(250., 282.)], &[], (35., 352.), 1),
+        8 => (&[(120., 48., 25., 160.)], &[], &[(230., 352.), (265., 352.)], &[], (35., 352.), 1),
+        9 => (&[(125., 242., 30., 110.), (215., 212., 85., 12.)], &[], &[(250., 212.), (250., 352.)], &[], (35., 352.), 2),
+        10 => (&[], &[], &[(240., 352.)], &[(140., 352.)], (35., 352.), 1),
+        11 => (&[(210., 252., 90., 100.)], &[], &[(250., 252.)], &[(155., 352.)], (35., 352.), 1),
+        12 => (&[(0., 232., 75., 120.), (210., 272., 90., 12.)], &[], &[(250., 272.), (155., 352.)], &[(250., 352.)], (35., 232.), 2),
+        13 => (&[(125., 252., 25., 100.)], &[], &[(240., 352.)], &[(90., 352.)], (35., 352.), 1),
+        14 => (&[(120., 48., 25., 150.), (215., 252., 85., 12.)], &[], &[(250., 252.), (250., 352.)], &[(155., 352.)], (35., 352.), 2),
+        15 => (&[(125., 262., 25., 90.)], &[(140., 172., 220., 188.)], &[(240., 352.)], &[], (35., 352.), 1),
+        16 => (&[(125., 302., 25., 50.), (210., 232., 90., 12.)], &[(140., 165., 220., 195.)], &[(250., 232.), (180., 352.)], &[], (35., 352.), 2),
+        17 => (&[(110., 302., 25., 50.), (220., 232., 80., 120.)], &[(140., 165., 220., 195.)], &[(255., 232.), (180., 352.)], &[], (35., 352.), 2),
+        18 => (&[(0., 232., 70., 120.), (125., 252., 25., 100.)], &[(210., 112., 270., 172.)], &[(240., 352.), (180., 352.)], &[], (35., 232.), 2),
+        19 => (&[(125., 262., 25., 90.)], &[(140., 172., 220., 188.)], &[(255., 352.)], &[(85., 352.)], (35., 352.), 1),
+        // Crossfire balcony: aim to both sides, protect the civilian below,
+        // and bank around the upper-right ledge. No staircase sweep.
+        20 => (&[(135., 220., 30., 12.), (220., 170., 80., 12.)], &[], &[(40., 352.), (260., 352.), (260., 170.)], &[(150., 352.)], (150., 220.), 3),
+        21 => (&[(0., 192., 75., 160.), (220., 252., 80., 100.)], &[], &[(250., 252.), (140., 352.), (190., 352.)], &[], (35., 192.), 2),
+        22 => (&[(120., 302., 25., 50.), (240., 212., 60., 140.)], &[], &[(265., 212.), (175., 352.), (215., 352.)], &[], (35., 352.), 3),
+        23 => (&[(0., 252., 75., 100.), (135., 292., 25., 60.), (225., 232., 75., 12.)], &[], &[(250., 232.), (200., 352.), (265., 352.)], &[(110., 352.)], (35., 252.), 2),
+        24 => (&[(100., 48., 25., 130.), (200., 262., 25., 90.)], &[], &[(160., 352.), (260., 352.)], &[(60., 352.)], (35., 252.), 2),
+        25 => {
+            (&[(0., 252., 70., 100.), (110., 292., 25., 60.), (205., 232., 95., 12.)], &[(120., 155., 180., 95.)], &[(250., 232.), (170., 352.), (265., 352.)], &[], (35., 252.), 2)
+        }
+        26 => (
+            &[(125., 302., 25., 50.), (210., 232., 90., 12.), (0., 192., 60., 12.), (65., 110., 50., 12.)],
+            &[(140., 165., 220., 195.)],
+            &[(250., 232.), (180., 352.)],
+            &[(90., 110.), (30., 192.)],
+            (35., 352.),
+            2,
+        ),
+        27 => (&[(0., 172., 75., 180.), (130., 272., 30., 80.), (250., 232., 50., 120.)], &[], &[(275., 232.), (100., 352.), (190., 352.), (230., 352.)], &[], (35., 172.), 3),
+        28 => (
+            &[(100., 292., 40., 60.), (175., 232., 40., 120.), (250., 172., 50., 180.)],
+            &[(20., 125., 80., 75.)],
+            &[(120., 292.), (195., 232.), (275., 172.)],
+            &[(155., 352.)],
+            (35., 352.),
+            2,
+        ),
+        29 => (
+            &[(0., 252., 75., 100.), (135., 302., 25., 50.), (225., 212., 75., 12.), (0., 110., 70., 12.)],
+            &[(125., 145., 185., 85.)],
+            &[(250., 212.), (200., 352.), (265., 352.)],
+            &[(110., 352.), (30., 110.)],
+            (35., 252.),
+            3,
+        ),
         _ => panic!("invalid Bankshot level"),
     };
-    r.blocks = blocks.iter().map(|&(x,y,w,h)| Rect{x,y,w,h}).collect();
-    r.plates = plates.iter().map(|&(x,y,u,v)| Plate{a:(x,y),b:(u,v)}).collect();
-    r.foes = foes.iter().enumerate().map(|(i,&(x,feet))|Person{x,feet,look:(i%3) as u8}).collect();
-    r.hostages = hostages.iter().map(|&(x,feet)|Person{x,feet,look:0}).collect();
+    r.blocks = blocks.iter().map(|&(x, y, w, h)| Rect { x, y, w, h }).collect();
+    r.plates = plates.iter().map(|&(x, y, u, v)| Plate { a: (x, y), b: (u, v) }).collect();
+    r.foes = foes.iter().enumerate().map(|(i, &(x, feet))| Person { x, feet, look: (i % 3) as u8 }).collect();
+    r.hostages = hostages.iter().map(|&(x, feet)| Person { x, feet, look: 0 }).collect();
     r.agent = agent;
     if agent.1 != FLOOR {
         if let Some(b) = r.blocks.iter().find(|b| b.y == agent.1 && b.x == 0.0) {
@@ -402,9 +439,13 @@ pub fn level(level: i32) -> Room {
         }
     }
     r.par = par;
-    if level == 3 { r.crates.push(Rect { x: 130.0, y: 292.0, w: 46.0, h: 60.0 }); }
+    if level == 3 {
+        r.crates.push(Rect { x: 130.0, y: 292.0, w: 46.0, h: 60.0 });
+    }
     // The agent also needs a visible platform on this balcony lesson.
-    if level == 24 { r.blocks.push(Rect { x: 0.0, y: 252.0, w: 50.0, h: 12.0 }); }
+    if level == 24 {
+        r.blocks.push(Rect { x: 0.0, y: 252.0, w: 50.0, h: 12.0 });
+    }
     r
 }
 
@@ -422,7 +463,9 @@ mod tests {
             assert!(need <= room.par, "level {} needs {} shots but par is {}", l + 1, need, room.par);
             assert_eq!(room.shots, 4);
             assert!(room.par < room.shots);
-            if l < 3 { assert_eq!(direct, all, "opening lesson must be readable"); }
+            if l < 3 {
+                assert_eq!(direct, all, "opening lesson must be readable");
+            }
             let safe = survey.iter().filter(|&&(m, h)| m != 0 && !h).count();
             println!(
                 "level {:2}: foes {} hostages {} blocks {} plates {} shots {} hidden {} safe {:.3}",
@@ -463,7 +506,9 @@ mod tests {
                 item.0 = p.foes.iter().filter(|&&(_, d)| d <= readable_distance).fold(0, |m, &(i, _)| m | 1 << i);
             }
             let need = Room::shots_needed(&Room::good_shots(&survey, window(l)), r.all_foes(), 0);
-            if !need.is_some_and(|n| n <= r.par) { failures.push((l + 1, need)); }
+            if !need.is_some_and(|n| n <= r.par) {
+                failures.push((l + 1, need));
+            }
         }
         assert!(failures.is_empty(), "levels needing unreadable ricochets: {:?}", failures);
     }
@@ -476,7 +521,7 @@ mod tests {
         assert_eq!(first.mask(), 0);
         let second = r.trace_broken(0.0, 1);
         assert_eq!(second.mask(), r.all_foes());
-        assert_eq!(second.hit, None);
+        assert_eq!(second.hit, Some(Hit::Agent));
     }
 
     #[test]
@@ -494,10 +539,13 @@ mod tests {
     }
 
     #[test]
-    fn returning_bullets_do_not_hurt_the_shooter() {
+    fn returning_bullets_hit_the_shooter_after_a_bounce() {
         let room = Room { agent: (30.0, FLOOR), shots: 4, ..Room::empty() };
         for angle in [0.0, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2] {
-            assert_eq!(room.trace(angle).hit, None);
+            let path = room.trace(angle);
+            assert_eq!(path.hit, Some(Hit::Agent));
+            assert!(path.pts.len() >= 3);
+            assert!(path.len > 20.0, "outgoing shot must leave the muzzle");
         }
     }
 
@@ -507,7 +555,7 @@ mod tests {
         let room = Room { agent: (30.0, FLOOR), foes: vec![foe], shots: 4, ..Room::empty() };
         // level: through the foe, off the far wall and back into the agent
         let mut p = room.trace(0.0);
-        assert_eq!((p.mask(), p.hit), (1, None));
+        assert_eq!((p.mask(), p.hit), (1, Some(Hit::Agent)));
         p.cut(170.0);
         assert_eq!((p.mask(), p.hit, p.pts.len()), (1, None, 2));
         assert!((p.pts[1].0 - 200.0).abs() < 0.01);

@@ -4,7 +4,7 @@
 #[cfg(test)]
 use wg::Rng;
 
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 pub const MAXW: usize = 8;
 pub const MAXH: usize = 10;
 pub const MAXCARS: usize = 40;
@@ -179,7 +179,7 @@ impl Lot {
 fn shape(level: i32) -> (i32, i32, f32, i32, i32, bool) {
     let (w, h, fill, props, fence, buses) =
         [(4, 4, 0.42, 0, 0, false), (5, 5, 0.55, 1, 0, false), (6, 6, 0.64, 1, 3, false), (6, 7, 0.70, 2, 4, true), (7, 8, 0.76, 3, 5, true), (8, 9, 0.80, 4, 6, true)]
-            [(level / 5) as usize];
+            [(level.min(29) / 5) as usize];
     (w, h, fill + (level % 5) as f32 * 0.018, props, fence, buses)
 }
 
@@ -217,7 +217,7 @@ fn generate(level: i32) -> Lot {
     for _ in 0..96 {
         let lot = attempt(&mut rng, w, h, fill, props, fence, buses);
         let (depth, free) = dependency(&lot);
-        let target = 2 + level / 5;
+        let target = if level < 30 { 2 + level / 5 } else { 6 + (level - 30) / 25 };
         let mark = -(depth - target).abs() * 30 - free * 2 + lot.n;
         if best.as_ref().is_none_or(|b| mark > b.0) {
             best = Some((mark, lot));

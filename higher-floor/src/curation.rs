@@ -11,7 +11,7 @@ fn export_campaign() {
     );
     for l in 0..LEVELS {
         let row = {
-            let t = generate(l);
+            let t = if l < 30 { campaign(l) } else { generate(l) };
             let rooms: Vec<_> = t.rooms[..t.n()].iter().map(|r| (r.kind, r.val, r.look, r.grow, r.locked)).collect();
             format!("({}, {}, &{:?})", t.floors, t.start, rooms)
         };

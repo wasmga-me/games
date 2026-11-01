@@ -3,7 +3,7 @@
 //! screw that nothing covers to take it out: it goes into the open box of
 //! its colour, or else into one of five spare holes. Full boxes leave and
 //! the next comes in; free plates fall away. When the spare holes are full
-//! and no screw has anywhere to go, the try is lost. 30 levels, three tries
+//! and no screw has anywhere to go, the try is lost. 100 levels, three tries
 //! each. The page shows the setup, pause and game over screens.
 mod glyphs;
 mod puzzle;
@@ -75,24 +75,74 @@ struct Theme {
 
 const THEME: [Theme; THEMES] = [
     // Workshop
-    Theme { bg: 0x2b2f3a, bg2: 0x1b1e26, board: 0x3a4050, hole: 0x1c2029, text: 0xf1f3f8, dim: 0x9aa1b3, overlay: 0x0d0f14, button: 0x3c7be0,
-        plates: [0xc9a27a, 0xb7c7d8, 0xd9b86a, 0x9fc3b0, 0xd3a9c3, 0xc2c9a0], screws: [0xe5484d, 0xf39a2b, 0xf2d03b, 0x3fbf6a, 0x2fb8d6, 0x4a6ff0, 0xa65fe6] },
+    Theme {
+        bg: 0x2b2f3a,
+        bg2: 0x1b1e26,
+        board: 0x3a4050,
+        hole: 0x1c2029,
+        text: 0xf1f3f8,
+        dim: 0x9aa1b3,
+        overlay: 0x0d0f14,
+        button: 0x3c7be0,
+        plates: [0xc9a27a, 0xb7c7d8, 0xd9b86a, 0x9fc3b0, 0xd3a9c3, 0xc2c9a0],
+        screws: [0xe5484d, 0xf39a2b, 0xf2d03b, 0x3fbf6a, 0x2fb8d6, 0x4a6ff0, 0xa65fe6],
+    },
     // Paper
-    Theme { bg: 0xf4eedf, bg2: 0xe6dcc6, board: 0xe0d4bb, hole: 0xb9aa8c, text: 0x3a2f24, dim: 0x8a7a66, overlay: 0x5a4a38, button: 0x3768d0,
-        plates: [0xffffff, 0xd8e6f2, 0xf7e2b0, 0xd6eedd, 0xf2d8e6, 0xe9ecd0], screws: [0xd83b45, 0xe8861a, 0xe0b51c, 0x2f9e57, 0x1f9cbc, 0x3b5fd8, 0x914fd0] },
+    Theme {
+        bg: 0xf4eedf,
+        bg2: 0xe6dcc6,
+        board: 0xe0d4bb,
+        hole: 0xb9aa8c,
+        text: 0x3a2f24,
+        dim: 0x8a7a66,
+        overlay: 0x5a4a38,
+        button: 0x3768d0,
+        plates: [0xffffff, 0xd8e6f2, 0xf7e2b0, 0xd6eedd, 0xf2d8e6, 0xe9ecd0],
+        screws: [0xd83b45, 0xe8861a, 0xe0b51c, 0x2f9e57, 0x1f9cbc, 0x3b5fd8, 0x914fd0],
+    },
     // Night
-    Theme { bg: 0x161a2c, bg2: 0x0c0e18, board: 0x22283f, hole: 0x0e111c, text: 0xf2f4fb, dim: 0x8f97b8, overlay: 0x05060c, button: 0x4f6ff0,
-        plates: [0x5c6896, 0x4f7f8f, 0x7a6597, 0x5f8a6a, 0x8b6a7c, 0x6f7a8c], screws: [0xff5a63, 0xffa53d, 0xffd84d, 0x4fd47c, 0x3fd0ee, 0x6b8cff, 0xbd7cff] },
+    Theme {
+        bg: 0x161a2c,
+        bg2: 0x0c0e18,
+        board: 0x22283f,
+        hole: 0x0e111c,
+        text: 0xf2f4fb,
+        dim: 0x8f97b8,
+        overlay: 0x05060c,
+        button: 0x4f6ff0,
+        plates: [0x5c6896, 0x4f7f8f, 0x7a6597, 0x5f8a6a, 0x8b6a7c, 0x6f7a8c],
+        screws: [0xff5a63, 0xffa53d, 0xffd84d, 0x4fd47c, 0x3fd0ee, 0x6b8cff, 0xbd7cff],
+    },
 ];
 
 #[derive(Clone, Copy)]
 enum Anim {
     /// a screw on its way: drawn at `from` until its delay is up
-    Fly { screw: usize, from: (f32, f32), to: (f32, f32), delay: f32, t: f32 },
+    Fly {
+        screw: usize,
+        from: (f32, f32),
+        to: (f32, f32),
+        delay: f32,
+        t: f32,
+    },
     /// a full box leaving with its three screws
-    BoxOut { place: usize, colour: u8, held: [u8; 3], delay: f32, t: f32 },
-    BoxIn { place: usize, delay: f32, t: f32 },
-    Fall { plate: usize, delay: f32, t: f32 },
+    BoxOut {
+        place: usize,
+        colour: u8,
+        held: [u8; 3],
+        delay: f32,
+        t: f32,
+    },
+    BoxIn {
+        place: usize,
+        delay: f32,
+        t: f32,
+    },
+    Fall {
+        plate: usize,
+        delay: f32,
+        t: f32,
+    },
 }
 
 impl Anim {
@@ -138,11 +188,19 @@ impl Unbolt {
         &THEME[self.s.opt[O_THEME] as usize]
     }
     fn plan_wh(&self) -> (f32, f32) {
-        if self.tall { (300.0, 400.0) } else { (400.0, 300.0) }
+        if self.tall {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
     /// the board: its left, top and side
     fn board(&self) -> (f32, f32, f32) {
-        if self.tall { (24.0, 142.0, 252.0) } else { (14.0, 42.0, 250.0) }
+        if self.tall {
+            (24.0, 142.0, 252.0)
+        } else {
+            (14.0, 42.0, 250.0)
+        }
     }
     fn to_px(&self, x: i16, y: i16) -> (f32, f32) {
         let (bx, by, side) = self.board();
@@ -153,7 +211,11 @@ impl Unbolt {
     }
     /// box place a: its box
     fn box_rect(&self, a: usize) -> (f32, f32, f32, f32) {
-        if self.tall { (150.0 - 118.0 + a as f32 * 124.0, 44.0, 112.0, 42.0) } else { (288.0, 46.0 + a as f32 * 56.0, 100.0, 42.0) }
+        if self.tall {
+            (150.0 - 118.0 + a as f32 * 124.0, 44.0, 112.0, 42.0)
+        } else {
+            (288.0, 46.0 + a as f32 * 56.0, 100.0, 42.0)
+        }
     }
     fn hole_r(&self) -> f32 {
         SCREW_R as f32 * self.unit() * 1.08
@@ -198,7 +260,11 @@ impl Unbolt {
     /// Restart, in the top bar while a level is on
     fn controls(&self) -> Row {
         let row = controls::row(&[Icon::Restart], self.plan_wh().0 - 8.0, 22.0);
-        if self.s.phase == PLAY { row } else { row.hidden() }
+        if self.s.phase == PLAY {
+            row
+        } else {
+            row.hidden()
+        }
     }
     /// Restart costs a try, as getting stuck does, so not on the last one.
     fn can_restart(&self) -> bool {
@@ -440,7 +506,11 @@ impl Game for Unbolt {
         self.keys = false;
     }
     fn plan(&self, w: i32, h: i32) -> (f32, f32) {
-        if h as f32 > w as f32 * 1.1 { (300.0, 400.0) } else { (400.0, 300.0) }
+        if h as f32 > w as f32 * 1.1 {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
 
     fn update(&mut self, input: &Input) -> u32 {
@@ -475,10 +545,18 @@ impl Game for Unbolt {
             self.hover = Hit::None;
         }
         if self.s.phase == PLAY {
-            if dirs & wg::LEFT != 0 { self.step_cursor(-1.0, 0.0); }
-            if dirs & wg::RIGHT != 0 { self.step_cursor(1.0, 0.0); }
-            if dirs & wg::UP != 0 { self.step_cursor(0.0, -1.0); }
-            if dirs & wg::DOWN != 0 { self.step_cursor(0.0, 1.0); }
+            if dirs & wg::LEFT != 0 {
+                self.step_cursor(-1.0, 0.0);
+            }
+            if dirs & wg::RIGHT != 0 {
+                self.step_cursor(1.0, 0.0);
+            }
+            if dirs & wg::UP != 0 {
+                self.step_cursor(0.0, -1.0);
+            }
+            if dirs & wg::DOWN != 0 {
+                self.step_cursor(0.0, 1.0);
+            }
             if input.pressed & wg::A != 0 {
                 self.keys = true;
                 let lv = &self.s.lv;
@@ -490,15 +568,13 @@ impl Game for Unbolt {
                 let lv = &self.s.lv;
                 if self.s.phase == PLAY && lv.screw[self.s.cur as usize].state != ON_BOARD {
                     let (x0, y0) = self.to_px(lv.screw[self.s.cur as usize].x, lv.screw[self.s.cur as usize].y);
-                    let near = (0..lv.screws as usize)
-                        .filter(|&i| lv.screw[i].state == ON_BOARD)
-                        .min_by(|&a, &b| {
-                            let d = |i: usize| {
-                                let (x, y) = self.to_px(lv.screw[i].x, lv.screw[i].y);
-                                (x - x0).hypot(y - y0) - if lv.blocked(i) { 0.0 } else { 1000.0 }
-                            };
-                            d(a).total_cmp(&d(b))
-                        });
+                    let near = (0..lv.screws as usize).filter(|&i| lv.screw[i].state == ON_BOARD).min_by(|&a, &b| {
+                        let d = |i: usize| {
+                            let (x, y) = self.to_px(lv.screw[i].x, lv.screw[i].y);
+                            (x - x0).hypot(y - y0) - if lv.blocked(i) { 0.0 } else { 1000.0 }
+                        };
+                        d(a).total_cmp(&d(b))
+                    });
                     if let Some(i) = near {
                         self.s.cur = i as i32;
                     }
@@ -757,6 +833,10 @@ impl Game for Unbolt {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE_ALL && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let ok = s.version == VERSION
             && s.opt.iter().zip(Self::CHOICES).all(|(&v, &c)| (0..c).contains(&v))
@@ -785,7 +865,18 @@ impl Unbolt {
         let title = if won {
             tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"])
         } else {
-            tr(&["No room left", "没有空位了", "置く場所がありません", "빈칸이 없습니다", "No queda sitio", "Não há mais espaço", "Plus de place", "Kein Platz mehr", "Места больше нет", "沒有空位了"])
+            tr(&[
+                "No room left",
+                "没有空位了",
+                "置く場所がありません",
+                "빈칸이 없습니다",
+                "No queda sitio",
+                "Não há mais espaço",
+                "Plus de place",
+                "Kein Platz mehr",
+                "Места больше нет",
+                "沒有空位了",
+            ])
         };
         s.text_c(title, w / 2.0, py + 34.0, 21.0, hex(th.text), 1.0);
         let line = if won {
@@ -850,13 +941,37 @@ impl Unbolt {
     fn screw_words(&self, i: usize, out: &mut String) {
         let lv = &self.s.lv;
         let sc = &lv.screw[i];
-        out.push_str(&tr(&["# screw", "# 螺丝", "# のねじ", "# 나사", "tornillo #", "parafuso #", "vis #", "# Schraube", "винт: #", "# 螺絲"]).replace('#', colour_name(sc.colour)));
+        out.push_str(
+            &tr(&["# screw", "# 螺丝", "# のねじ", "# 나사", "tornillo #", "parafuso #", "vis #", "# Schraube", "винт: #", "# 螺絲"]).replace('#', colour_name(sc.colour)),
+        );
         out.push_str(", ");
         out.push_str(match sc.state {
             IN_BOX => tr(&["in its box", "在盒子里", "箱の中", "상자 안", "en su caja", "na caixa", "dans sa boîte", "in seiner Box", "в коробке", "在盒子裡"]),
-            IN_SPARE => tr(&["in a spare slot", "在备用孔里", "予備の穴", "예비 구멍 안", "en un hueco de reserva", "num furo reserva", "dans un trou de réserve", "in einem Ersatzloch", "в запасном гнезде", "在備用孔裡"]),
+            IN_SPARE => tr(&[
+                "in a spare slot",
+                "在备用孔里",
+                "予備の穴",
+                "예비 구멍 안",
+                "en un hueco de reserva",
+                "num furo reserva",
+                "dans un trou de réserve",
+                "in einem Ersatzloch",
+                "в запасном гнезде",
+                "在備用孔裡",
+            ]),
             DONE => tr(&["cleared", "已收走", "片付いた", "정리됨", "guardado", "guardado", "rangée", "weggeräumt", "убран", "已收走"]),
-            _ if lv.blocked(i) => tr(&["covered by a plate", "被板挡住", "板の下", "판에 가려짐", "tapado por una placa", "coberto por uma placa", "sous une plaque", "unter einer Platte", "под пластиной", "被板擋住"]),
+            _ if lv.blocked(i) => tr(&[
+                "covered by a plate",
+                "被板挡住",
+                "板の下",
+                "판에 가려짐",
+                "tapado por una placa",
+                "coberto por uma placa",
+                "sous une plaque",
+                "unter einer Platte",
+                "под пластиной",
+                "被板擋住",
+            ]),
             _ => tr(&["free", "可以拧下", "外せる", "뺄 수 있음", "libre", "livre", "libre", "frei", "свободен", "可以擰下"]),
         });
     }
@@ -926,7 +1041,21 @@ impl wg::Board for Unbolt {
             }
         }
         out.push_str(". ");
-        out.push_str(&tr(&["Spare slots used: # of 5", "备用孔已用 # / 5", "予備の穴 # / 5", "예비 구멍 # / 5 사용", "Huecos de reserva: # de 5", "Furos reserva: # de 5", "Trous de réserve : # sur 5", "Ersatzlöcher: # von 5", "Запасные гнёзда: # из 5", "備用孔已用 # / 5"]).replace('#', &lv.spare_used().to_string()));
+        out.push_str(
+            &tr(&[
+                "Spare slots used: # of 5",
+                "备用孔已用 # / 5",
+                "予備の穴 # / 5",
+                "예비 구멍 # / 5 사용",
+                "Huecos de reserva: # de 5",
+                "Furos reserva: # de 5",
+                "Trous de réserve : # sur 5",
+                "Ersatzlöcher: # von 5",
+                "Запасные гнёзда: # из 5",
+                "備用孔已用 # / 5",
+            ])
+            .replace('#', &lv.spare_used().to_string()),
+        );
         for &j in lv.spare[..SPARE].iter().filter(|&&j| j != 0) {
             out.push_str(", ");
             out.push_str(colour_name(lv.screw[j as usize - 1].colour));
@@ -964,19 +1093,77 @@ impl wg::Board for Unbolt {
         let gone = (0..self.s.lv.plates as usize).filter(|&p| self.s.lv.plate[p].gone != 0).count();
         let ev = self.tap(i);
         if ev == 0 {
-            said.push_str(tr(&["Covered by a plate", "被板挡住", "板の下です", "판에 가려져 있습니다", "Tapado por una placa", "Coberto por uma placa", "Sous une plaque", "Unter einer Platte", "Под пластиной", "被板擋住"]));
+            said.push_str(tr(&[
+                "Covered by a plate",
+                "被板挡住",
+                "板の下です",
+                "판에 가려져 있습니다",
+                "Tapado por una placa",
+                "Coberto por uma placa",
+                "Sous une plaque",
+                "Unter einer Platte",
+                "Под пластиной",
+                "被板擋住",
+            ]));
             return 0;
         }
         self.screw_words(i, said);
         let fell = (0..self.s.lv.plates as usize).filter(|&p| self.s.lv.plate[p].gone != 0).count() - gone;
         if fell > 0 {
             said.push_str(". ");
-            said.push_str(&tr(&["Plates fell: #", "掉落 # 块板", "板が # 枚落ちた", "판 # 개 떨어짐", "Placas caídas: #", "Placas caídas: #", "Plaques tombées : #", "Platten gefallen: #", "Упало пластин: #", "掉落 # 塊板"]).replace('#', &fell.to_string()));
+            said.push_str(
+                &tr(&[
+                    "Plates fell: #",
+                    "掉落 # 块板",
+                    "板が # 枚落ちた",
+                    "판 # 개 떨어짐",
+                    "Placas caídas: #",
+                    "Placas caídas: #",
+                    "Plaques tombées : #",
+                    "Platten gefallen: #",
+                    "Упало пластин: #",
+                    "掉落 # 塊板",
+                ])
+                .replace('#', &fell.to_string()),
+            );
         }
         let end = match self.s.phase {
-            CLEARED | DONE_ALL => tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]),
-            FAILED => tr(&["No spare slots left. Press Space to retry.", "没有空位了。按空格再试一次。", "置く場所がありません。スペースでもう一度。", "빈칸이 없습니다. 스페이스로 다시 하기.", "No queda sitio. Espacio para reintentar.", "Não há mais espaço. Espaço para tentar de novo.", "Plus de place. Espace pour réessayer.", "Kein Platz mehr. Leertaste für nochmal.", "Места больше нет. Пробел, чтобы ещё раз.", "沒有空位了。按空白鍵再試一次。"]),
-            LOST => tr(&["No spare slots or tries left. Game over.", "没有空位，也没有次数了。游戏结束。", "置く場所も挑戦も残っていません。ゲームオーバー。", "빈칸도 기회도 없습니다. 게임 오버.", "No queda sitio ni intentos. Fin de la partida.", "Sem espaço e sem tentativas. Fim de jogo.", "Plus de place ni d'essais. Partie terminée.", "Kein Platz und keine Versuche mehr. Spiel vorbei.", "Ни места, ни попыток. Игра окончена.", "沒有空位，也沒有次數了。遊戲結束。"]),
+            CLEARED | DONE_ALL => tr(&[
+                "Level cleared! Press Space for the next level.",
+                "过关！按空格进入下一关。",
+                "クリア！スペースで次のレベル。",
+                "레벨 클리어! 스페이스로 다음 레벨.",
+                "¡Nivel superado! Espacio para el siguiente.",
+                "Nível concluído! Espaço para o próximo.",
+                "Niveau réussi ! Espace pour le suivant.",
+                "Level geschafft! Leertaste für das nächste.",
+                "Уровень пройден! Пробел для следующего.",
+                "過關！按空白鍵進入下一關。",
+            ]),
+            FAILED => tr(&[
+                "No spare slots left. Press Space to retry.",
+                "没有空位了。按空格再试一次。",
+                "置く場所がありません。スペースでもう一度。",
+                "빈칸이 없습니다. 스페이스로 다시 하기.",
+                "No queda sitio. Espacio para reintentar.",
+                "Não há mais espaço. Espaço para tentar de novo.",
+                "Plus de place. Espace pour réessayer.",
+                "Kein Platz mehr. Leertaste für nochmal.",
+                "Места больше нет. Пробел, чтобы ещё раз.",
+                "沒有空位了。按空白鍵再試一次。",
+            ]),
+            LOST => tr(&[
+                "No spare slots or tries left. Game over.",
+                "没有空位，也没有次数了。游戏结束。",
+                "置く場所も挑戦も残っていません。ゲームオーバー。",
+                "빈칸도 기회도 없습니다. 게임 오버.",
+                "No queda sitio ni intentos. Fin de la partida.",
+                "Sem espaço e sem tentativas. Fim de jogo.",
+                "Plus de place ni d'essais. Partie terminée.",
+                "Kein Platz und keine Versuche mehr. Spiel vorbei.",
+                "Ни места, ни попыток. Игра окончена.",
+                "沒有空位，也沒有次數了。遊戲結束。",
+            ]),
             _ => "",
         };
         if !end.is_empty() {

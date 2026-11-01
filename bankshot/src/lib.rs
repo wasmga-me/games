@@ -2,7 +2,7 @@
 //! crates are cartoons drawn by art/draw.py with games-src/tools/cartoon.
 //! Gunmen hide behind walls and ledges. Aim the agent's shot, and it
 //! bounces off the walls, the floor, the ceiling and steel plates. Hit
-//! every gunman with the shots you have, and never a hostage. 30 levels.
+//! every gunman with the shots you have, and never a hostage. 100 levels.
 mod art;
 mod glyphs;
 mod room;
@@ -12,14 +12,14 @@ use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, Pointer, Screen};
 
 /// Authored campaign and destructible cover replace the random room dealer.
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 const AIM: i32 = 0;
 /// a shot on its way
 const FLY: i32 = 1;
 const CLEARED: i32 = 2;
 const DONE: i32 = 3;
-/// a hostage hit, or the shots ran out
+/// the agent or a hostage hit, or the shots ran out
 const FAILED: i32 = 4;
 
 const PLAN: (f32, f32) = (300.0, 400.0);
@@ -40,7 +40,7 @@ struct Save {
     level: i32,
     phase: i32,
     retries: i32,
-    /// shots left, foes down as bits, and the hostage hit (-1 none)
+    /// shots left, foes down as bits, and the person hit (-1 none, -2 agent, >=0 hostage)
     shots: i32,
     down: u32,
     broken: u32,
@@ -81,7 +81,14 @@ struct Bankshot {
 impl Bankshot {
     fn card(&self) -> (f32, f32, f32, f32) {
         let (w, h) = PLAN;
-        let (pw, ph) = (248.0, match self.s.phase { DONE => 128.0, FAILED => 158.0, _ => 190.0 });
+        let (pw, ph) = (
+            248.0,
+            match self.s.phase {
+                DONE => 128.0,
+                FAILED => 158.0,
+                _ => 190.0,
+            },
+        );
         (w / 2.0 - pw / 2.0, h * 0.36 - ph / 2.0, pw, ph)
     }
     fn button(&self) -> (f32, f32, f32, f32) {
@@ -97,7 +104,11 @@ impl Bankshot {
     /// Restart, in the top bar while a level is on
     fn controls(&self) -> Row {
         let row = controls::row(&[Icon::Restart], PLAN.0 - 8.0, 24.0);
-        if matches!(self.s.phase, AIM | FLY) { row } else { row.hidden() }
+        if matches!(self.s.phase, AIM | FLY) {
+            row
+        } else {
+            row.hidden()
+        }
     }
     /// Restart starts over only once a shot was fired, and not mid-flight.
     fn can_restart(&self) -> bool {
@@ -191,10 +202,14 @@ impl Bankshot {
         }
         if let Some(hit) = self.shot.hit {
             self.s.hurt = match hit {
+                Hit::Agent => -2,
                 Hit::Hostage(h) => h as i32,
                 Hit::Crate(c) => {
                     self.s.broken |= 1 << c;
-                    if self.s.shots == 0 { self.s.phase = FAILED; return ev | wg::EV_LOSE; }
+                    if self.s.shots == 0 {
+                        self.s.phase = FAILED;
+                        return ev | wg::EV_LOSE;
+                    }
                     self.s.phase = AIM;
                     self.aim_at(self.s.aim);
                     return ev | wg::EV_HIT;
@@ -446,19 +461,6 @@ impl Game for Bankshot {
             let live = k < self.s.shots;
             bullet(s, x, 24.0, if live { 1.0 } else { 0.25 });
         }
-        let lesson = match self.s.level {
-            0 => tr(&["Aim, then release to fire", "瞄准后松开发射", "狙って離すと発射", "조준 후 놓으면 발사", "Apunta y suelta para disparar", "Mire e solte para atirar", "Visez, puis relâchez pour tirer", "Zielen und zum Schießen loslassen", "Прицельтесь и отпустите", "瞄準後放開發射"]),
-            1..=2 => tr(&["One bullet can hit several targets", "一发子弹可以击中多个目标", "一発で複数の敵を倒せる", "한 발로 여러 적을 맞히세요", "Una bala puede dar a varios", "Uma bala pode acertar vários", "Une balle peut toucher plusieurs cibles", "Eine Kugel kann mehrere treffen", "Одна пуля — несколько целей", "一發子彈可以擊中多個目標"]),
-            3 => tr(&["Wood absorbs one shot, then breaks", "木箱挡住一发子弹后破碎", "木箱は一発を止めて壊れる", "나무 상자는 한 발을 막고 부서져요", "La madera absorbe una bala y se rompe", "Madeira bloqueia um tiro e quebra", "Le bois absorbe un tir puis se brise", "Holz stoppt einen Schuss und zerbricht", "Ящик поглощает выстрел и ломается", "木箱擋住一發子彈後破碎"]),
-            4..=9 => tr(&["Bounce around cover", "利用反弹绕过掩体", "跳弾で障害物を回り込もう", "도탄으로 장애물을 피하세요", "Rebota para rodear obstáculos", "Ricocheteie para contornar obstáculos", "Contournez les obstacles par ricochet", "Mit Abprallern um Hindernisse", "Обойдите укрытие рикошетом", "利用反彈繞過掩體"]),
-            10..=14 => tr(&["Keep hostages out of the bullet's path", "避开人质", "人質を弾道から外そう", "인질을 피해서 쏘세요", "Evita a los rehenes", "Evite os reféns", "Évitez les otages", "Verschone die Geiseln", "Не заденьте заложников", "避開人質"]),
-            15..=19 => tr(&["Steel plates reflect bullets", "钢板会反弹子弹", "鉄板は弾を反射する", "철판은 총알을 반사해요", "Las placas de acero desvían las balas", "Placas de aço refletem as balas", "Les plaques d'acier renvoient les balles", "Stahlplatten lenken Kugeln ab", "Стальные пластины отражают пули", "鋼板會反彈子彈"]),
-            _ => tr(&["Plan the path before firing", "发射前规划路线", "撃つ前に弾道を考えよう", "발사 전에 경로를 계획하세요", "Planea la trayectoria antes de disparar", "Planeje a trajetória antes de atirar", "Prévoyez la trajectoire avant de tirer", "Plane die Flugbahn vor dem Schuss", "Продумайте путь до выстрела", "發射前規劃路線"]),
-        };
-        s.text_c(lesson, w / 2.0, 368.0, s.fit_size(lesson, 11.0, w - 20.0), hex(0x202733), 1.0);
-        let target = tr(&["Shots for 3 stars", "三星所需发数", "星3つの弾数", "별 3개 목표 발수", "Disparos para 3 estrellas", "Tiros para 3 estrelas", "Tirs pour 3 étoiles", "Schüsse für 3 Sterne", "Выстрелов для 3 звёзд", "三星所需發數"]);
-        let target = format!("{}: {}", target, self.room.par);
-        s.text_c(&target, w / 2.0, 388.0, s.fit_size(&target, 10.0, w - 20.0), hex(0x202733), 1.0);
         if !matches!(self.s.phase, AIM | FLY) {
             self.draw_card(s, w);
         }
@@ -490,12 +492,12 @@ impl Game for Bankshot {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
-        let ok = s.version == VERSION
-            && (0..LEVELS).contains(&s.opt[0])
-            && (0..LEVELS).contains(&s.level)
-            && (AIM..=FAILED).contains(&s.phase)
-            && s.aim.is_finite();
+        let ok = s.version == VERSION && (0..LEVELS).contains(&s.opt[0]) && (0..LEVELS).contains(&s.level) && (AIM..=FAILED).contains(&s.phase) && s.aim.is_finite();
         if ok {
             let saved = self.s;
             self.room = room::level(saved.level);
@@ -521,11 +523,13 @@ impl Game for Bankshot {
 }
 
 fn star(s: &mut Screen, x: f32, y: f32, radius: f32, earned: bool) {
-    let points: Vec<_> = (0..10).map(|i| {
-        let a = i as f32 * std::f32::consts::PI / 5.0 - std::f32::consts::FRAC_PI_2;
-        let r = radius * if i % 2 == 0 { 1.0 } else { 0.45 };
-        (x + a.cos() * r, y + a.sin() * r)
-    }).collect();
+    let points: Vec<_> = (0..10)
+        .map(|i| {
+            let a = i as f32 * std::f32::consts::PI / 5.0 - std::f32::consts::FRAC_PI_2;
+            let r = radius * if i % 2 == 0 { 1.0 } else { 0.45 };
+            (x + a.cos() * r, y + a.sin() * r)
+        })
+        .collect();
     // Screen::poly accepts convex polygons only: fill the center and five tips.
     let color = hex(if earned { 0xffd166 } else { 0x657080 });
     let center: Vec<_> = (0..5).map(|i| points[i * 2 + 1]).collect();
@@ -628,7 +632,9 @@ fn draw_scene(s: &mut Screen, g: &Bankshot) {
     s.rect(LEFT - 3.0, TOP, 3.0, FLOOR - TOP, 0.0, hex(0x7b818b), 1.0);
     s.rect(RIGHT, TOP, 3.0, FLOOR - TOP, 0.0, hex(0x7b818b), 1.0);
     for (i, b) in room.crates.iter().enumerate() {
-        if g.s.broken & (1 << i) != 0 { continue; }
+        if g.s.broken & (1 << i) != 0 {
+            continue;
+        }
         s.rect(b.x, b.y, b.w, b.h, 2.0, hex(0xa46a2e), 1.0);
         s.rect(b.x + 3.0, b.y + 3.0, b.w - 6.0, b.h - 6.0, 1.0, hex(0xc58b44), 1.0);
         s.line(b.x + 6.0, b.y + 6.0, b.x + b.w - 6.0, b.y + b.h - 6.0, 3.0, hex(0xe1ad65), 1.0);
@@ -676,6 +682,8 @@ impl Bankshot {
         let failed = self.s.phase == FAILED;
         let title = if !failed {
             tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"])
+        } else if self.s.hurt == -2 {
+            tr(&["Agent hit", "特工中弹", "エージェントに命中", "요원 명중", "Agente herido", "Agente atingido", "Agent touché", "Agent getroffen", "Агент ранен", "特工中彈"])
         } else if self.s.hurt >= 0 {
             tr(&["Hostage hit", "误伤人质", "人質に命中", "인질 명중", "Rehén herido", "Refém atingido", "Otage touché", "Geisel getroffen", "Заложник ранен", "誤傷人質"])
         } else {
@@ -769,13 +777,16 @@ mod tests {
     }
 
     #[test]
-    fn returning_shots_cost_ammunition_without_self_damage() {
+    fn returning_shots_hurt_the_agent_and_retry_restores_the_room() {
         let mut g = Bankshot::new();
         g.start(1);
         g.aim_at(std::f32::consts::FRAC_PI_2);
         g.fire();
-        assert_eq!(run(&mut g, 4000) & wg::EV_LOSE, 0);
-        assert_eq!((g.s.phase, g.s.shots), (AIM, 3));
+        assert_ne!(run(&mut g, 4000) & wg::EV_LOSE, 0);
+        assert_eq!((g.s.phase, g.s.shots, g.s.hurt), (FAILED, 3, -2));
+        assert_eq!(g.fire(), 0);
+        g.press_button();
+        assert_eq!((g.s.phase, g.s.shots, g.s.hurt), (AIM, 4, -1));
     }
 
     #[test]
@@ -806,7 +817,14 @@ mod tests {
         for misses in 0..=3 {
             g.retry();
             for _ in 0..misses {
-                g.aim_at(std::f32::consts::FRAC_PI_2);
+                let miss = (0..room::ANGLES)
+                    .map(Room::step_angle)
+                    .find(|&a| {
+                        let p = g.room.trace(a);
+                        p.foes.is_empty() && p.hit.is_none()
+                    })
+                    .unwrap();
+                g.aim_at(miss);
                 g.fire();
                 run(&mut g, 3000);
             }
@@ -830,10 +848,13 @@ mod tests {
         for l in 0..LEVELS {
             g.begin(l);
             let initial = g.room.clone();
-            let miss = (0..room::ANGLES).map(Room::step_angle).find(|&a| {
-                let p = g.room.trace(a);
-                p.foes.is_empty() && p.hit.is_none()
-            }).expect("no harmless shot");
+            let miss = (0..room::ANGLES)
+                .map(Room::step_angle)
+                .find(|&a| {
+                    let p = g.room.trace(a);
+                    p.foes.is_empty() && p.hit.is_none()
+                })
+                .expect("no harmless shot");
             for _ in 0..g.room.shots {
                 g.aim_at(miss);
                 g.fire();

@@ -1,7 +1,8 @@
 //! The levels: ground and ledges, where the dog sits, the hives, the ink
 //! and the bees.
 
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
+include!("campaign.rs");
 /// the ground's top, plan units
 pub const GROUND: f32 = 352.0;
 /// plan units to a model unit for the dog and the hives, and a bee's height
@@ -131,7 +132,7 @@ fn layout(k: i32) -> (Vec<Rect>, (f32, f32, bool), Vec<(f32, f32)>) {
 /// Terrain puzzles after three free-drawing lessons. A short bridge,
 /// sliding gate, paired roof patches, roof-and-gate or two gates is
 /// required; the ink cannot encircle the dog independently of the terrain.
-fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
+fn challenge(n: i32, stroke: impl FnMut(&[(f32, f32)])) -> Level {
     // type, dog x, floor y, half-width, wall height. Explicit authored order
     // alternates lessons and combinations instead of ten repeating arenas.
     let (kind, x, y, w, h): (u8, f32, f32, f32, f32) = match n {
@@ -162,8 +163,13 @@ fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
         27 => (3, 170., 250., 54., 84.),
         28 => (4, 112., 244., 54., 88.),
         29 => (5, 150., 320., 56., 96.),
+        30.. => EXTRA[(n - 30) as usize],
         _ => unreachable!(),
     };
+    build(n, (kind, x, y, w, h), stroke)
+}
+
+pub(super) fn build(n: i32, (kind, x, y, w, h): (u8, f32, f32, f32, f32), mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
     let (l, rr, top) = (x - w, x + w, y - h);
     let mut solids = vec![GROUND_RECT, r(l - 14., y, rr + 14., y + 16.)];
     let side = |solids: &mut Vec<Rect>, xx: f32, door: bool| {
@@ -174,18 +180,18 @@ fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
             solids.push(r(xx - 7., top, xx + 7., y));
         }
     };
-    side(&mut solids, l, kind == 4);
-    side(&mut solids, rr, kind == 1 || kind == 3 || kind == 4 || kind == 5);
+    side(&mut solids, l, kind == 4 || kind >= 6);
+    side(&mut solids, rr, kind == 1 || kind >= 3);
     if kind == 1 || kind == 4 {
         solids.push(r(l - 7., top - 12., rr + 7., y - 52.));
     }
-    if kind == 2 || kind == 5 {
+    if kind == 2 || kind == 5 || kind == 7 {
         solids.extend([r(l - 7., top, l + 14., top + 12.), r(rr - 14., top, rr + 7., top + 12.)]);
         solids.push(r(x - 20., top, x + 20., y - 52.));
         solids.extend([r(l - 23., top - 12., l - 19., top + 4.), r(x - 3., top - 12., x + 3., top), r(rr + 19., top - 12., rr + 23., top + 4.)]);
         stroke(&[(l - 10., top - 6.), (x - 8., top - 6.)]);
         stroke(&[(x + 8., top - 6.), (rr + 10., top - 6.)]);
-    } else if kind == 0 || kind == 3 {
+    } else if kind == 0 || kind == 3 || kind == 6 {
         // Offset roof opening: a short plank must bridge the actual gap.
         let gap = if kind == 0 && n % 2 == 0 { x + 8. } else { x - 30. };
         solids.push(r(l - 7., top, gap, y - 52.));
@@ -193,11 +199,11 @@ fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
         solids.extend([r(gap - 33., top - 12., gap - 29., top), r(gap + 57., top - 12., gap + 61., top)]);
         stroke(&[(gap - 20., top - 6.), (gap + 48., top - 6.)]);
     }
-    if kind == 1 || kind == 3 || kind == 4 || kind == 5 {
+    if kind == 1 || kind >= 3 {
         solids.extend([r(rr + 7., y, rr + 27., y + 16.), r(rr + 21., y - 27., rr + 27., y), r(rr + 21., y - 100., rr + 27., y - 47.)]);
         stroke(&[(rr + 14., y - if kind == 5 { 76. } else { 85. }), (rr + 14., y - 4.)]);
     }
-    if kind == 4 {
+    if kind == 4 || kind >= 6 {
         solids.extend([r(l - 27., y, l - 7., y + 16.), r(l - 27., y - 27., l - 21., y), r(l - 27., y - 100., l - 21., y - 47.)]);
         stroke(&[(l - 14., y - 85.), (l - 14., y - 4.)]);
     }
@@ -208,6 +214,8 @@ fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
         3 => 149.,
         4 => 162.,
         5 => 2. * (w + 2.) + 72.,
+        6 => 230.,
+        7 => 2. * (w + 2.) + 162.,
         _ => unreachable!(),
     };
     let hives = if n < 8 {
@@ -221,7 +229,7 @@ fn challenge(n: i32, mut stroke: impl FnMut(&[(f32, f32)])) -> Level {
         solids.push(r(119., 110., 181., 124.));
     }
     let ink = length + if n < 12 { 8. } else { 4. };
-    Level { solids, dog: (x, y, n % 2 == 0), hives, ink, bees: 8 + (n / 6) as u32, secs: 8. + (n / 10) as f32 }
+    Level { solids, dog: (x, y, n % 2 == 0), hives, ink, bees: 8 + (n.min(29) / 6) as u32, secs: 8. + (n.min(29) / 10) as f32 }
 }
 
 pub fn level(n: i32) -> Level {
@@ -253,7 +261,7 @@ mod tests {
             assert!(seen.insert((terrain, hives, lv.dog.0 as i32, lv.dog.1 as i32)), "repeated terrain {}", n + 1);
             assert!(lv.solids.iter().any(|r| r.y == lv.dog.1 && lv.dog.0 > r.x && lv.dog.0 < r.x + r.w));
             if n >= 3 {
-                assert!(lv.ink < 210.);
+                assert!(lv.ink < 300.);
             }
         }
     }

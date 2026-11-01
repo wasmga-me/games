@@ -4,7 +4,7 @@
 use wg::Rng;
 
 pub const MAXN: usize = 9;
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 
 /// up, right, down, left; 0 is an empty square
 pub const DX: [i32; 5] = [0, 0, 1, 0, -1];
@@ -86,6 +86,9 @@ impl Board {
 
 /// the board's side in level l (0 for the first): 3 up to 9
 pub fn side(level: i32) -> i32 {
+    if level >= 30 {
+        return 7 + (level / 10) % 3;
+    }
     if level == 29 {
         9
     } else {
@@ -160,7 +163,7 @@ fn generate(level: i32) -> Board {
             }
         }
         let (depth, free) = dependency(&b);
-        let target = 3 + level / 5 + level % 5;
+        let target = 3 + level.min(29) / 5 + level % 5;
         let score = -(depth - target).abs() * 20 - (want - placed) as i32 * 8 - free;
         if best.as_ref().is_none_or(|v| score > v.0) {
             best = Some((score, b));

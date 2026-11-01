@@ -11,7 +11,12 @@ fn export_campaign() {
     );
     for l in 0..LEVELS {
         let row = {
-            let (g, order) = generate_order(l);
+            let (g, order) = if l < 30 {
+                let (g, o) = campaign(l);
+                (g, o.to_vec())
+            } else {
+                generate_order(l)
+            };
             let plates: Vec<_> = g.plate[..g.plates as usize].iter().map(|p| (p.ax, p.ay, p.bx, p.by, p.layer)).collect();
             let screws: Vec<_> = g.screw[..g.screws as usize].iter().map(|s| (s.x, s.y, s.plate, s.colour)).collect();
             format!("(&{:?}, &{:?}, &{:?}, &{:?})", plates, screws, &g.colour[..g.boxes as usize], order)

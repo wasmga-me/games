@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use wg::Rng;
 
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 pub const MAXCOLS: usize = 2;
 pub const MAXFLOORS: usize = 6;
 pub const MAXROOMS: usize = MAXCOLS * MAXFLOORS;
@@ -205,7 +205,7 @@ fn items(rng: &mut Rng, d: i32, room: usize) -> Vec<i8> {
 /// a tower at difficulty `d` should let win: about half at first, few by
 /// the last level, fewer still in endless.
 fn careful_wins(d: i32) -> f32 {
-    (0.5 - 0.42 * d as f32 / (LEVELS - 1) as f32).max(0.04)
+    (0.5 - 0.42 * d as f32 / 29.0).max(0.04)
 }
 
 /// Deals a level: the same level always deals the same tower.
@@ -228,17 +228,50 @@ fn generate(level: i32) -> Tower {
         }
         return t;
     }
-    deal_with(&mut Rng::new(0x70E7 + level as u32 * 7919), level)
+    deal_with(&mut Rng::new(0x70E7 + level as u32 * 7919), level.min(29))
 }
 
 pub fn deal(level: i32) -> Tower {
     campaign(level)
 }
 
-/// Deals tower `k` (from 0) of an endless climb from this seed.
-pub fn deal_endless(seed: u32, k: i32) -> Tower {
-    // a little ahead of the levels at first, then on past them
-    deal_with(&mut Rng::new(seed ^ (k as u32 + 1).wrapping_mul(0x9E37_79B9)), 2 + k * 3 / 2)
+/// One floor of the continuous climb, generated relative to the power
+/// arriving there. The returned power is the result of its safe room order.
+/// Occasional halving traps keep numbers readable without resetting power.
+pub fn endless_floor(seed: u32, floor: i32, power: i32) -> ([Room; 2], i32) {
+    let mut rng = Rng::new(seed ^ (floor as u32 + 1).wrapping_mul(0x9E37_79B9));
+    let p = power.max(4);
+    let mut rooms = [Room::default(); 2];
+    let end;
+    if p > 5000 || floor % 4 == 3 {
+        let enemy = (p * 3 / 4).max(2);
+        rooms[0] = Room { kind: MONSTER, val: enemy, ..Room::default() };
+        rooms[1] = Room { kind: TRAP, ..Room::default() };
+        end = (p + enemy + 1) / 2;
+    } else {
+        let boost = 2 + rng.below(6) as i32;
+        rooms[0] = Room { kind: if floor % 3 == 1 { POTION } else { MONSTER }, val: boost.min(p - 1), ..Room::default() };
+        rooms[1] = Room { kind: MONSTER, val: p + rooms[0].val / 2, ..Room::default() };
+        end = p + rooms[0].val + rooms[1].val;
+    }
+    for r in &mut rooms {
+        r.look = rng.below(LOOKS as u32) as i8;
+    }
+    if rng.below(2) == 0 {
+        rooms.swap(0, 1);
+    }
+    (rooms, end)
+}
+
+pub fn endless_start(seed: u32) -> Tower {
+    let mut t = Tower { cols: 2, floors: 4, start: 8, rooms: [Room::default(); MAXROOMS] };
+    let mut power = t.start;
+    for f in 0..4 {
+        let (rooms, end) = endless_floor(seed, f, power);
+        t.rooms[f as usize * 2..f as usize * 2 + 2].copy_from_slice(&rooms);
+        power = end;
+    }
+    t
 }
 
 /// Of a few towers built at difficulty d, the one whose careful climbs win
@@ -371,21 +404,16 @@ mod tests {
     }
 
     #[test]
-    fn endless_towers_can_be_won_and_lost() {
-        for k in 0..40 {
-            check(&format!("endless {k:2}"), &deal_endless(12345, k));
-        }
-    }
-
-    /// Many endless climbs, as players' random seeds deal them: run with
-    /// --ignored.
-    #[test]
-    #[ignore]
-    fn endless_deals_for_any_seed() {
+    fn endless_floors_have_a_safe_order_and_a_losing_order() {
         for seed in 0..150u32 {
-            for k in 0..24 {
-                let t = deal_endless(seed.wrapping_mul(2654435761), k);
-                assert!(t.valid() && solvable(&t, 0, t.start), "seed {seed} tower {k}");
+            let mut power = 8;
+            for floor in 0..1000 {
+                let (rooms, end) = endless_floor(seed, floor, power);
+                let outcomes = [(0, 1), (1, 0)].map(|(a, b)| take(power, &rooms[a], 0).and_then(|p| take(p, &rooms[b], 1)));
+                assert!(outcomes.contains(&Some(end)), "seed {seed}, floor {floor}");
+                assert!(outcomes.contains(&None), "no losing order {seed}, {floor}");
+                assert!(end > 0 && end < 20000);
+                power = end;
             }
         }
     }

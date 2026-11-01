@@ -220,11 +220,7 @@ impl Boarding {
         s.rect(30.0, 122.0, 240.0, 150.0, 16.0, hex(0xffffff), 1.0);
         let failed = self.s.phase == STUCK;
         s.text_c(if failed { tr(&["Bench full", "候车区满了"]) } else { tr(&["Everyone aboard!", "全部上车！"]) }, 150.0, 151.0, 21.0, INK, 1.0);
-        let detail = if failed {
-            tr(&["Plan around the next bus colour.", "先考虑下一辆车的颜色。"]).to_owned()
-        } else {
-            format!("+{}", self.s.cleared_score)
-        };
+        let detail = if failed { tr(&["Plan around the next bus colour.", "先考虑下一辆车的颜色。"]).to_owned() } else { format!("+{}", self.s.cleared_score) };
         s.text_c(&detail, 150.0, 183.0, s.fit_size(&detail, 13.0, 214.0), INK, 1.0);
         s.rect(50.0, 215.0, 200.0, 40.0, 20.0, hex(0x3479c7), 1.0);
         s.text_c(if failed { tr(&["Retry level", "重试本关"]) } else { tr(&["Next level", "下一关"]) }, 150.0, 235.0, 16.0, hex(0xffffff), 1.0);
@@ -416,6 +412,10 @@ impl Game for Boarding {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let ok = s.version == VERSION
             && (0..LEVELS).contains(&s.level)
@@ -432,11 +432,15 @@ impl Game for Boarding {
 }
 impl wg::Board for Boarding {
     fn grid(&self) -> Option<(i32, i32)> {
-        if matches!(self.s.phase, CLEARED | STUCK) { return Some((1, 1)); }
+        if matches!(self.s.phase, CLEARED | STUCK) {
+            return Some((1, 1));
+        }
         Some((self.s.yard.w, self.s.yard.h))
     }
     fn cursor(&self) -> (i32, i32) {
-        if matches!(self.s.phase, CLEARED | STUCK) { return (0, 0); }
+        if matches!(self.s.phase, CLEARED | STUCK) {
+            return (0, 0);
+        }
         (self.s.cx, self.s.cy)
     }
     fn focus(&mut self, x: i32, y: i32) {
@@ -450,7 +454,9 @@ impl wg::Board for Boarding {
         self.board_box()
     }
     fn cell_box(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
-        if matches!(self.s.phase, CLEARED | STUCK) { return Some((50.0, 215.0, 200.0, 40.0)); }
+        if matches!(self.s.phase, CLEARED | STUCK) {
+            return Some((50.0, 215.0, 200.0, 40.0));
+        }
         let (bx, by, c) = self.board_box();
         Some((bx + x as f32 * c, by + y as f32 * c, c, c))
     }

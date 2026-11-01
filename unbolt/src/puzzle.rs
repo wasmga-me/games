@@ -3,7 +3,7 @@
 #[cfg(test)]
 use wg::Rng;
 
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 pub const MAXP: usize = 24;
 pub const MAXS: usize = 48;
 pub const MAXB: usize = MAXS / 3;
@@ -242,7 +242,7 @@ fn shape(level: i32) -> (u8, usize, u8) {
     if level == 3 || level == 4 {
         return (2, 4, 4);
     }
-    [(1, 2, 2), (3, 6, 5), (3, 8, 5), (4, 10, 5), (5, 12, 6), (6, 14, 7)][(level / 5) as usize]
+    [(1, 2, 2), (3, 6, 5), (3, 8, 5), (4, 10, 5), (5, 12, 6), (6, 14, 7)][(level.min(29) / 5) as usize]
 }
 
 /// The deal for a level, the same for everyone. Plates go down layer by
@@ -262,7 +262,7 @@ fn generate_order(level: i32) -> (Level, Vec<usize>) {
     // Select by sampled unplanned play, retaining a verified winning order.
     // The desired loss rate rises gradually: now and then
     // at first, mostly at the end (the best found if none comes close)
-    let want = TRIALS as f32 * (0.15 + 0.5 * level as f32 / (LEVELS - 1) as f32);
+    let want = TRIALS as f32 * (0.15 + 0.5 * level.min(29) as f32 / 29.0);
     let mut best: Option<(f32, Level, Vec<usize>)> = None;
     for _ in 0..DEALS {
         let (lv, order) = candidate(level, &mut rng);

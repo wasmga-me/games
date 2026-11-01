@@ -4,7 +4,7 @@
 use wg::Rng;
 
 pub const MAXN: usize = 8;
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 
 /// openings as bits: up, right, down, left
 #[cfg(test)]
@@ -120,8 +120,69 @@ impl Grid {
     }
 }
 
+/// Time is based on the board, never an unbounded penalty for level number.
+#[cfg(test)]
+pub fn time_limit(g: &Grid, level: i32) -> i32 {
+    let base = 40 + g.n * g.n * 2 - level.min(29) / 2;
+    if level < 30 {
+        base
+    } else {
+        let turns = solve(g).map_or(0, |s| par(g, &s));
+        base.max(turns * 3 + 20)
+    }
+}
+
 pub fn side(level: i32) -> i32 {
-    [3, 4, 5, 6, 7, 8][(level / 5) as usize]
+    if level < 30 {
+        [3, 4, 5, 6, 7, 8][(level / 5) as usize]
+    } else {
+        6 + ((level - 30) / 25).min(2)
+    }
+}
+
+/// Offline bounded search for a winding path, not a repeated row snake.
+#[cfg(test)]
+fn winding_route(n: i32, level: i32) -> Vec<(i32, i32)> {
+    fn walk(n: i32, target: (i32, i32), min: usize, max: usize, path: &mut Vec<(i32, i32)>, rng: &mut Rng, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
+        let p = *path.last().unwrap();
+        if p == target {
+            return path.len() >= min;
+        }
+        if path.len() >= max {
+            return false;
+        }
+        let mut dirs = [0, 1, 2, 3];
+        rng.shuffle(&mut dirs);
+        for d in dirs {
+            let q = (p.0 + DX[d], p.1 + DY[d]);
+            if q.0 < 0 || q.1 < 0 || q.0 >= n || q.1 >= n || path.contains(&q) {
+                continue;
+            }
+            path.push(q);
+            if walk(n, target, min, max, path, rng, budget) {
+                return true;
+            }
+            path.pop();
+        }
+        false
+    }
+    let mut rng = Rng::new(0xF10B_2026 ^ (level as u32).wrapping_mul(7919));
+    for _ in 0..100 {
+        let mut path = vec![(0, rng.below(n as u32) as i32)];
+        let target = (n - 1, rng.below(n as u32) as i32);
+        let min = (n * 2 + level % 7) as usize;
+        if walk(n, target, min, min + 10, &mut path, &mut rng, &mut 20000) {
+            let turns = path.windows(3).filter(|p| (p[1].0 - p[0].0, p[1].1 - p[0].1) != (p[2].0 - p[1].0, p[2].1 - p[1].1)).count();
+            if turns >= 6 {
+                return path;
+            }
+        }
+    }
+    panic!("no bounded winding route for {level}")
 }
 
 #[cfg(test)]
@@ -129,7 +190,9 @@ fn generate(level: i32) -> Grid {
     let n = side(level);
     let lesson = level % 5;
     let mut path = Vec::new();
-    if level == 0 {
+    if level >= 30 {
+        path = winding_route(n, level);
+    } else if level == 0 {
         path = vec![(0, 1), (1, 1), (2, 1)];
     } else if level == 1 {
         path = vec![(0, 0), (1, 0), (1, 1), (2, 1)];
@@ -303,7 +366,7 @@ mod campaign_checks {
             }
             // Even at three seconds per clockwise turn the route fits
             // the timer. Reading time before the first turn is unlimited.
-            assert!(turns * 3 < 40 + g.n * g.n * 2 - l / 2, "level {} is a speed test", l + 1);
+            assert!(turns * 3 < time_limit(&g, l), "level {} is a speed test", l + 1);
         }
     }
 }

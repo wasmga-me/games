@@ -882,6 +882,10 @@ mod tests {
         let mut g = Pinwork::new();
         g.start(1);
         g.begin(level);
+        replay(g, order)
+    }
+
+    fn replay(mut g: Pinwork, order: &[usize]) -> i32 {
         let step = Input { held: 0, pressed: 0, dt: 16 };
         // let the grains settle first
         for _ in 0..60 {
@@ -977,6 +981,87 @@ mod tests {
         }
     }
 
+    fn geometry_key(lv: &levels::Level) -> Vec<(i32, i32, i32, i32, i32)> {
+        let key = |flip: bool| {
+            let mut v = Vec::new();
+            for (kind, segs) in [(0, &lv.walls), (1, &lv.pins)] {
+                for &(a, b, c, d) in segs {
+                    let a = if flip { 300. - a } else { a };
+                    let c = if flip { 300. - c } else { c };
+                    let p = (a as i32, b as i32);
+                    let q = (c as i32, d as i32);
+                    let (p, q) = if p < q { (p, q) } else { (q, p) };
+                    v.push((kind, p.0, p.1, q.0, q.1));
+                }
+            }
+            v.sort();
+            v
+        };
+        key(false).min(key(true))
+    }
+
+    #[test]
+    #[ignore = "offline campaign export"]
+    fn export_campaign() {
+        let mut out = String::from("// Fixed chamber variants selected by full particle simulation.\nconst EXTRA:&[Layout]=&[\n");
+        let mut routes = String::from("#[cfg(test)] const ROUTES:&[(&[usize],&[usize])]=&[\n");
+        let mut seen = std::collections::HashSet::new();
+        for level in 0..20 {
+            seen.insert(geometry_key(&levels::level(level)));
+        }
+        for level in 20..LEVELS {
+            if let Some((lv, text, win, loss)) = levels::exported(level) {
+                if seen.insert(geometry_key(&lv)) {
+                    out.push_str(&format!("{text}, // {}\n", level + 1));
+                    routes.push_str(&format!("(&{win:?},&{loss:?}),\n"));
+                    continue;
+                }
+            }
+            let mut accepted = None;
+            for attempt in 0..160u32 {
+                let (lv, text, win) = levels::candidate((level as u32).wrapping_mul(7919) + attempt * 131, (level - 20) as usize);
+                if seen.contains(&geometry_key(&lv)) {
+                    continue;
+                }
+                let trial = |order: &[usize]| {
+                    let mut g = Pinwork::new();
+                    g.start(1);
+                    g.s.level = level;
+                    g.lv = lv.clone();
+                    g.restart();
+                    replay(g, order)
+                };
+                if !matches!(trial(&win), CLEARED | DONE) {
+                    continue;
+                }
+                let mut loss = win.clone();
+                loss.reverse();
+                if trial(&loss) != FAILED {
+                    continue;
+                }
+                if (0..win.len()).any(|omit| {
+                    let shorter: Vec<_> = win.iter().enumerate().filter(|(i, _)| *i != omit).map(|(_, v)| *v).collect();
+                    matches!(trial(&shorter), CLEARED | DONE)
+                }) {
+                    continue;
+                }
+                seen.insert(geometry_key(&lv));
+                accepted = Some((text, win, loss));
+                break;
+            }
+            let (text, win, loss) = accepted.expect("bounded chamber selection failed");
+            out.push_str(&format!("{text}, // {}\n", level + 1));
+            routes.push_str(&format!("(&{win:?},&{loss:?}),\n"));
+            eprintln!("accepted {}", level + 1);
+            // Keep accepted results recoverable if a later candidate needs tuning.
+            std::fs::write("/tmp/pinwork-campaign-progress.txt", format!("{out}];\n{routes}];\n")).unwrap();
+        }
+        out.push_str("];\n");
+        routes.push_str("];\n");
+        out.push_str(&routes);
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/campaign.rs"), out).unwrap();
+    }
+
     #[test]
     #[ignore = "manual level-design probe; campaign test checks all orders"]
     fn replay_design_route() {
@@ -990,6 +1075,17 @@ mod tests {
         // PINWORK_LEVEL=n checks only level n
         let only = std::env::var("PINWORK_LEVEL").ok().and_then(|v| v.parse::<i32>().ok());
         for level in (0..LEVELS).filter(|l| only.is_none_or(|o| o == l + 1)) {
+            if level >= 20 {
+                let (win, loss) = levels::routes(level);
+                assert!(matches!(play(level, win), CLEARED | DONE), "level {} winning route", level + 1);
+                assert_eq!(play(level, loss), FAILED, "level {} losing route", level + 1);
+                for omit in 0..win.len() {
+                    let shorter: Vec<_> = win.iter().enumerate().filter(|(i, _)| *i != omit).map(|(_, v)| *v).collect();
+                    assert!(!matches!(play(level, &shorter), CLEARED | DONE), "level {} bypasses pin {}", level + 1, omit);
+                }
+                continue;
+            }
+
             let n = levels::level(level).pins.len();
             let mut wins = Vec::new();
             let (mut lost, mut all) = (0, 0);

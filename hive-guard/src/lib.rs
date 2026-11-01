@@ -4,7 +4,7 @@
 //! A dog sits near a beehive. Draw lines with the ink you have, then let
 //! the bees out: the ink drops as solid bars, and the bees pour out, find
 //! their way to the dog and shove whatever is in it. Keep every bee off
-//! the dog until the time runs out. 30 levels.
+//! the dog until the time runs out. 100 levels.
 mod art;
 mod glyphs;
 mod levels;
@@ -533,6 +533,10 @@ impl Game for HiveGuard {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let ok = s.version == VERSION && (0..LEVELS).contains(&s.opt[0]) && (0..LEVELS).contains(&s.level) && (DRAW..=STUNG).contains(&s.phase);
         if ok {
@@ -712,6 +716,64 @@ mod tests {
         assert_eq!(g.go(), wg::EV_BLIP);
         let ms = (g.lv.secs * 1000.0) as i32 + 200;
         run(g, ms) & wg::EV_LEVEL != 0
+    }
+
+    #[test]
+    #[ignore = "offline campaign export"]
+    fn export_campaign() {
+        let mut out = String::from("// Fixed terrain specifications, selected by full physics replay.\nconst EXTRA:&[(u8,f32,f32,f32,f32)]=&[\n");
+        let mut seen = std::collections::HashSet::new();
+        for level in 30..LEVELS {
+            let mut rng = wg::Rng::new(0xBEEF2026 ^ (level as u32).wrapping_mul(7919));
+            let mut accepted = None;
+            for _ in 0..1500 {
+                let kind = if level < 55 { [2, 3, 4, 5][(level % 4) as usize] } else { [3, 4, 5, 6, 7][(level % 5) as usize] };
+                let spec = (kind, 110. + rng.below(71) as f32, 260. + rng.below(93) as f32, 46. + rng.below(15) as f32, 74. + rng.below(23) as f32);
+                let key = format!("{spec:?}");
+                if seen.contains(&key) {
+                    continue;
+                }
+                let mut solution = Vec::new();
+                let lv = levels::build(level, spec, |s| solution.push(s.to_vec()));
+                let trial = |lines: Vec<Vec<(f32, f32)>>, seed: u32| {
+                    let mut g = HiveGuard::new();
+                    g.start(1);
+                    g.s.level = level;
+                    g.lv = lv.clone();
+                    g.swarm = world::Swarm::new(&g.lv, seed);
+                    for line in lines {
+                        stroke(&mut g, line);
+                    }
+                    !g.lines.is_empty() && play(&mut g)
+                };
+                if ![(level as u32, 0., 0.), (1001, -1., -1.), (1002, 1., -1.), (1003, 0., -2.)]
+                    .into_iter()
+                    .all(|(seed, ox, oy)| trial(solution.iter().map(|s| s.iter().map(|&(x, y)| (x + ox, y + oy)).collect()).collect(), seed))
+                {
+                    continue;
+                }
+                if (0..solution.len()).any(|omit| trial(solution.iter().enumerate().filter(|(i, _)| *i != omit).map(|(_, s)| s.clone()).collect(), level as u32)) {
+                    continue;
+                }
+                if [40., 49., 58., 65.].into_iter().any(|r| trial(vec![arch(r, r, lv.dog.0, lv.dog.1).collect()], level as u32)) {
+                    continue;
+                }
+                if trial(lv.hives.iter().map(|&(x, y)| arch(36., 60., x, y).collect()).collect(), level as u32) {
+                    continue;
+                }
+                if trial(vec![vec![(10., 60.), (20., 60.)]], level as u32) {
+                    continue;
+                }
+                seen.insert(key);
+                accepted = Some(spec);
+                break;
+            }
+            let spec = accepted.expect("bounded shelter selection failed");
+            out.push_str(&format!("{spec:?}, // {}\n", level + 1));
+            eprintln!("accepted {}", level + 1);
+        }
+        out.push_str("];\n");
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/campaign.rs"), out).unwrap();
     }
 
     #[test]

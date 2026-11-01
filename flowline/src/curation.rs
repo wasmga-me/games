@@ -11,7 +11,7 @@ fn export_campaign() {
     );
     for l in 0..LEVELS {
         let row = {
-            let g = generate(l);
+            let g = if l < 30 { campaign(l) } else { generate(l) };
             format!("({}, {}, {}, &{:?}, &{:?})", g.n, g.tap, g.drain, &g.pipe[..(g.n * g.n) as usize], &g.rot[..(g.n * g.n) as usize])
         };
         out.push_str(&format!("        {} => {}, // Level {}\n", l, row, l + 1));

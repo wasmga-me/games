@@ -75,15 +75,16 @@ Boarding moves passengers into matching buses through a five-seat waiting bench.
 Flowline requires a sealed route to the garden before the timer expires while
 keeping the hero dry. Unpark ends an attempt after three collisions. Higher Floor
 reserves the marked boss for last; Pinwork seals fluid barriers and offers
-twenty distinct chambers, including eight adaptations from the browser game
-[Hero Rescue](https://plays.org/hero-rescue/) (see [level notes](pinwork/references.md)). The other eight puzzle campaigns each have 30 fixed layouts with staged lessons.
+100 fixed chambers, including eight adaptations from the browser game
+[Hero Rescue](https://plays.org/hero-rescue/) (see [level notes](pinwork/references.md)). All ten ad-style campaigns now contain 100 fixed levels each, generated and
+checked offline before release.
 See [campaign design and editable level data](campaigns.md). Unbolt and Boarding
 retain a verified winning removal sequence for every layout.
 
 Bankshot follows [Mr Bullet](https://poki.com/en/g/mr-bullet)'s shooting rules and
 opening lessons: direct shots, aligned enemies, stairs and breakable wooden cover.
-Its 30 fixed layouts replace random rooms. Four bullets allow mistakes, while
-visible shot targets reward efficient clears with up to three stars. Tests check
+Its 100 fixed layouts replace random rooms. Four bullets allow mistakes;
+efficient clears earn up to three stars. Reflected shots can hit the agent. Tests check
 campaign wins, reachable losses, retry, cover saves and consistent aiming tolerance.
 
 ## Licence
@@ -95,3 +96,7 @@ Campaign games report successful completion separately from a loss through
 The ten ad-style modules pin the shared engine's clarified restart arrow and
 completion export. Pinwork's level notes describe the four redesigned late
 chambers and the gold/stone collision fixes.
+
+Higher Floor’s endless mode is one continuously scrolling tower with persistent
+power, alongside its 100-level campaign. Flowline retains upstream water when
+a pipe turns; disconnected branches drain, and the garden fills gradually.

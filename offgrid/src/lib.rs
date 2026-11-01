@@ -2,7 +2,7 @@
 //! A board full of arrows. Tap an arrow to send it off the board the way it
 //! points; if another arrow is in its way it bumps into it and comes back,
 //! and that costs one of three lives. Clear the board to finish the level.
-//! 30 levels, from 4 x 4 to 9 x 9. The page shows the setup, pause and game
+//! 100 levels, from 3 x 3 to 9 x 9. The page shows the setup, pause and game
 //! over screens.
 mod glyphs;
 mod puzzle;
@@ -72,11 +72,41 @@ struct Theme {
 
 const THEME: [Theme; THEMES] = [
     // Night
-    Theme { bg: 0x1a1f33, bg2: 0x10131f, well: 0x262c45, dot: 0x3a4263, text: 0xf2f4fb, dim: 0x8f97b8, overlay: 0x0b0d16, arrow: [0x4f7cff, 0xff6b5a, 0x35c48a, 0xffbe3d], ink: 0xffffff },
+    Theme {
+        bg: 0x1a1f33,
+        bg2: 0x10131f,
+        well: 0x262c45,
+        dot: 0x3a4263,
+        text: 0xf2f4fb,
+        dim: 0x8f97b8,
+        overlay: 0x0b0d16,
+        arrow: [0x4f7cff, 0xff6b5a, 0x35c48a, 0xffbe3d],
+        ink: 0xffffff,
+    },
     // Paper
-    Theme { bg: 0xf6f1e6, bg2: 0xe7dfcc, well: 0xe4dac6, dot: 0xcdbfa6, text: 0x3a2f24, dim: 0x8a7a66, overlay: 0x5a4a38, arrow: [0x3d6fd6, 0xd9503f, 0x2c9a6a, 0xd99a1e], ink: 0xffffff },
+    Theme {
+        bg: 0xf6f1e6,
+        bg2: 0xe7dfcc,
+        well: 0xe4dac6,
+        dot: 0xcdbfa6,
+        text: 0x3a2f24,
+        dim: 0x8a7a66,
+        overlay: 0x5a4a38,
+        arrow: [0x3d6fd6, 0xd9503f, 0x2c9a6a, 0xd99a1e],
+        ink: 0xffffff,
+    },
     // Mint
-    Theme { bg: 0xe3f2ec, bg2: 0xcfe6dc, well: 0xc2dccf, dot: 0xa5c7b6, text: 0x1f4535, dim: 0x5f8574, overlay: 0x1f4535, arrow: [0x3a7bd5, 0xe0604a, 0x1f8f62, 0xe39b20], ink: 0xffffff },
+    Theme {
+        bg: 0xe3f2ec,
+        bg2: 0xcfe6dc,
+        well: 0xc2dccf,
+        dot: 0xa5c7b6,
+        text: 0x1f4535,
+        dim: 0x5f8574,
+        overlay: 0x1f4535,
+        arrow: [0x3a7bd5, 0xe0604a, 0x1f8f62, 0xe39b20],
+        ink: 0xffffff,
+    },
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -113,7 +143,11 @@ impl Offgrid {
         &THEME[self.s.opt[O_THEME] as usize]
     }
     fn plan_wh(&self) -> (f32, f32) {
-        if self.tall { (300.0, 400.0) } else { (400.0, 300.0) }
+        if self.tall {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
     /// the board's box: x, y, side, and a square's side
     fn board_box(&self) -> (f32, f32, f32, f32) {
@@ -142,7 +176,11 @@ impl Offgrid {
         }
         let (bx, by, _, c) = self.board_box();
         let (gx, gy) = (((x - bx) / c).floor() as i32, ((y - by) / c).floor() as i32);
-        if self.s.board.inside(gx, gy) { Hit::Cell(gx, gy) } else { Hit::None }
+        if self.s.board.inside(gx, gy) {
+            Hit::Cell(gx, gy)
+        } else {
+            Hit::None
+        }
     }
 
     fn begin(&mut self, level: i32) {
@@ -232,15 +270,7 @@ fn draw_arrow(s: &mut Screen, x: f32, y: f32, c: f32, dir: u8, face: u32, ink: u
     // the arrow: a shaft and a head, pointing right, then turned
     let (cx, cy) = (x + c / 2.0, y + c / 2.0);
     let k = c * 0.5;
-    let pts: [(f32, f32); 7] = [
-        (-0.30, -0.08),
-        (0.02, -0.08),
-        (0.02, -0.24),
-        (0.32, 0.0),
-        (0.02, 0.24),
-        (0.02, 0.08),
-        (-0.30, 0.08),
-    ];
+    let pts: [(f32, f32); 7] = [(-0.30, -0.08), (0.02, -0.08), (0.02, -0.24), (0.32, 0.0), (0.02, 0.24), (0.02, 0.08), (-0.30, 0.08)];
     let (ca, sa) = match dir {
         1 => (0.0, -1.0),
         2 => (1.0, 0.0),
@@ -303,7 +333,11 @@ impl Game for Offgrid {
         self.keys = false;
     }
     fn plan(&self, w: i32, h: i32) -> (f32, f32) {
-        if h as f32 > w as f32 * 1.1 { (300.0, 400.0) } else { (400.0, 300.0) }
+        if h as f32 > w as f32 * 1.1 {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
 
     fn update(&mut self, input: &Input) -> u32 {
@@ -334,10 +368,18 @@ impl Game for Offgrid {
         }
         let n = self.s.board.n;
         if self.s.phase == PLAY {
-            if dirs & wg::LEFT != 0 { self.s.cx = (self.s.cx - 1).max(0); }
-            if dirs & wg::RIGHT != 0 { self.s.cx = (self.s.cx + 1).min(n - 1); }
-            if dirs & wg::UP != 0 { self.s.cy = (self.s.cy - 1).max(0); }
-            if dirs & wg::DOWN != 0 { self.s.cy = (self.s.cy + 1).min(n - 1); }
+            if dirs & wg::LEFT != 0 {
+                self.s.cx = (self.s.cx - 1).max(0);
+            }
+            if dirs & wg::RIGHT != 0 {
+                self.s.cx = (self.s.cx + 1).min(n - 1);
+            }
+            if dirs & wg::UP != 0 {
+                self.s.cy = (self.s.cy - 1).max(0);
+            }
+            if dirs & wg::DOWN != 0 {
+                self.s.cy = (self.s.cy + 1).min(n - 1);
+            }
             if input.pressed & wg::A != 0 {
                 self.keys = true;
                 ev |= self.tap(self.s.cx, self.s.cy);
@@ -486,7 +528,18 @@ impl Game for Offgrid {
             }
         }
         let left = self.s.board.count();
-        let left_l = tr(&["Arrows left", "剩余箭头", "残りの矢印", "남은 화살표", "Flechas restantes", "Setas restantes", "Flèches restantes", "Pfeile übrig", "Осталось стрелок", "剩餘箭頭"]);
+        let left_l = tr(&[
+            "Arrows left",
+            "剩余箭头",
+            "残りの矢印",
+            "남은 화살표",
+            "Flechas restantes",
+            "Setas restantes",
+            "Flèches restantes",
+            "Pfeile übrig",
+            "Осталось стрелок",
+            "剩餘箭頭",
+        ]);
         let line = format!("{} {}", left_l, left);
         let size = s.fit_size(&line, 14.0, w - 190.0);
         s.text_c(&line, w / 2.0, ty, size, hex(th.dim), 1.0);
@@ -522,6 +575,10 @@ impl Game for Offgrid {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let n = s.board.n;
         let ok = s.version == VERSION
@@ -594,10 +651,54 @@ impl wg::Board for Offgrid {
             return;
         }
         out.push_str(match d {
-            1 => tr(&["arrow up", "向上箭头", "上向きの矢印", "위쪽 화살표", "flecha arriba", "seta para cima", "flèche vers le haut", "Pfeil nach oben", "стрелка вверх", "向上箭頭"]),
-            2 => tr(&["arrow right", "向右箭头", "右向きの矢印", "오른쪽 화살표", "flecha a la derecha", "seta para a direita", "flèche vers la droite", "Pfeil nach rechts", "стрелка вправо", "向右箭頭"]),
-            3 => tr(&["arrow down", "向下箭头", "下向きの矢印", "아래쪽 화살표", "flecha abajo", "seta para baixo", "flèche vers le bas", "Pfeil nach unten", "стрелка вниз", "向下箭頭"]),
-            _ => tr(&["arrow left", "向左箭头", "左向きの矢印", "왼쪽 화살표", "flecha a la izquierda", "seta para a esquerda", "flèche vers la gauche", "Pfeil nach links", "стрелка влево", "向左箭頭"]),
+            1 => tr(&[
+                "arrow up",
+                "向上箭头",
+                "上向きの矢印",
+                "위쪽 화살표",
+                "flecha arriba",
+                "seta para cima",
+                "flèche vers le haut",
+                "Pfeil nach oben",
+                "стрелка вверх",
+                "向上箭頭",
+            ]),
+            2 => tr(&[
+                "arrow right",
+                "向右箭头",
+                "右向きの矢印",
+                "오른쪽 화살표",
+                "flecha a la derecha",
+                "seta para a direita",
+                "flèche vers la droite",
+                "Pfeil nach rechts",
+                "стрелка вправо",
+                "向右箭頭",
+            ]),
+            3 => tr(&[
+                "arrow down",
+                "向下箭头",
+                "下向きの矢印",
+                "아래쪽 화살표",
+                "flecha abajo",
+                "seta para baixo",
+                "flèche vers le bas",
+                "Pfeil nach unten",
+                "стрелка вниз",
+                "向下箭頭",
+            ]),
+            _ => tr(&[
+                "arrow left",
+                "向左箭头",
+                "左向きの矢印",
+                "왼쪽 화살표",
+                "flecha a la izquierda",
+                "seta para a esquerda",
+                "flèche vers la gauche",
+                "Pfeil nach links",
+                "стрелка влево",
+                "向左箭頭",
+            ]),
         });
         out.push_str(", ");
         out.push_str(match self.s.board.blocked(x, y) {
@@ -608,7 +709,18 @@ impl wg::Board for Offgrid {
     fn status(&self, out: &mut String) {
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
         let lives_l = tr(&["lives", "生命", "ライフ", "목숨", "vidas", "vidas", "vies", "Leben", "жизни"]);
-        let left_l = tr(&["arrows left", "剩余箭头", "残りの矢印", "남은 화살표", "flechas restantes", "setas restantes", "flèches restantes", "Pfeile übrig", "осталось стрелок", "剩餘箭頭"]);
+        let left_l = tr(&[
+            "arrows left",
+            "剩余箭头",
+            "残りの矢印",
+            "남은 화살표",
+            "flechas restantes",
+            "setas restantes",
+            "flèches restantes",
+            "Pfeile übrig",
+            "осталось стрелок",
+            "剩餘箭頭",
+        ]);
         out.push_str(&format!("{} {}, {} {}, {} {}", level_l, self.s.level + 1, lives_l, self.s.lives, left_l, self.s.board.count()));
     }
     fn keys(&self) -> &'static str {
@@ -639,11 +751,44 @@ impl wg::Board for Offgrid {
         let lives = self.s.lives;
         let ev = self.tap(x, y);
         said.push_str(if self.s.phase == CLEARED || self.s.phase == DONE {
-            tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"])
+            tr(&[
+                "Level cleared! Press Space for the next level.",
+                "过关！按空格进入下一关。",
+                "クリア！スペースで次のレベル。",
+                "레벨 클리어! 스페이스로 다음 레벨.",
+                "¡Nivel superado! Espacio para el siguiente.",
+                "Nível concluído! Espaço para o próximo.",
+                "Niveau réussi ! Espace pour le suivant.",
+                "Level geschafft! Leertaste für das nächste.",
+                "Уровень пройден! Пробел для следующего.",
+                "過關！按空白鍵進入下一關。",
+            ])
         } else if self.s.phase == LOST {
-            tr(&["Blocked. Out of lives, game over.", "被挡住。生命用完，游戏结束。", "ぶつかった。ライフがなくなりゲームオーバー。", "막힘. 목숨이 없어 게임 오버.", "Bloqueada. Sin vidas, fin de la partida.", "Bloqueada. Sem vidas, fim de jogo.", "Bloquée. Plus de vies, partie terminée.", "Blockiert. Keine Leben mehr, Spiel vorbei.", "Заблокирована. Жизни кончились, игра окончена.", "被擋住。生命用完，遊戲結束。"])
+            tr(&[
+                "Blocked. Out of lives, game over.",
+                "被挡住。生命用完，游戏结束。",
+                "ぶつかった。ライフがなくなりゲームオーバー。",
+                "막힘. 목숨이 없어 게임 오버.",
+                "Bloqueada. Sin vidas, fin de la partida.",
+                "Bloqueada. Sem vidas, fim de jogo.",
+                "Bloquée. Plus de vies, partie terminée.",
+                "Blockiert. Keine Leben mehr, Spiel vorbei.",
+                "Заблокирована. Жизни кончились, игра окончена.",
+                "被擋住。生命用完，遊戲結束。",
+            ])
         } else if self.s.lives < lives {
-            tr(&["Blocked, one life lost.", "被挡住，失去一条生命。", "ぶつかった、ライフを1つ失った。", "막힘, 목숨 하나를 잃었습니다.", "Bloqueada, pierdes una vida.", "Bloqueada, perdeu uma vida.", "Bloquée, une vie perdue.", "Blockiert, ein Leben weg.", "Заблокирована, минус жизнь.", "被擋住，失去一條生命。"])
+            tr(&[
+                "Blocked, one life lost.",
+                "被挡住，失去一条生命。",
+                "ぶつかった、ライフを1つ失った。",
+                "막힘, 목숨 하나를 잃었습니다.",
+                "Bloqueada, pierdes una vida.",
+                "Bloqueada, perdeu uma vida.",
+                "Bloquée, une vie perdue.",
+                "Blockiert, ein Leben weg.",
+                "Заблокирована, минус жизнь.",
+                "被擋住，失去一條生命。",
+            ])
         } else if ev != 0 {
             tr(&["Cleared.", "飞出去了。", "飛んでいった。", "나갔습니다.", "Fuera.", "Saiu.", "Partie.", "Weg.", "Улетела.", "飛出去了。"])
         } else {

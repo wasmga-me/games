@@ -1,7 +1,7 @@
 //! Decant - an original wasmga.me game. MIT licensed.
 //! Coloured liquids are layered in glass tubes. Pour the top layer of one
 //! tube into an empty tube or onto the same colour, until every tube holds
-//! one colour. 30 levels, from 3 colours to 10. The page shows the setup,
+//! one colour. 100 levels, from 2 colours to 8. The page shows the setup,
 //! pause and game over screens.
 mod glyphs;
 mod puzzle;
@@ -80,17 +80,48 @@ struct Theme {
 
 const THEME: [Theme; THEMES] = [
     // Night
-    Theme { bg: 0x1c2238, bg2: 0x0f1220, glass: 0xc9d3f2, inside: 0x252c47, shelf: 0x3a4263, shelf_lo: 0x262c45, text: 0xf2f4fb, dim: 0x8f97b8, button: 0x2c3352, overlay: 0x0b0d16 },
+    Theme {
+        bg: 0x1c2238,
+        bg2: 0x0f1220,
+        glass: 0xc9d3f2,
+        inside: 0x252c47,
+        shelf: 0x3a4263,
+        shelf_lo: 0x262c45,
+        text: 0xf2f4fb,
+        dim: 0x8f97b8,
+        button: 0x2c3352,
+        overlay: 0x0b0d16,
+    },
     // Paper
-    Theme { bg: 0xf6f1e6, bg2: 0xe7dfcc, glass: 0x8a96a8, inside: 0xe8e2d4, shelf: 0xb89a74, shelf_lo: 0x8f7354, text: 0x3a2f24, dim: 0x8a7a66, button: 0xe4d9c4, overlay: 0x5a4a38 },
+    Theme {
+        bg: 0xf6f1e6,
+        bg2: 0xe7dfcc,
+        glass: 0x8a96a8,
+        inside: 0xe8e2d4,
+        shelf: 0xb89a74,
+        shelf_lo: 0x8f7354,
+        text: 0x3a2f24,
+        dim: 0x8a7a66,
+        button: 0xe4d9c4,
+        overlay: 0x5a4a38,
+    },
     // Lab
-    Theme { bg: 0x2b3440, bg2: 0x1d232b, glass: 0xd8e4ec, inside: 0x323d4a, shelf: 0x56606e, shelf_lo: 0x3d4652, text: 0xeef2f6, dim: 0x9aa6b4, button: 0x3c4654, overlay: 0x14181e },
+    Theme {
+        bg: 0x2b3440,
+        bg2: 0x1d232b,
+        glass: 0xd8e4ec,
+        inside: 0x323d4a,
+        shelf: 0x56606e,
+        shelf_lo: 0x3d4652,
+        text: 0xeef2f6,
+        dim: 0x9aa6b4,
+        button: 0x3c4654,
+        overlay: 0x14181e,
+    },
 ];
 
 /// liquid colours, told apart by lightness as well as hue
-const LIQUID: [u32; 10] = [
-    0xe5384a, 0xffc22e, 0x3b5fe0, 0x2f9e44, 0xf7731a, 0x8e4ec6, 0x14b0aa, 0xe05ba6, 0xb5d334, 0x7a4a2a,
-];
+const LIQUID: [u32; 10] = [0xe5384a, 0xffc22e, 0x3b5fe0, 0x2f9e44, 0xf7731a, 0x8e4ec6, 0x14b0aa, 0xe05ba6, 0xb5d334, 0x7a4a2a];
 
 #[derive(Clone, Copy, PartialEq)]
 enum Hit {
@@ -222,7 +253,11 @@ fn level(poly: &[Pt], vol: f32) -> f32 {
     let (mut a, mut b) = (lo, hi);
     for _ in 0..22 {
         let m = (a + b) / 2.0;
-        if area(&clip(poly, m, true)) > vol { a = m } else { b = m }
+        if area(&clip(poly, m, true)) > vol {
+            a = m
+        } else {
+            b = m
+        }
     }
     (a + b) / 2.0
 }
@@ -253,7 +288,11 @@ impl Decant {
         &THEME[self.s.opt[O_THEME] as usize]
     }
     fn plan_wh(&self) -> (f32, f32) {
-        if self.tall { (300.0, 400.0) } else { (400.0, 300.0) }
+        if self.tall {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
     fn tubes(&self) -> usize {
         self.s.stand.n as usize
@@ -262,7 +301,11 @@ impl Decant {
     fn rows(&self) -> (usize, usize) {
         let n = self.tubes();
         let most = if self.tall { 6 } else { 7 };
-        if n <= most { (n, 1) } else { ((n + 1) / 2, 2) }
+        if n <= most {
+            (n, 1)
+        } else {
+            ((n + 1) / 2, 2)
+        }
     }
     fn colw(&self) -> f32 {
         (self.plan_wh().0 - 24.0) / self.rows().0 as f32
@@ -687,7 +730,11 @@ impl Game for Decant {
         self.keys = false;
     }
     fn plan(&self, w: i32, h: i32) -> (f32, f32) {
-        if h as f32 > w as f32 * 1.1 { (300.0, 400.0) } else { (400.0, 300.0) }
+        if h as f32 > w as f32 * 1.1 {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
 
     fn update(&mut self, input: &Input) -> u32 {
@@ -725,9 +772,15 @@ impl Game for Decant {
             self.hover = Hit::None;
         }
         if self.s.phase == PLAY {
-            if dirs & wg::LEFT != 0 { self.cursor_move(-1, 0); }
-            if dirs & wg::RIGHT != 0 { self.cursor_move(1, 0); }
-            if dirs & (wg::UP | wg::DOWN) != 0 { self.cursor_move(0, 1); }
+            if dirs & wg::LEFT != 0 {
+                self.cursor_move(-1, 0);
+            }
+            if dirs & wg::RIGHT != 0 {
+                self.cursor_move(1, 0);
+            }
+            if dirs & (wg::UP | wg::DOWN) != 0 {
+                self.cursor_move(0, 1);
+            }
             if input.pressed & wg::A != 0 {
                 self.keys = true;
                 ev |= self.tap(self.s.cursor);
@@ -842,7 +895,18 @@ impl Game for Decant {
             s.text_c(labels[i], b.0 + b.2 / 2.0, b.1 + b.3 / 2.0, size, hex(th.text), if on { 1.0 } else { 0.4 });
         }
         if stuck {
-            let msg = tr(&["No moves left", "无路可走", "注げる管がありません", "더 이상 부을 수 없습니다", "No quedan movimientos", "Sem jogadas", "Plus aucun coup", "Kein Zug mehr möglich", "Ходов нет", "無路可走"]);
+            let msg = tr(&[
+                "No moves left",
+                "无路可走",
+                "注げる管がありません",
+                "더 이상 부을 수 없습니다",
+                "No quedan movimientos",
+                "Sem jogadas",
+                "Plus aucun coup",
+                "Kein Zug mehr möglich",
+                "Ходов нет",
+                "無路可走",
+            ]);
             let y = self.buttons()[0].1 - 10.0;
             s.text_c(msg, w / 2.0, y, 13.0, hex(th.text), 0.9);
         }
@@ -878,6 +942,10 @@ impl Game for Decant {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let ok = s.version == VERSION
             && s.opt.iter().zip(Self::CHOICES).all(|(&v, &c)| (0..c).contains(&v))
@@ -915,7 +983,8 @@ impl Decant {
         s.text_c(&line, w / 2.0, py + 64.0, size, hex(th.dim), 1.0);
         if self.s.phase == CLEARED {
             let b = self.next_box();
-            let label = tr(&["Next level", "下一关", "次のレベル", "다음 레벨", "Siguiente nivel", "Próximo nível", "Niveau suivant", "Nächstes Level", "Следующий уровень", "下一關"]);
+            let label =
+                tr(&["Next level", "下一关", "次のレベル", "다음 레벨", "Siguiente nivel", "Próximo nível", "Niveau suivant", "Nächstes Level", "Следующий уровень", "下一關"]);
             let hv = self.hover == Hit::Next;
             let fill = hex(LIQUID[2]);
             s.rect(b.0, b.1, b.2, b.3, b.3 / 2.0, if hv { mix(hex(0xffffff), fill, 0.15) } else { fill }, 1.0);
@@ -1052,7 +1121,18 @@ impl wg::Board for Decant {
         self.focus(x, y);
         let n = self.s.stand.n;
         let undo_l = tr(&["Undone", "已撤销", "戻した", "되돌림", "Deshecho", "Desfeito", "Annulé", "Zurückgenommen", "Отменено", "已復原"]);
-        let none_l = tr(&["Nothing to undo", "没有可撤销的", "戻せる手がありません", "되돌릴 수 없습니다", "Nada que deshacer", "Nada para desfazer", "Rien à annuler", "Nichts zurückzunehmen", "Нечего отменять", "沒有可復原的"]);
+        let none_l = tr(&[
+            "Nothing to undo",
+            "没有可撤销的",
+            "戻せる手がありません",
+            "되돌릴 수 없습니다",
+            "Nada que deshacer",
+            "Nada para desfazer",
+            "Rien à annuler",
+            "Nichts zurückzunehmen",
+            "Нечего отменять",
+            "沒有可復原的",
+        ]);
         if a != 0 || x == n {
             let ev = self.undo();
             said.push_str(if ev != 0 { undo_l } else { none_l });
@@ -1075,13 +1155,46 @@ impl wg::Board for Decant {
             self.cell(to, 0, said);
             if self.s.stand.solved() {
                 said.push_str(". ");
-                said.push_str(tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
+                said.push_str(tr(&[
+                    "Level cleared! Press Space for the next level.",
+                    "过关！按空格进入下一关。",
+                    "クリア！スペースで次のレベル。",
+                    "레벨 클리어! 스페이스로 다음 레벨.",
+                    "¡Nivel superado! Espacio para el siguiente.",
+                    "Nível concluído! Espaço para o próximo.",
+                    "Niveau réussi ! Espace pour le suivant.",
+                    "Level geschafft! Leertaste für das nächste.",
+                    "Уровень пройден! Пробел для следующего.",
+                    "過關！按空白鍵進入下一關。",
+                ]));
             } else if !self.s.stand.any_move() {
                 said.push_str(". ");
-                said.push_str(tr(&["No moves left", "无路可走", "注げる管がありません", "더 이상 부을 수 없습니다", "No quedan movimientos", "Sem jogadas", "Plus aucun coup", "Kein Zug mehr möglich", "Ходов нет", "無路可走"]));
+                said.push_str(tr(&[
+                    "No moves left",
+                    "无路可走",
+                    "注げる管がありません",
+                    "더 이상 부을 수 없습니다",
+                    "No quedan movimientos",
+                    "Sem jogadas",
+                    "Plus aucun coup",
+                    "Kein Zug mehr möglich",
+                    "Ходов нет",
+                    "無路可走",
+                ]));
             }
         } else if ev == wg::EV_HIT {
-            said.push_str(tr(&["Cannot pour into that tube", "倒不进去", "そこには注げません", "거기에는 부을 수 없습니다", "No se puede verter ahí", "Não dá para despejar aí", "Impossible de verser ici", "Da passt es nicht hinein", "Туда нельзя перелить", "倒不進去"]));
+            said.push_str(tr(&[
+                "Cannot pour into that tube",
+                "倒不进去",
+                "そこには注げません",
+                "거기에는 부을 수 없습니다",
+                "No se puede verter ahí",
+                "Não dá para despejar aí",
+                "Impossible de verser ici",
+                "Da passt es nicht hinein",
+                "Туда нельзя перелить",
+                "倒不進去",
+            ]));
         } else if sel >= 0 && self.s.sel < 0 {
             said.push_str(tr(&["Set down", "放下", "置いた", "내려놓음", "Dejado", "Colocado", "Reposé", "Abgestellt", "Поставлена", "放下"]));
         } else {

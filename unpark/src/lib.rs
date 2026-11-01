@@ -3,7 +3,7 @@
 //! A parking lot is packed with cars bumper to bumper. Tap a car to drive it
 //! forward, or swipe it backward to reverse; with a clear lane it pulls out
 //! onto the ring road and drives away, otherwise it bumps into whatever blocks
-//! its path. Clear the lot to finish the level. 30 levels.
+//! its path. Clear the lot to finish the level. 100 levels.
 mod art;
 mod glyphs;
 mod puzzle;
@@ -148,7 +148,11 @@ fn heading(d: usize) -> f32 {
 
 impl Unpark {
     fn plan_wh(&self) -> (f32, f32) {
-        if self.tall { (300.0, 400.0) } else { (400.0, 300.0) }
+        if self.tall {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
 
     /// Fits the park, its ring road and the road out between the top bar
@@ -318,7 +322,17 @@ impl Unpark {
             let (dx, dy) = (next.0 - at.0, next.1 - at.1);
             let len = dx.abs() + dy.abs();
             if len > 0.001 {
-                let way = if dx.abs() > dy.abs() { if dx > 0.0 { 1 } else { 3 } } else if dy > 0.0 { 2 } else { 0 };
+                let way = if dx.abs() > dy.abs() {
+                    if dx > 0.0 {
+                        1
+                    } else {
+                        3
+                    }
+                } else if dy > 0.0 {
+                    2
+                } else {
+                    0
+                };
                 legs.push(Leg { x: at.0, y: at.1, d: way, len, face: heading(way) });
             }
             at = next;
@@ -432,17 +446,7 @@ impl Game for Unpark {
         wg::add_glyphs(&glyphs::GLYPHS);
         let sheet = Image::png(art::SHEET);
         let sprites = art::ARTS.iter().map(|a| sheet.crop(a.x, a.y, a.w, a.h)).collect();
-        Unpark {
-            s: blank(),
-            tall: false,
-            hover: Hit::None,
-            keys: false,
-            sprites,
-            drives: Vec::new(),
-            bump: None,
-            press: None,
-
-        }
+        Unpark { s: blank(), tall: false, hover: Hit::None, keys: false, sprites, drives: Vec::new(), bump: None, press: None }
     }
     fn save(&mut self) -> &mut Save {
         &mut self.s
@@ -457,7 +461,11 @@ impl Game for Unpark {
         self.keys = false;
     }
     fn plan(&self, w: i32, h: i32) -> (f32, f32) {
-        if h as f32 > w as f32 * 1.1 { (300.0, 400.0) } else { (400.0, 300.0) }
+        if h as f32 > w as f32 * 1.1 {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
 
     fn update(&mut self, input: &Input) -> u32 {
@@ -498,10 +506,18 @@ impl Game for Unpark {
             self.hover = Hit::None;
         }
         if self.s.phase == PLAY {
-            if dirs & wg::LEFT != 0 { self.cursor_move(-1, 0); }
-            if dirs & wg::RIGHT != 0 { self.cursor_move(1, 0); }
-            if dirs & wg::UP != 0 { self.cursor_move(0, -1); }
-            if dirs & wg::DOWN != 0 { self.cursor_move(0, 1); }
+            if dirs & wg::LEFT != 0 {
+                self.cursor_move(-1, 0);
+            }
+            if dirs & wg::RIGHT != 0 {
+                self.cursor_move(1, 0);
+            }
+            if dirs & wg::UP != 0 {
+                self.cursor_move(0, -1);
+            }
+            if dirs & wg::DOWN != 0 {
+                self.cursor_move(0, 1);
+            }
             let pick = input.pressed & (wg::A | wg::B);
             if pick != 0 {
                 self.keys = true;
@@ -737,6 +753,10 @@ impl Game for Unpark {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let ok = s.version == VERSION
             && (0..LEVELS).contains(&s.opt[0])
@@ -794,18 +814,8 @@ struct Theme {
     accent: u32,
 }
 
-const THEME: Theme = Theme {
-    grass: 0x7cb85a,
-    grass2: 0x5f9e45,
-    road: 0x4a4f58,
-    lot: 0x5b616b,
-    paint: 0xeef0f2,
-    kerb: 0xc9ccd1,
-    text: 0xffffff,
-    dim: 0xe4f2dc,
-    card: 0x2f3540,
-    accent: 0x3d7be0,
-};
+const THEME: Theme =
+    Theme { grass: 0x7cb85a, grass2: 0x5f9e45, road: 0x4a4f58, lot: 0x5b616b, paint: 0xeef0f2, kerb: 0xc9ccd1, text: 0xffffff, dim: 0xe4f2dc, card: 0x2f3540, accent: 0x3d7be0 };
 
 /// The grass, the ring road and the road out, and the park with its bays
 /// and barriers: drawn once a level.
@@ -952,18 +962,7 @@ impl Unpark {
         let (px, py, pw, ph) = self.card();
         s.shadow(px, py + 4.0, pw, ph, 16.0, 14.0, 0, 0.45);
         s.rect(px, py, pw, ph, 16.0, hex(th.card), 1.0);
-        let title = tr(&[
-            "Level cleared",
-            "过关",
-            "クリア",
-            "레벨 클리어",
-            "Nivel superado",
-            "Nível concluído",
-            "Niveau réussi",
-            "Level geschafft",
-            "Уровень пройден",
-            "過關",
-        ]);
+        let title = tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"]);
         let title = if self.s.phase == FAILED { tr(&["Too many collisions", "碰撞次数用完了"]) } else { title };
         let size = s.fit_size(title, 21.0, pw - 32.0);
         s.text_c(title, w / 2.0, py + 34.0, size, hex(th.text), 1.0);
@@ -974,18 +973,8 @@ impl Unpark {
         s.text_c(&line, w / 2.0, py + 64.0, size, hex(0xb9c2cf), 1.0);
         if matches!(self.s.phase, CLEARED | FAILED) {
             let b = self.next_box();
-            let label = tr(&[
-                "Next level",
-                "下一关",
-                "次のレベル",
-                "다음 레벨",
-                "Siguiente nivel",
-                "Próximo nível",
-                "Niveau suivant",
-                "Nächstes Level",
-                "Следующий уровень",
-                "下一關",
-            ]);
+            let label =
+                tr(&["Next level", "下一关", "次のレベル", "다음 레벨", "Siguiente nivel", "Próximo nível", "Niveau suivant", "Nächstes Level", "Следующий уровень", "下一關"]);
             let label = if self.s.phase == FAILED { tr(&["Retry level", "重试本关"]) } else { label };
             let hv = self.hover == Hit::Next;
             let fill = hex(th.accent);
@@ -1006,11 +995,15 @@ const WAYS: [[&str; 10]; 4] = [
 /// The accessible board: the park's squares, each saying what stands on it.
 impl wg::Board for Unpark {
     fn grid(&self) -> Option<(i32, i32)> {
-        if matches!(self.s.phase, CLEARED | FAILED) { return Some((1, 1)); }
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            return Some((1, 1));
+        }
         Some((self.s.lot.w, self.s.lot.h))
     }
     fn cursor(&self) -> (i32, i32) {
-        if matches!(self.s.phase, CLEARED | FAILED) { return (0, 0); }
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            return (0, 0);
+        }
         (self.s.cx, self.s.cy)
     }
     fn focus(&mut self, x: i32, y: i32) {
@@ -1024,7 +1017,9 @@ impl wg::Board for Unpark {
         (v.x, v.y, v.s)
     }
     fn cell_box(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
-        if matches!(self.s.phase, CLEARED | FAILED) { return Some(self.next_box()); }
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            return Some(self.next_box());
+        }
         let v = self.view();
         let (px, py) = v.at(x as f32, y as f32);
         Some((px, py, v.s, v.s * TILT))
@@ -1038,9 +1033,31 @@ impl wg::Board for Unpark {
         if let Some(i) = lot.car_at(x, y) {
             let c = &lot.cars[i];
             let what = if c.len == 3 {
-                tr(&["Bus facing #", "朝#的公交车", "#向きのバス", "# 방향 버스", "Autobús mirando #", "Ônibus virado #", "Bus tourné #", "Bus, Front #", "Автобус носом #", "朝#的公車"])
+                tr(&[
+                    "Bus facing #",
+                    "朝#的公交车",
+                    "#向きのバス",
+                    "# 방향 버스",
+                    "Autobús mirando #",
+                    "Ônibus virado #",
+                    "Bus tourné #",
+                    "Bus, Front #",
+                    "Автобус носом #",
+                    "朝#的公車",
+                ])
             } else {
-                tr(&["Car facing #", "朝#的汽车", "#向きの車", "# 방향 자동차", "Coche mirando #", "Carro virado #", "Voiture tournée #", "Auto, Front #", "Машина носом #", "朝#的汽車"])
+                tr(&[
+                    "Car facing #",
+                    "朝#的汽车",
+                    "#向きの車",
+                    "# 방향 자동차",
+                    "Coche mirando #",
+                    "Carro virado #",
+                    "Voiture tournée #",
+                    "Auto, Front #",
+                    "Машина носом #",
+                    "朝#的汽車",
+                ])
             };
             out.push_str(&what.replace('#', tr(&WAYS[c.dir as usize])));
             let part = if c.end(false) == (x, y) {
@@ -1054,10 +1071,32 @@ impl wg::Board for Unpark {
             out.push_str(part);
             if lot.way(i, false) == Way::Out {
                 out.push_str(", ");
-                out.push_str(tr(&["clear road ahead", "前方畅通", "前が空いている", "앞길이 비어 있음", "vía libre delante", "caminho livre à frente", "voie libre devant", "vorne frei", "впереди свободно", "前方暢通"]));
+                out.push_str(tr(&[
+                    "clear road ahead",
+                    "前方畅通",
+                    "前が空いている",
+                    "앞길이 비어 있음",
+                    "vía libre delante",
+                    "caminho livre à frente",
+                    "voie libre devant",
+                    "vorne frei",
+                    "впереди свободно",
+                    "前方暢通",
+                ]));
             } else if lot.way(i, true) == Way::Out {
                 out.push_str(", ");
-                out.push_str(tr(&["clear road behind", "后方畅通", "後ろが空いている", "뒷길이 비어 있음", "vía libre detrás", "caminho livre atrás", "voie libre derrière", "hinten frei", "сзади свободно", "後方暢通"]));
+                out.push_str(tr(&[
+                    "clear road behind",
+                    "后方畅通",
+                    "後ろが空いている",
+                    "뒷길이 비어 있음",
+                    "vía libre detrás",
+                    "caminho livre atrás",
+                    "voie libre derrière",
+                    "hinten frei",
+                    "сзади свободно",
+                    "後方暢通",
+                ]));
             }
         } else {
             out.push_str(match lot.prop(x, y) {
@@ -1082,7 +1121,8 @@ impl wg::Board for Unpark {
     }
     fn status(&self, out: &mut String) {
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
-        let left_l = tr(&["cars left", "辆车待开出", "台残り", "대 남음", "coches por sacar", "carros restantes", "voitures restantes", "Autos übrig", "машин осталось", "輛車待開出"]);
+        let left_l =
+            tr(&["cars left", "辆车待开出", "台残り", "대 남음", "coches por sacar", "carros restantes", "voitures restantes", "Autos übrig", "машин осталось", "輛車待開出"]);
         let bumps_l = tr(&["bumps", "次碰撞", "回衝突", "번 충돌", "choques", "batidas", "chocs", "Rempler", "ударов", "次碰撞"]);
         out.push_str(&format!("{} {}, {} {}, {}/{} {}", level_l, self.s.level + 1, self.s.lot.left(), left_l, self.s.bumps, LIVES, bumps_l));
         if self.s.phase == FAILED {
@@ -1111,27 +1151,82 @@ impl wg::Board for Unpark {
         }
         self.focus(x, y);
         let Some(i) = self.s.lot.car_at(x, y) else {
-            said.push_str(tr(&["No car here", "这里没有车", "ここに車はありません", "여기에 차가 없습니다", "Aquí no hay coche", "Não há carro aqui", "Pas de voiture ici", "Hier steht kein Auto", "Здесь нет машины", "這裡沒有車"]));
+            said.push_str(tr(&[
+                "No car here",
+                "这里没有车",
+                "ここに車はありません",
+                "여기에 차가 없습니다",
+                "Aquí no hay coche",
+                "Não há carro aqui",
+                "Pas de voiture ici",
+                "Hier steht kein Auto",
+                "Здесь нет машины",
+                "這裡沒有車",
+            ]));
             return 0;
         };
         let way = self.s.lot.way(i, a != 0);
         let ev = self.send(i, a != 0);
         match way {
-            _ if ev == 0 => said.push_str(tr(&["Wait a moment", "请稍等", "少し待って", "잠시 기다리세요", "Espera un momento", "Espere um pouco", "Un instant", "Einen Moment", "Подождите", "請稍等"])),
+            _ if ev == 0 => said.push_str(tr(&[
+                "Wait a moment",
+                "请稍等",
+                "少し待って",
+                "잠시 기다리세요",
+                "Espera un momento",
+                "Espere um pouco",
+                "Un instant",
+                "Einen Moment",
+                "Подождите",
+                "請稍等",
+            ])),
             Way::Out => {
                 said.push_str(tr(&["Drove out", "开出去了", "出ていった", "빠져나감", "Salió", "Saiu", "Sortie", "Rausgefahren", "Выехала", "開出去了"]));
                 said.push_str(". ");
                 if self.s.lot.left() == 0 {
-                    said.push_str(tr(&["Level cleared! Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
+                    said.push_str(tr(&[
+                        "Level cleared! Space for the next level.",
+                        "过关！按空格进入下一关。",
+                        "クリア！スペースで次のレベル。",
+                        "레벨 클리어! 스페이스로 다음 레벨.",
+                        "¡Nivel superado! Espacio para el siguiente.",
+                        "Nível concluído! Espaço para o próximo.",
+                        "Niveau réussi ! Espace pour le suivant.",
+                        "Level geschafft! Leertaste für das nächste.",
+                        "Уровень пройден! Пробел для следующего.",
+                        "過關！按空白鍵進入下一關。",
+                    ]));
                 } else {
                     self.status(said);
                 }
             }
             Way::Blocked { by, .. } => {
                 said.push_str(if by >= 0 {
-                    tr(&["Bumped into another car", "撞到了车", "車にぶつかった", "차에 부딪힘", "Chocó con un coche", "Bateu num carro", "Choc contre une voiture", "Gegen ein Auto gestoßen", "Врезалась в машину", "撞到了車"])
+                    tr(&[
+                        "Bumped into another car",
+                        "撞到了车",
+                        "車にぶつかった",
+                        "차에 부딪힘",
+                        "Chocó con un coche",
+                        "Bateu num carro",
+                        "Choc contre une voiture",
+                        "Gegen ein Auto gestoßen",
+                        "Врезалась в машину",
+                        "撞到了車",
+                    ])
                 } else {
-                    tr(&["Bumped into an obstacle", "撞到了障碍", "障害物にぶつかった", "장애물에 부딪힘", "Chocó con un obstáculo", "Bateu num obstáculo", "Choc contre un obstacle", "Gegen ein Hindernis gestoßen", "Врезалась в препятствие", "撞到了障礙"])
+                    tr(&[
+                        "Bumped into an obstacle",
+                        "撞到了障碍",
+                        "障害物にぶつかった",
+                        "장애물에 부딪힘",
+                        "Chocó con un obstáculo",
+                        "Bateu num obstáculo",
+                        "Choc contre un obstacle",
+                        "Gegen ein Hindernis gestoßen",
+                        "Врезалась в препятствие",
+                        "撞到了障礙",
+                    ])
                 });
             }
         }
@@ -1164,9 +1259,7 @@ mod tests {
             let mut g = Unpark::new();
             g.begin(level);
             let lot = g.s.lot;
-            let (i, back) = (0..lot.n as usize)
-                .find_map(|i| [false, true].into_iter().find(|&b| lot.way(i, b) != Way::Out).map(|b| (i, b)))
-                .expect("a collision is possible");
+            let (i, back) = (0..lot.n as usize).find_map(|i| [false, true].into_iter().find(|&b| lot.way(i, b) != Way::Out).map(|b| (i, b))).expect("a collision is possible");
             for _ in 0..LIVES {
                 g.send(i, back);
                 run(&mut g, 600);
@@ -1195,9 +1288,8 @@ mod tests {
             let mut ev = 0;
             loop {
                 let lot = g.s.lot;
-                let Some((i, back)) = (0..lot.n as usize)
-                    .filter(|&i| lot.cars[i].out == 0)
-                    .find_map(|i| [false, true].into_iter().find(|&b| lot.way(i, b) == Way::Out).map(|b| (i, b)))
+                let Some((i, back)) =
+                    (0..lot.n as usize).filter(|&i| lot.cars[i].out == 0).find_map(|i| [false, true].into_iter().find(|&b| lot.way(i, b) == Way::Out).map(|b| (i, b)))
                 else {
                     break;
                 };

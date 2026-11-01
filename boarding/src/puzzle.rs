@@ -2,7 +2,7 @@
 //! Every deal includes a replayable solution; five waiting passengers lose.
 #[cfg(test)]
 use wg::Rng;
-pub const LEVELS: i32 = 30;
+pub const LEVELS: i32 = 100;
 pub const MAXN: usize = 6;
 pub const CELLS: usize = MAXN * MAXN;
 pub const BUSES: usize = CELLS / 3;
@@ -159,6 +159,9 @@ impl Yard {
 
 #[cfg(test)]
 pub fn shape(level: i32) -> (i32, i32, u8) {
+    if level >= 30 {
+        return [(4, 6, 5), (5, 6, 5), (6, 6, 6), (6, 5, 6), (5, 6, 6)][(level % 5) as usize];
+    }
     if level == 29 {
         return (6, 6, 6);
     }
@@ -194,7 +197,8 @@ fn generate_order(level: i32) -> (Yard, Vec<usize>) {
     }
     let (w, h, colours) = shape(level);
     let mut rng = Rng::new(0xb05a_2026 ^ (level as u32 + 1).wrapping_mul(7919));
-    let target = 0.20 + (level / 5) as f32 * 0.10 + (level % 5) as f32 * 0.025;
+    let difficulty = level.min(29);
+    let target = 0.20 + (difficulty / 5) as f32 * 0.10 + (difficulty % 5) as f32 * 0.025;
     let mut best: Option<(f32, Yard, Vec<usize>)> = None;
     for _ in 0..80 {
         let mut y = Yard::empty(w, h);
@@ -221,7 +225,7 @@ fn generate_order(level: i32) -> (Yard, Vec<usize>) {
         // the actual bench and automatic-boarding rules.
         for _ in 0..24 {
             let mut seq = base.clone();
-            let window = 2 + (level / 5) as u32 + (level % 5 >= 3) as u32;
+            let window = 2 + (difficulty / 5) as u32 + (level % 5 >= 3) as u32;
             for k in 0..total {
                 let j = (k + rng.below(window) as usize).min(total - 1);
                 seq.swap(k, j);

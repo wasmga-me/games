@@ -7,7 +7,7 @@
 //! falls with one as strong (a tie fells both). Potions add to his power,
 //! chests double it, traps halve it, poison takes from it; brutes grow with
 //! every room he takes, and a key opens the locked rooms. Take every room to
-//! finish the tower. 30 levels, or endless towers that grow harder.
+//! finish the tower. 100 levels, or one continuous endless tower.
 mod art;
 mod glyphs;
 mod puzzle;
@@ -16,7 +16,7 @@ use puzzle::{take, Room, Tower, BRUTE, CHEST, EMPTY, KEY, LEVELS, MONSTER, POISO
 use wg::controls::{self, Icon, Row};
 use wg::{hex, mix, tr, Game, Image, Input, KeyRepeat, Pointer, Screen};
 
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 /// options: the mode, and the level to start at
 const O_MODE: usize = 0;
@@ -50,7 +50,7 @@ const END_MS: f32 = 460.0;
 struct Save {
     version: u32,
     opt: [i32; 2],
-    /// the level, or in endless mode the tower, from 0
+    /// the level, or the lowest visible endless floor, from 0
     level: i32,
     phase: i32,
     tower: Tower,
@@ -72,8 +72,9 @@ struct Save {
     cx: i32,
     cy: i32,
     rep: KeyRepeat,
-    /// endless mode's towers
+    /// Continuous climb seed and predicted power above the visible floors.
     seed: u32,
+    frontier_power: i32,
 }
 impl Save {
     fn endless(&self) -> bool {
@@ -98,7 +99,11 @@ struct Move {
 
 impl Move {
     fn fight(&self, room: &Room) -> f32 {
-        if room.fights() { FIGHT_MS } else { 0.0 }
+        if room.fights() {
+            FIGHT_MS
+        } else {
+            0.0
+        }
     }
 }
 
@@ -121,6 +126,7 @@ struct HigherFloor {
     /// each room taken this level, with power and the hero's room before
     /// it, for Undo; not saved, so a loaded save starts it empty
     hist: Vec<(usize, i32, i32)>,
+    scroll: f32,
 }
 
 impl HigherFloor {
@@ -136,7 +142,7 @@ impl HigherFloor {
     fn room_box(&self, r: usize) -> (f32, f32, f32, f32) {
         let (f, c) = self.s.tower.place(r);
         let rh = self.room_h();
-        (self.tower_x0() + WALL + c as f32 * ROOM_W, GROUND - BASE - (f + 1) as f32 * rh, ROOM_W, rh)
+        (self.tower_x0() + WALL + c as f32 * ROOM_W, GROUND - BASE - (f + 1) as f32 * rh - self.scroll, ROOM_W, rh)
     }
     /// the hero's room on his own tower
     fn home_box(&self) -> (f32, f32, f32, f32) {
@@ -184,7 +190,11 @@ impl HigherFloor {
     /// Undo and Restart, in the top bar while a level is on
     fn controls(&self) -> Row {
         let row = controls::row(&[Icon::Undo, Icon::Restart], PLAN.0 - 8.0, 20.0);
-        if self.controls_on() { row } else { row.hidden() }
+        if self.controls_on() {
+            row
+        } else {
+            row.hidden()
+        }
     }
     /// Undo and Restart: while a level (not an endless tower) is on
     fn controls_on(&self) -> bool {
@@ -224,13 +234,21 @@ impl HigherFloor {
     fn begin(&mut self, level: i32) {
         let s = &mut self.s;
         s.level = level;
-        s.tower = if s.endless() { puzzle::deal_endless(s.seed, level) } else { puzzle::deal(level) };
+        s.tower = if s.endless() { puzzle::endless_start(s.seed) } else { puzzle::deal(level) };
+        if s.endless() {
+            let mut power = s.tower.start;
+            for f in 0..4 {
+                power = puzzle::endless_floor(s.seed, f, power).1;
+            }
+            s.frontier_power = power;
+        }
         self.reset();
     }
 
     /// The hero back on his own tower, before the tower dealt.
     fn reset(&mut self) {
         self.hist.clear();
+        self.scroll = 0.0;
         let s = &mut self.s;
         s.phase = PLAY;
         s.taken = 0;
@@ -243,12 +261,41 @@ impl HigherFloor {
         self.deny = None;
     }
 
+    fn reachable(&self, r: usize) -> bool {
+        if !self.s.endless() {
+            return self.s.tower.reachable(self.s.taken, r);
+        }
+        let first = (0..self.s.tower.n()).find(|&i| self.s.taken & (1 << i) == 0);
+        r < self.s.tower.n() && self.s.taken & (1 << r) == 0 && first.is_some_and(|i| i / 2 == r / 2)
+    }
+
+    /// Slide a cleared floor below the viewport and reveal one new floor.
+    /// The hero and power stay in this same tower; there is no clear card.
+    fn climb(&mut self) -> u32 {
+        let s = &mut self.s;
+        s.done += 1;
+        s.score = s.score.saturating_add(100);
+        if s.taken & 15 == 15 {
+            s.tower.rooms.copy_within(2..8, 0);
+            let (rooms, end) = puzzle::endless_floor(s.seed, s.level + 4, s.frontier_power);
+            s.tower.rooms[6..8].copy_from_slice(&rooms);
+            s.frontier_power = end;
+            s.level += 1;
+            s.taken >>= 2;
+            s.at -= 2;
+            s.cy = (s.cy + 1).min(3);
+            self.scroll = self.room_h();
+        }
+        self.hist.clear();
+        wg::EV_HIT
+    }
+
     /// Sends the hero into room r.
     fn enter(&mut self, r: usize) -> u32 {
-        if self.s.phase != PLAY || self.walk.is_some() || r >= self.s.tower.n() || self.s.taken & 1 << r != 0 {
+        if self.s.phase != PLAY || self.walk.is_some() || self.scroll > 0.1 || r >= self.s.tower.n() || self.s.taken & 1 << r != 0 {
             return 0;
         }
-        if !self.s.tower.reachable(self.s.taken, r) {
+        if !self.reachable(r) {
             self.deny = Some((r, 0.0));
             return wg::EV_HIT;
         }
@@ -275,7 +322,17 @@ impl HigherFloor {
         if room.fights() {
             s.all_beaten += 1;
         }
-        if s.tower.won(s.taken) { self.clear_level() } else { wg::EV_HIT }
+        if s.endless() {
+            if s.taken & (3 << (m.to / 2 * 2)) == 3 << (m.to / 2 * 2) {
+                self.climb()
+            } else {
+                wg::EV_HIT
+            }
+        } else if s.tower.won(s.taken) {
+            self.clear_level()
+        } else {
+            wg::EV_HIT
+        }
     }
 
     fn clear_level(&mut self) -> u32 {
@@ -312,10 +369,10 @@ impl HigherFloor {
         self.s.taken.count_ones()
     }
 
-    /// "Level", or "Tower" in endless mode
+    /// "Level", or "Floor" in endless mode
     fn level_label(&self) -> &'static str {
         if self.s.endless() {
-            tr(&["Tower", "塔", "タワー", "탑", "Torre", "Torre", "Tour", "Turm", "Башня", "塔"])
+            tr(&["Floor", "楼层", "階", "층", "Piso", "Andar", "Étage", "Etage", "Этаж", "樓層"])
         } else {
             tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"])
         }
@@ -373,7 +430,7 @@ impl Game for HigherFloor {
         wg::add_glyphs(&glyphs::GLYPHS);
         let sheet = Image::png(art::SHEET);
         let sprites = art::ARTS.iter().map(|a| sheet.crop(a.x, a.y, a.w, a.h)).collect();
-        HigherFloor { s: blank(), hover: Hit::None, keys: false, sprites, walk: None, deny: None, hist: Vec::new() }
+        HigherFloor { s: blank(), hover: Hit::None, keys: false, sprites, walk: None, deny: None, hist: Vec::new(), scroll: 0.0 }
     }
     fn save(&mut self) -> &mut Save {
         &mut self.s
@@ -393,6 +450,7 @@ impl Game for HigherFloor {
 
     fn update(&mut self, input: &Input) -> u32 {
         let dt = input.dt as f32;
+        self.scroll = (self.scroll - dt * 0.18).max(0.0);
         let mut ev = 0;
         if let Some(m) = &mut self.walk {
             m.t += dt;
@@ -420,10 +478,18 @@ impl Game for HigherFloor {
         }
         if self.s.phase == PLAY {
             let t = self.s.tower;
-            if dirs & wg::LEFT != 0 { self.s.cx = (self.s.cx - 1).max(0); }
-            if dirs & wg::RIGHT != 0 { self.s.cx = (self.s.cx + 1).min(t.cols - 1); }
-            if dirs & wg::UP != 0 { self.s.cy = (self.s.cy - 1).max(0); }
-            if dirs & wg::DOWN != 0 { self.s.cy = (self.s.cy + 1).min(t.floors - 1); }
+            if dirs & wg::LEFT != 0 {
+                self.s.cx = (self.s.cx - 1).max(0);
+            }
+            if dirs & wg::RIGHT != 0 {
+                self.s.cx = (self.s.cx + 1).min(t.cols - 1);
+            }
+            if dirs & wg::UP != 0 {
+                self.s.cy = (self.s.cy - 1).max(0);
+            }
+            if dirs & wg::DOWN != 0 {
+                self.s.cy = (self.s.cy + 1).min(t.floors - 1);
+            }
             if input.pressed & wg::A != 0 {
                 self.keys = true;
                 ev |= self.enter(self.cursor_room());
@@ -473,7 +539,7 @@ impl Game for HigherFloor {
             Hit::Button => 1000,
             Hit::Ctl(i) => 1001 + i as i32,
         };
-        let shown = [hv, self.keys as i32];
+        let shown = [hv, self.keys as i32, self.scroll.to_bits() as i32];
         let mut c = self.s;
         c.level_ms = 0;
         c.time_ms = 0;
@@ -481,13 +547,13 @@ impl Game for HigherFloor {
         wg::hash(wg::hash(0, wg::bytes_of(&c)), wg::bytes_of(&shown))
     }
     fn moving(&self) -> bool {
-        self.walk.is_some() || self.deny.is_some()
+        self.walk.is_some() || self.deny.is_some() || self.scroll > 0.0
     }
 
     fn draw(&mut self, s: &mut Screen) {
         let (w, _) = PLAN;
         let t = self.s.tower;
-        let key = wg::hash(0, wg::bytes_of(&[self.s.level, t.cols, t.floors]));
+        let key = wg::hash(0, wg::bytes_of(&[self.s.level, t.cols, t.floors, self.s.opt[O_MODE], self.scroll.to_bits() as i32]));
         s.background(key, |s| self.draw_scene(s));
 
         let u = self.unit();
@@ -508,7 +574,7 @@ impl Game for HigherFloor {
                 }
             }
             let (ix, iy, iw, ih) = (b.0 + 2.0, b.1 + 2.0, b.2 - 4.0, b.3 - 6.0);
-            let open = t.reachable(self.s.taken, r);
+            let open = self.reachable(r);
             if marked == Some(r) {
                 s.rect(ix, iy, iw, ih, 3.0, hex(0xffe066), if open { 0.22 } else { 0.1 });
                 ring_rect(s, ix, iy, iw, ih, hex(0xffe066), 0.9);
@@ -564,7 +630,7 @@ impl Game for HigherFloor {
             if !open {
                 s.rect(ix, iy, iw, ih, 3.0, hex(0x0b0d18), 0.5);
             }
-            if r + 1 == t.n() {
+            if !self.s.endless() && r + 1 == t.n() {
                 s.text_c(tr(&["BOSS", "首领"]), x, iy + 9.0, 9.0, hex(0xffcc50), 1.0);
             }
             if t.locked(self.s.taken, r) {
@@ -634,7 +700,7 @@ impl Game for HigherFloor {
                 }
             }
         };
-        shaded(s, &format!("{} {}", level_l, self.s.level + 1), 14.0, 20.0, 17.0, false);
+        shaded(s, &format!("{} {}", level_l, if self.s.endless() { self.s.done + 1 } else { self.s.level + 1 }), 14.0, 20.0, 17.0, false);
         let hover = if let Hit::Ctl(i) = self.hover { Some(i) } else { None };
         let right = self.controls().draw(s, hover, |i| self.can_use(i), w);
         shaded(s, &format!("{} {}", left_l, left), right - 14.0, 20.0, 15.0, true);
@@ -653,7 +719,11 @@ impl Game for HigherFloor {
         self.s.phase == DONE || self.s.endless() && self.s.phase == LOST
     }
     fn reached(&self) -> i32 {
-        if self.s.endless() { -1 } else { self.s.level }
+        if self.s.endless() {
+            -1
+        } else {
+            self.s.level
+        }
     }
     fn cleared(&self) -> Option<(i32, u32)> {
         (!self.s.endless() && self.s.cleared >= 0).then(|| (self.s.cleared, self.s.cleared_score as u32))
@@ -669,6 +739,10 @@ impl Game for HigherFloor {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         self.hist.clear();
         let s = &self.s;
         let t = &s.tower;
@@ -679,6 +753,7 @@ impl Game for HigherFloor {
             && (s.endless() || s.level < LEVELS)
             && (PLAY..=LOST).contains(&s.phase)
             && t.valid()
+            && (!s.endless() || (s.frontier_power > 0 && t.cols == 2 && t.floors == 4 && s.done >= 0 && (s.phase == PLAY || s.phase == LOST)))
             && s.taken >> t.n() == 0
             && s.power > 0
             && (-1..t.n() as i32).contains(&s.at)
@@ -686,6 +761,7 @@ impl Game for HigherFloor {
             && (0..t.floors).contains(&s.cy);
         self.walk = None;
         self.deny = None;
+        self.scroll = 0.0;
         self.hover = Hit::None;
         ok
     }
@@ -714,6 +790,7 @@ fn blank() -> Save {
         cy: 0,
         rep: KeyRepeat(0),
         seed: 0,
+        frontier_power: 0,
     }
 }
 
@@ -737,6 +814,23 @@ impl HigherFloor {
     fn draw_scene(&self, s: &mut Screen) {
         let (x0, y0, x1, y1) = s.visible();
         s.rect_grad(x0, y0, x1 - x0, GROUND - y0, 0.0, hex(0x7cc4ef), hex(0xd8effa), 1.0);
+        if self.s.endless() {
+            let x = self.tower_x0();
+            s.rect(x, 0., TOWER_X1 - x, y1, 0., hex(STONE), 1.);
+            for r in 0..self.s.tower.n() {
+                self.room(s, self.room_box(r), r);
+            }
+            for f in 0..4 {
+                let b = self.room_box(f * 2);
+                s.text_r(&(self.s.level + f as i32 + 1).to_string(), x - 6., b.1 + b.3 * 0.5, 14., hex(0x435572), 1.);
+            }
+            if self.s.done == 0 {
+                let home = self.home_box();
+                self.tower(s, HOME_X, home.1, HOME_X + HOME_W, 0x2f6fd6);
+                self.room(s, home, 99);
+            }
+            return;
+        }
         // clouds
         let mut rng = wg::Rng::new(31 + self.s.level as u32);
         for _ in 0..5 {
@@ -963,9 +1057,31 @@ impl wg::Board for HigherFloor {
                 }
                 out.push_str(", ");
                 out.push_str(if self.s.power > v {
-                    tr(&["weaker than you", "比你弱", "あなたより弱い", "당신보다 약함", "más débil que tú", "mais fraco que você", "plus faible que vous", "schwächer als du", "слабее вас", "比你弱"])
+                    tr(&[
+                        "weaker than you",
+                        "比你弱",
+                        "あなたより弱い",
+                        "당신보다 약함",
+                        "más débil que tú",
+                        "mais fraco que você",
+                        "plus faible que vous",
+                        "schwächer als du",
+                        "слабее вас",
+                        "比你弱",
+                    ])
                 } else if self.s.power == v {
-                    tr(&["as strong as you, you would both fall", "和你一样强，会同归于尽", "あなたと互角、相打ちになる", "당신과 같음, 둘 다 쓰러짐", "igual que tú, caeríais los dos", "igual a você, os dois cairiam", "aussi fort que vous, vous tomberiez tous les deux", "gleich stark, ihr fallt beide", "равен вам, падёте оба", "和你一樣強，會同歸於盡"])
+                    tr(&[
+                        "as strong as you, you would both fall",
+                        "和你一样强，会同归于尽",
+                        "あなたと互角、相打ちになる",
+                        "당신과 같음, 둘 다 쓰러짐",
+                        "igual que tú, caeríais los dos",
+                        "igual a você, os dois cairiam",
+                        "aussi fort que vous, vous tomberiez tous les deux",
+                        "gleich stark, ihr fallt beide",
+                        "равен вам, падёте оба",
+                        "和你一樣強，會同歸於盡",
+                    ])
                 } else {
                     tr(&["too strong", "太强了", "強すぎる", "너무 강함", "demasiado fuerte", "forte demais", "trop fort", "zu stark", "слишком силён", "太強了"])
                 });
@@ -1015,22 +1131,34 @@ impl wg::Board for HigherFloor {
                 "陷阱，力量減半",
             ])),
         }
-        if r + 1 == t.n() {
+        if !self.s.endless() && r + 1 == t.n() {
             out.push_str(tr(&[", boss: clear every other room first", "，首领：先清完其他房间"]));
         }
         if t.locked(self.s.taken, r) {
             out.push_str(", ");
             out.push_str(tr(&["locked", "上锁", "鍵がかかっている", "잠김", "cerrada", "trancada", "fermée", "verschlossen", "заперта", "上鎖"]));
-        } else if !t.reachable(self.s.taken, r) {
+        } else if !self.reachable(r) {
             out.push_str(", ");
-            out.push_str(tr(&["out of reach", "够不着", "まだ届かない", "닿지 않음", "fuera de alcance", "fora de alcance", "hors de portée", "nicht erreichbar", "не добраться", "夠不著"]));
+            out.push_str(tr(&[
+                "out of reach",
+                "够不着",
+                "まだ届かない",
+                "닿지 않음",
+                "fuera de alcance",
+                "fora de alcance",
+                "hors de portée",
+                "nicht erreichbar",
+                "не добраться",
+                "夠不著",
+            ]));
         }
     }
     fn status(&self, out: &mut String) {
         let s = &self.s;
         let level_l = self.level_label();
         let power_l = tr(&["power", "力量", "パワー", "힘", "poder", "poder", "puissance", "Stärke", "сила", "力量"]);
-        let left_l = tr(&["rooms left", "个房间剩余", "部屋が残り", "개 방 남음", "salas quedan", "salas restantes", "salles restantes", "Räume übrig", "комнат осталось", "個房間剩餘"]);
+        let left_l =
+            tr(&["rooms left", "个房间剩余", "部屋が残り", "개 방 남음", "salas quedan", "salas restantes", "salles restantes", "Räume übrig", "комнат осталось", "個房間剩餘"]);
         let left = s.tower.left(s.taken);
         out.push_str(&format!("{} {}, {} {}, {} {}", level_l, s.level + 1, power_l, s.power, left, left_l));
     }
@@ -1085,13 +1213,57 @@ impl wg::Board for HigherFloor {
             if let Some(m) = self.walk.take() {
                 let ev = self.arrive(m);
                 if self.over() && self.s.phase == LOST {
-                    said.push_str(tr(&["Defeated. Game over.", "被打败了。游戏结束。", "負けた。ゲームオーバー。", "패배. 게임 오버.", "Derrotado. Fin de la partida.", "Derrotado. Fim de jogo.", "Vaincu. Partie terminée.", "Besiegt. Spiel vorbei.", "Поражение. Игра окончена.", "被打敗了。遊戲結束。"]));
+                    said.push_str(tr(&[
+                        "Defeated. Game over.",
+                        "被打败了。游戏结束。",
+                        "負けた。ゲームオーバー。",
+                        "패배. 게임 오버.",
+                        "Derrotado. Fin de la partida.",
+                        "Derrotado. Fim de jogo.",
+                        "Vaincu. Partie terminée.",
+                        "Besiegt. Spiel vorbei.",
+                        "Поражение. Игра окончена.",
+                        "被打敗了。遊戲結束。",
+                    ]));
                 } else if self.s.phase == LOST {
-                    said.push_str(tr(&["Defeated. Press Space to retry.", "被打败了。按空格再试一次。", "負けた。スペースでもう一度。", "패배. 스페이스로 다시.", "Derrotado. Espacio para reintentar.", "Derrotado. Espaço para tentar de novo.", "Vaincu. Espace pour réessayer.", "Besiegt. Leertaste für nochmal.", "Поражение. Пробел, чтобы повторить.", "被打敗了。按空白鍵再試一次。"]));
+                    said.push_str(tr(&[
+                        "Defeated. Press Space to retry.",
+                        "被打败了。按空格再试一次。",
+                        "負けた。スペースでもう一度。",
+                        "패배. 스페이스로 다시.",
+                        "Derrotado. Espacio para reintentar.",
+                        "Derrotado. Espaço para tentar de novo.",
+                        "Vaincu. Espace pour réessayer.",
+                        "Besiegt. Leertaste für nochmal.",
+                        "Поражение. Пробел, чтобы повторить.",
+                        "被打敗了。按空白鍵再試一次。",
+                    ]));
                 } else if self.s.phase == CLEARED && self.s.endless() {
-                    said.push_str(tr(&["Tower cleared! Press Space for the next tower.", "攻下了塔！按空格进入下一座。", "タワー攻略！スペースで次のタワー。", "탑 클리어! 스페이스로 다음 탑.", "¡Torre superada! Espacio para la siguiente.", "Torre concluída! Espaço para a próxima.", "Tour vidée ! Espace pour la suivante.", "Turm geschafft! Leertaste für den nächsten.", "Башня пройдена! Пробел для следующей.", "攻下了塔！按空白鍵進入下一座。"]));
+                    said.push_str(tr(&[
+                        "Tower cleared! Press Space for the next tower.",
+                        "攻下了塔！按空格进入下一座。",
+                        "タワー攻略！スペースで次のタワー。",
+                        "탑 클리어! 스페이스로 다음 탑.",
+                        "¡Torre superada! Espacio para la siguiente.",
+                        "Torre concluída! Espaço para a próxima.",
+                        "Tour vidée ! Espace pour la suivante.",
+                        "Turm geschafft! Leertaste für den nächsten.",
+                        "Башня пройдена! Пробел для следующей.",
+                        "攻下了塔！按空白鍵進入下一座。",
+                    ]));
                 } else if self.s.phase == CLEARED {
-                    said.push_str(tr(&["Level cleared! Press Space for the next level.", "过关！按空格进入下一关。", "クリア！スペースで次のレベル。", "레벨 클리어! 스페이스로 다음 레벨.", "¡Nivel superado! Espacio para el siguiente.", "Nível concluído! Espaço para o próximo.", "Niveau réussi ! Espace pour le suivant.", "Level geschafft! Leertaste für das nächste.", "Уровень пройден! Пробел для следующего.", "過關！按空白鍵進入下一關。"]));
+                    said.push_str(tr(&[
+                        "Level cleared! Press Space for the next level.",
+                        "过关！按空格进入下一关。",
+                        "クリア！スペースで次のレベル。",
+                        "레벨 클리어! 스페이스로 다음 레벨.",
+                        "¡Nivel superado! Espacio para el siguiente.",
+                        "Nível concluído! Espaço para o próximo.",
+                        "Niveau réussi ! Espace pour le suivant.",
+                        "Level geschafft! Leertaste für das nächste.",
+                        "Уровень пройден! Пробел для следующего.",
+                        "過關！按空白鍵進入下一關。",
+                    ]));
                 } else {
                     self.status(said);
                 }
@@ -1099,9 +1271,31 @@ impl wg::Board for HigherFloor {
             }
         }
         if ev == wg::EV_HIT {
-            said.push_str(tr(&["Out of reach", "够不着", "まだ届かない", "닿지 않음", "Fuera de alcance", "Fora de alcance", "Hors de portée", "Nicht erreichbar", "Не добраться", "夠不著"]));
+            said.push_str(tr(&[
+                "Out of reach",
+                "够不着",
+                "まだ届かない",
+                "닿지 않음",
+                "Fuera de alcance",
+                "Fora de alcance",
+                "Hors de portée",
+                "Nicht erreichbar",
+                "Не добраться",
+                "夠不著",
+            ]));
         } else {
-            said.push_str(tr(&["Wait a moment", "请稍等", "少し待って", "잠시 기다리세요", "Espera un momento", "Espere um pouco", "Un instant", "Einen Moment", "Подождите", "請稍等"]));
+            said.push_str(tr(&[
+                "Wait a moment",
+                "请稍等",
+                "少し待って",
+                "잠시 기다리세요",
+                "Espera un momento",
+                "Espere um pouco",
+                "Un instant",
+                "Einen Moment",
+                "Подождите",
+                "請稍等",
+            ]));
         }
         ev
     }
@@ -1187,30 +1381,41 @@ mod tests {
     }
 
     #[test]
-    fn endless_ends_at_the_first_fall() {
+    fn endless_climbs_one_tower_and_restores_its_frontier() {
         let mut g = HigherFloor::new();
         g.s.opt = [ENDLESS, 0];
         g.start(77);
-        for k in 0..3 {
-            assert_eq!(g.s.level, k);
-            let mut path = Vec::new();
-            assert!(solve(&g.s.tower, 0, g.s.power, &mut path));
-            for r in path {
-                g.enter(r);
+        for floor in 0..1000 {
+            assert_eq!(g.s.done, floor);
+            assert_eq!(g.s.phase, PLAY);
+            let f = (0..8).find(|&r| g.reachable(r)).unwrap() / 2;
+            let pair = [f * 2, f * 2 + 1];
+            let first = pair
+                .into_iter()
+                .find(|&r| take(g.s.power, &g.s.tower.rooms[r], 0).is_some_and(|p| take(p, &g.s.tower.rooms[pair[usize::from(r == pair[0])]], 1).is_some()))
+                .unwrap();
+            for r in [first, if first == pair[0] { pair[1] } else { pair[0] }] {
+                assert_eq!(g.enter(r), wg::EV_BLIP);
                 run(&mut g, 2000);
             }
-            assert_eq!(g.s.phase, CLEARED);
-            assert_eq!(g.reached(), -1);
-            assert!(g.cleared().is_none());
-            g.press_button();
+            assert_eq!(g.s.phase, PLAY);
+            assert!(g.s.at >= 0);
+            assert!(g.s.power > 0 && g.s.power < 20000);
+            if floor % 100 == 0 {
+                let mut restored = HigherFloor::new();
+                restored.s = g.s;
+                assert!(restored.loaded());
+                g = restored;
+            }
         }
-        let r = (0..g.s.tower.n()).find(|&r| g.s.tower.reachable(0, r)).unwrap();
-        g.s.tower.rooms[r] = Room { kind: MONSTER, val: 999, ..Room::default() };
+        assert_eq!(g.s.level, 999);
+        assert_eq!(g.s.done, 1000);
+        assert_eq!(g.reached(), -1);
+        let r = (0..8).find(|&r| g.reachable(r)).unwrap();
+        g.s.tower.rooms[r] = Room { kind: MONSTER, val: g.s.power, ..Room::default() };
         g.enter(r);
-        assert!(run(&mut g, 2000) & wg::EV_GAMEOVER != 0);
+        assert_ne!(run(&mut g, 2000) & wg::EV_GAMEOVER, 0);
         assert!(g.over());
-        assert_eq!(g.press_button(), 0);
-        assert!(g.score() > 0);
     }
 
     #[test]

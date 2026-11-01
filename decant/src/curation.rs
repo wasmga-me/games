@@ -11,7 +11,7 @@ fn export_campaign() {
     );
     for l in 0..LEVELS {
         let row = {
-            let (s, par) = generate(l);
+            let (s, par) = if l < 30 { campaign(l) } else { generate(l) };
             format!("(&{:?}, {})", &s.tube[..s.n as usize], par)
         };
         out.push_str(&format!("        {} => {}, // Level {}\n", l, row, l + 1));

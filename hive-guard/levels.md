@@ -7,7 +7,8 @@ a vertical stroke can slide into a guide beside a doorway. The guide must
 support the stroke at both ends so bees cannot tip it aside.
 
 These are original layouts in the draw-to-protect genre. They are not an
-extracted commercial campaign. Edit `src/levels.rs`; all coordinates use the
+extracted commercial campaign. Edit `src/levels.rs` for the opening thirty levels and `src/campaign.rs` for
+the seventy offline-selected extensions; all coordinates use the
 300 × 400 drawing space. `challenge` records optional solution strokes for
 tests; the production loader does not allocate those witnesses.
 
@@ -25,17 +26,18 @@ tests; the production loader does not allocate those witnesses.
 | 19–23 | Alternate two-roof, roof-and-gate and two-gate shelters at different elevations. |
 | 24–29 | Three hives attack paired and combined openings; four spare ink units reward economical strokes. |
 | 30 | Two separate roof bridges and a side gate. All three openings need protection. |
+| 31–100 | Recombined roof gaps and guided gates, including three- and four-opening shelters. Each necessary barrier is checked independently. |
 
-Ink ranges from 76 to 192 units after the lessons; survival time rises from
+In the first thirty levels, ink ranges from 76 to 192 units after the lessons; survival time rises from
 8 to 10 seconds. Ink is sized per puzzle rather than reduced mechanically on
 every level. Retry keeps the same terrain and swarm seed. Saved attempts from
 the earlier dome campaign are rejected (save version 3); level unlocks remain.
 
 Run `cargo test --locked --release --manifest-path hive-guard/Cargo.toml` from
-the game-source repository. The tests replay all 30 intended shelters, alternate
+the game-source repository. The tests replay all 100 intended shelters, alternate
 swarms with small pen offsets, and the following losing strategies:
 
-- semicircles with radii 40, 49, 58 and 65 on levels 4–30;
+- semicircles with radii 40, 49, 58 and 65 on levels 4–100;
 - omitting each barrier in every puzzle with multiple openings;
 - drawing an irrelevant line instead of protecting the dog;
 - covering the hives instead of closing the dog's entrances.
@@ -43,3 +45,7 @@ swarms with small pen offsets, and the following losing strategies:
 These are regression checks against the reported shortcuts, not a proof that
 only one drawing can win or a claim that numerical difficulty equals human
 perceived difficulty. Alternative working shelters are welcome.
+
+The ignored `export_campaign` native test selects the extension with the same
+simulation, offset, omitted-barrier and shortcut checks used by the normal
+suite. Survival time and swarm sizes stay capped at the original finale.

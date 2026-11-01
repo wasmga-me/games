@@ -11,7 +11,7 @@ fn export_campaign() {
     );
     for l in 0..LEVELS {
         let row = {
-            let g = generate(l);
+            let g = if l < 30 { campaign(l) } else { generate(l) };
             let props: Vec<_> = g.props.iter().enumerate().filter(|(_, v)| **v != 0).map(|(i, &v)| (i, v)).collect();
             let fences: Vec<_> = g.fence.iter().enumerate().filter(|(_, v)| **v != 0).map(|(i, _)| i).collect();
             let cars: Vec<_> = g.cars[..g.n as usize].iter().map(|c| (c.x, c.y, c.len, c.dir, c.model)).collect();

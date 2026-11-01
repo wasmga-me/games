@@ -1,6 +1,6 @@
 # Pinwork level references
 
-The campaign has 20 distinct chambers. Levels 1–8 retain the original tutorial
+The campaign has 100 fixed chambers. Levels 1–8 retain the original tutorial
 layouts and gold quotas. Eight of levels 9–20 adapt arrangements from the browser version
 of [Hero Rescue on Plays.org](https://plays.org/hero-rescue/), inspected on
 2026-11-01. The [playable reference](https://plays.org/game/hero-rescue/) has 40
@@ -33,7 +33,7 @@ it in a low chamber does not count as collecting it. Water, lava, stone and coin
 use the same physical interactions as the introductory campaign.
 
 Each chamber is checked for a winning pull sequence and a losing pull sequence.
-The test enumerates every order of every pin subset, waiting for settling or the
+For the opening twenty chambers, the test enumerates every order of every pin subset, waiting for settling or the
 game's maximum evaluation interval between pulls. Additional checks reject
 repeated/mirrored geometry and ensure no chamber resolves before player input.
 Reference screenshots and downloaded browser data are research material outside
@@ -52,3 +52,11 @@ Only touching lava particles that cool together form one rock. Separate stones
 do not weld on later contact, and any disconnected fragments are split into
 independent bodies. In-progress saves restart their chamber when loaded, so
 there is no stale particle-body state to migrate.
+
+Levels 21–100 are fixed variants of the multi-step families introduced at 11,
+15, 16 and 19. They vary reservoir sizes, contents and lower chutes. They are
+original variants, not further extracted reference levels or eighty new
+mechanics. `src/campaign.rs` stores their geometry and test-only winning/losing
+routes. The offline exporter checks the complete particle simulation, rejects
+exact or mirrored geometry, and requires every pull in the winning witness.
+Normal tests replay both routes and all single-pull omissions for each variant.

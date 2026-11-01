@@ -11,7 +11,12 @@ fn export_campaign() {
     );
     for l in 0..LEVELS {
         let row = {
-            let (y, order) = generate_order(l);
+            let (y, order) = if l < 30 {
+                let (y, o) = campaign(l);
+                (y, o.to_vec())
+            } else {
+                generate_order(l)
+            };
             format!("({}, {}, &{:?}, &{:?}, &{:?})", y.w, y.h, &y.cell[..(y.w * y.h) as usize], &y.queue[..y.buses as usize], order)
         };
         out.push_str(&format!("        {} => {}, // Level {}\n", l, row, l + 1));

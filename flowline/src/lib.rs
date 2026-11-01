@@ -2,7 +2,7 @@
 //! A board of pipe pieces lies between a tap on the left and a drain on the
 //! right. Tap a piece to turn it a quarter; the water runs through every
 //! pipe joined to the tap as you go. Join the tap to the drain to finish
-//! the level. 30 levels, from 4 x 4 to 8 x 8. The page shows the setup,
+//! the level. 100 levels, from 3 x 3 to 8 x 8. The page shows the setup,
 //! pause and game over screens.
 mod glyphs;
 mod puzzle;
@@ -27,7 +27,7 @@ const FAILED: i32 = 3;
 const TURN_MS: f32 = 130.0;
 const FILL_MS: f32 = 110.0;
 /// the drain's basin filling once the water is through
-const BASIN_MS: f32 = 650.0;
+const BASIN_MS: f32 = 1400.0;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -75,11 +75,53 @@ struct Theme {
 
 const THEME: [Theme; THEMES] = [
     // Night
-    Theme { bg: 0x1a1f33, bg2: 0x10131f, well: 0x262c45, tile: 0x2f3655, pipe: 0xb8c0d8, pipe_lo: 0x7d86a3, channel: 0x1d2236, water: 0x2f8bff, water_hi: 0x8cc8ff, text: 0xf2f4fb, dim: 0x8f97b8, overlay: 0x0b0d16, button: 0x3b63d6 },
+    Theme {
+        bg: 0x1a1f33,
+        bg2: 0x10131f,
+        well: 0x262c45,
+        tile: 0x2f3655,
+        pipe: 0xb8c0d8,
+        pipe_lo: 0x7d86a3,
+        channel: 0x1d2236,
+        water: 0x2f8bff,
+        water_hi: 0x8cc8ff,
+        text: 0xf2f4fb,
+        dim: 0x8f97b8,
+        overlay: 0x0b0d16,
+        button: 0x3b63d6,
+    },
     // Brass
-    Theme { bg: 0x2a2320, bg2: 0x1a1513, well: 0x3a302b, tile: 0x463a33, pipe: 0xe0b45e, pipe_lo: 0xa67c32, channel: 0x2a211c, water: 0x37a6e8, water_hi: 0xa7dcff, text: 0xf6ead8, dim: 0xb5a289, overlay: 0x120e0c, button: 0x2f8fd0 },
+    Theme {
+        bg: 0x2a2320,
+        bg2: 0x1a1513,
+        well: 0x3a302b,
+        tile: 0x463a33,
+        pipe: 0xe0b45e,
+        pipe_lo: 0xa67c32,
+        channel: 0x2a211c,
+        water: 0x37a6e8,
+        water_hi: 0xa7dcff,
+        text: 0xf6ead8,
+        dim: 0xb5a289,
+        overlay: 0x120e0c,
+        button: 0x2f8fd0,
+    },
     // Paper
-    Theme { bg: 0xf6f1e6, bg2: 0xe7dfcc, well: 0xe2d8c4, tile: 0xece4d3, pipe: 0x8a96a8, pipe_lo: 0x5f6b7d, channel: 0xd9d2c3, water: 0x2f7fe0, water_hi: 0x9ccbff, text: 0x3a2f24, dim: 0x8a7a66, overlay: 0x5a4a38, button: 0x2f7fe0 },
+    Theme {
+        bg: 0xf6f1e6,
+        bg2: 0xe7dfcc,
+        well: 0xe2d8c4,
+        tile: 0xece4d3,
+        pipe: 0x8a96a8,
+        pipe_lo: 0x5f6b7d,
+        channel: 0xd9d2c3,
+        water: 0x2f7fe0,
+        water_hi: 0x9ccbff,
+        text: 0x3a2f24,
+        dim: 0x8a7a66,
+        overlay: 0x5a4a38,
+        button: 0x2f7fe0,
+    },
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -109,7 +151,11 @@ impl Flowline {
         &THEME[self.s.opt[O_THEME] as usize]
     }
     fn plan_wh(&self) -> (f32, f32) {
-        if self.tall { (300.0, 400.0) } else { (400.0, 300.0) }
+        if self.tall {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
     /// the board's box: x, y, side, and a square's side
     fn board_box(&self) -> (f32, f32, f32, f32) {
@@ -133,10 +179,18 @@ impl Flowline {
     /// Restart, in the top bar while a level is on
     fn controls(&self) -> Row {
         let row = controls::row(&[Icon::Restart], self.plan_wh().0 - 8.0, self.top_y());
-        if self.s.phase == PLAY { row } else { row.hidden() }
+        if self.s.phase == PLAY {
+            row
+        } else {
+            row.hidden()
+        }
     }
     fn top_y(&self) -> f32 {
-        if self.tall { 26.0 } else { 22.0 }
+        if self.tall {
+            26.0
+        } else {
+            22.0
+        }
     }
     fn can_restart(&self) -> bool {
         matches!(self.s.phase, PLAY | FAILED) && self.s.through == 0 && self.s.turns > 0
@@ -144,8 +198,7 @@ impl Flowline {
     fn limit_ms(&self) -> i32 {
         // Larger boards need more reading time; later chapters allow less
         // time per cell. The clock starts only on the first turn.
-        let cells = self.s.grid.n * self.s.grid.n;
-        1000 * (40 + cells * 2 - self.s.level / 2)
+        1000 * (40 + self.s.grid.n * self.s.grid.n * 2 - self.s.level.min(29) / 2).max(if self.s.level >= 30 { self.s.par * 3 + 20 } else { 0 })
     }
     fn remaining(&self) -> i32 {
         (self.limit_ms() - self.s.level_ms).max(0)
@@ -170,7 +223,11 @@ impl Flowline {
         }
         let (bx, by, _, c) = self.board_box();
         let (gx, gy) = (((x - bx) / c).floor() as i32, ((y - by) / c).floor() as i32);
-        if self.s.grid.inside(gx, gy) { Hit::Cell(gx, gy) } else { Hit::None }
+        if self.s.grid.inside(gx, gy) {
+            Hit::Cell(gx, gy)
+        } else {
+            Hit::None
+        }
     }
 
     fn begin(&mut self, level: i32) {
@@ -202,7 +259,9 @@ impl Flowline {
         let r = &mut self.s.grid.rot[i];
         *r = (*r + if back { 3 } else { 1 }) % 4;
         self.spin[i] += if back { -1.0 } else { 1.0 };
-        self.wet.fill(0.0);
+        // Retain water already in every other pipe. Only the rotating
+        // piece loses its contents; disconnected branches drain in flow().
+        self.wet[i] = 0.0;
         self.s.turns += 1;
         self.s.all_turns += 1;
         if self.s.grid.through() {
@@ -247,14 +306,14 @@ impl Flowline {
             for x in 0..n {
                 let i = (y * n + x) as usize;
                 if dist[i] < 0 {
-                    wet[i] = 0.0;
+                    wet[i] = (wet[i] - step * 0.5).max(0.0);
                     continue;
                 }
                 if self.spin[i].abs() > 0.05 {
                     wet[i] = 0.0;
                     continue;
                 }
-                let fed = dist[i] == 0 || self.feeder(&dist, x, y).map_or(false, |j| self.wet[j] >= 1.0);
+                let fed = dist[i] == 0 || self.feeder(&dist, x, y).is_some_and(|j| self.wet[j] >= 1.0 && self.spin[j].abs() <= 0.05);
                 if fed {
                     wet[i] = (wet[i] + step).min(1.0);
                 }
@@ -352,15 +411,7 @@ fn draw_pipe(s: &mut Screen, th: &Theme, cx: f32, cy: f32, c: f32, open: u8, ang
     if wet >= 1.0 {
         for &k in &arms {
             let (dx, dy) = arm(k);
-            s.line(
-                cx + dx * half * 0.2,
-                cy + dy * half * 0.2 - inner * 0.35,
-                cx + dx * half * 0.8,
-                cy + dy * half * 0.8 - inner * 0.35,
-                inner * 0.22,
-                hex(th.water_hi),
-                0.6,
-            );
+            s.line(cx + dx * half * 0.2, cy + dy * half * 0.2 - inner * 0.35, cx + dx * half * 0.8, cy + dy * half * 0.8 - inner * 0.35, inner * 0.22, hex(th.water_hi), 0.6);
         }
     }
 }
@@ -414,7 +465,11 @@ impl Game for Flowline {
         self.keys = false;
     }
     fn plan(&self, w: i32, h: i32) -> (f32, f32) {
-        if h as f32 > w as f32 * 1.1 { (300.0, 400.0) } else { (400.0, 300.0) }
+        if h as f32 > w as f32 * 1.1 {
+            (300.0, 400.0)
+        } else {
+            (400.0, 300.0)
+        }
     }
 
     fn update(&mut self, input: &Input) -> u32 {
@@ -460,10 +515,18 @@ impl Game for Flowline {
         }
         let n = self.s.grid.n;
         if self.s.phase == PLAY {
-            if dirs & wg::LEFT != 0 { self.s.cx = (self.s.cx - 1).max(0); }
-            if dirs & wg::RIGHT != 0 { self.s.cx = (self.s.cx + 1).min(n - 1); }
-            if dirs & wg::UP != 0 { self.s.cy = (self.s.cy - 1).max(0); }
-            if dirs & wg::DOWN != 0 { self.s.cy = (self.s.cy + 1).min(n - 1); }
+            if dirs & wg::LEFT != 0 {
+                self.s.cx = (self.s.cx - 1).max(0);
+            }
+            if dirs & wg::RIGHT != 0 {
+                self.s.cx = (self.s.cx + 1).min(n - 1);
+            }
+            if dirs & wg::UP != 0 {
+                self.s.cy = (self.s.cy - 1).max(0);
+            }
+            if dirs & wg::DOWN != 0 {
+                self.s.cy = (self.s.cy + 1).min(n - 1);
+            }
             if input.pressed & wg::A != 0 {
                 self.keys = true;
                 ev |= self.turn(self.s.cx, self.s.cy, false);
@@ -524,7 +587,7 @@ impl Game for Flowline {
             return false;
         }
         let dist = self.s.grid.flow();
-        let settling = self.wet.iter().zip(dist.iter()).any(|(&w, &d)| d >= 0 && w < 1.0);
+        let settling = self.wet.iter().zip(dist.iter()).any(|(&w, &d)| (d >= 0 && w < 1.0) || (d < 0 && w > 0.0));
         self.spin.iter().any(|&s| s != 0.0) || settling || (self.s.through != 0 && self.basin < 1.0)
     }
 
@@ -583,21 +646,37 @@ impl Game for Flowline {
                 draw_pipe(s, th, tx + c / 2.0, ty + c / 2.0, c, open, ang, self.wet[i], if self.spin[i].abs() > 0.05 { None } else { entry });
             }
         }
-        // the drain's basin, filling once the water is through
+        // A fixed spout empties into the pot from above. The water rises
+        // inside its walls; the stream never swings with the fill height.
         let dy = by + (g.drain as f32 + 0.5) * c;
-        let (qx, qw, qh) = (bx + side + 12.0, 22.0, 30.0);
-        s.rect(qx - 2.0, dy - qh / 2.0 - 2.0, qw + 4.0, qh + 4.0, 7.0, hex(th.pipe), 1.0);
-        s.rect(qx, dy - qh / 2.0, qw, qh, 6.0, hex(th.channel), 1.0);
-        if self.basin > 0.0 {
-            let fill = qh * self.basin;
-            s.set_clip(qx, dy + qh / 2.0 - fill, qw, fill);
-            s.rect(qx, dy - qh / 2.0, qw, qh, 6.0, hex(th.water), 1.0);
-            s.no_clip();
-            let last = ((g.drain * n) + n - 1) as usize;
-            if self.wet[last] >= 1.0 && self.basin < 1.0 {
-                s.line(bx + side, dy, qx + qw / 2.0, dy + qh / 2.0 - fill, c * 0.08, hex(th.water), 1.0);
-            }
+        let qx = bx + side + 10.;
+        let qw = 24.;
+        let qy = dy + 10.;
+        let qh = 28.;
+        let outlet = bx + side;
+        let spout = qx + qw * 0.5;
+        s.line(outlet, dy, spout, dy, 3.5, hex(th.pipe), 1.);
+        s.line(spout, dy, spout, dy + 6., 3.5, hex(th.pipe), 1.);
+        s.rect(qx, qy, qw, qh, 4., hex(0xb86845), 1.);
+        s.rect(qx + 3., qy + 2., qw - 6., qh - 5., 2., hex(th.channel), 1.);
+        let surface = qy + qh - 3. - (qh - 7.) * self.basin;
+        if self.basin > 0. {
+            s.rect(qx + 3., surface, qw - 6., qy + qh - 3. - surface, 1., hex(th.water), 1.);
+            s.line(qx + 4., surface, qx + qw - 4., surface, 0.8, hex(th.water_hi), 0.8);
         }
+        let last = ((g.drain * n) + n - 1) as usize;
+        if self.wet[last] >= 1. && self.s.through != 0 && self.basin < 1. {
+            s.line(outlet, dy, spout, dy, 1.5, hex(th.water), 1.);
+            s.line(spout, dy, spout, surface, 1.4, hex(th.water), 1.);
+            s.ellipse(spout, surface, 3. + (self.basin * 25.).sin().abs() * 2., 0.8, hex(th.water_hi), 0.8);
+        }
+        // Front lip occludes the stream; the plant revives gradually.
+        s.rect(qx - 1., qy, qw + 2., 5., 2., hex(0xd78758), 1.);
+        let green = mix(hex(0x59bc6b), hex(0xb69a60), self.basin);
+        let stem = qx + qw - 6.;
+        s.line(stem, qy, stem, qy - 20., 1.5, green, 1.);
+        s.ellipse(stem - 4., qy - 12., 5., 2.5, green, 1.);
+        s.ellipse(stem + 3., qy - 18., 4., 2.5, green, 1.);
 
         // the top bar: level and turns
         let level_l = tr(&["Level", "关卡", "レベル", "레벨", "Nivel", "Nível", "Niveau", "Level", "Уровень", "關卡"]);
@@ -614,24 +693,27 @@ impl Game for Flowline {
             hex(if self.remaining() < 15000 { 0xe85b53 } else { th.dim }),
             1.0,
         );
-        // The danger port is visibly connected to the person below it.
-        let hx = bx + (n / 2) as f32 * c + c / 2.0;
-        let hy = by + side + 11.0;
-        s.line(hx, by + side, hx, hy, 2.0, hex(0xe85b53), 1.0);
-        s.disc(hx, hy + 5.0, 4.0, hex(0xffd2a0), 1.0);
-        s.line(hx, hy + 10.0, hx, hy + 18.0, 3.0, hex(0xe85b53), 1.0);
-        s.line(hx - 7.0, hy + 16.0, hx, hy + 11.0, 2.0, hex(0xe85b53), 1.0);
-        s.line(hx + 7.0, hy + 16.0, hx, hy + 11.0, 2.0, hex(0xe85b53), 1.0);
-        s.line(hx, hy + 18.0, hx - 5.0, hy + 26.0, 2.0, hex(th.pipe), 1.0);
-        s.line(hx, hy + 18.0, hx + 5.0, hy + 26.0, 2.0, hex(th.pipe), 1.0);
-        // A dry plant is the destination, turning green as water arrives.
-        let plant = hex(if self.basin > 0.0 { 0x59bc6b } else { 0xb69a60 });
-        s.line(qx + qw / 2.0, dy - 16.0, qx + qw / 2.0, dy - 34.0, 1.5, plant, 1.0);
-        s.ellipse(qx + qw / 2.0 - 5.0, dy - 28.0, 6.0, 3.0, plant, 1.0);
-        s.ellipse(qx + qw / 2.0 + 5.0, dy - 33.0, 6.0, 3.0, plant, 1.0);
-        if self.tall {
-            s.text_c(tr(&["Water the garden. Keep the hero dry.", "给花园浇水，别淋到英雄。"]), w / 2.0, 367.0, 12.0, hex(th.dim), 1.0);
-        }
+        // A visible knight below the danger outlet: cape, helmet, face,
+        // armour and shield remain legible at mobile size without a caption.
+        let hx = bx + (n / 2) as f32 * c + c / 2.;
+        let hy = by + side + 5.;
+        s.line(hx, by + side, hx, hy, 2.5, hex(0xe85b53), 1.);
+        s.tri((hx - 4., hy - 3.), (hx + 4., hy - 3.), (hx, hy + 3.), hex(0xe85b53), 1.);
+        let fy = hy + 18.;
+        s.tri((hx - 7., fy - 4.), (hx - 14., fy + 16.), (hx + 10., fy + 16.), hex(0xc53d4d), 1.);
+        s.rect(hx - 6., fy + 1., 12., 12., 3., hex(0xc4d5e4), 1.);
+        s.line(hx - 3., fy + 12., hx - 4., fy + 19., 2.4, hex(0x354761), 1.);
+        s.line(hx + 3., fy + 12., hx + 4., fy + 19., 2.4, hex(0x354761), 1.);
+        s.disc(hx, fy - 6., 7., hex(0x839bb2), 1.);
+        s.rect(hx - 5., fy - 8., 10., 6., 2., hex(0xffd2a0), 1.);
+        s.disc(hx - 2., fy - 6., 0.9, hex(0x25334a), 1.);
+        s.disc(hx + 2., fy - 6., 0.9, hex(0x25334a), 1.);
+        s.line(hx, fy - 13., hx + 3., fy - 19., 2.5, hex(0xc53d4d), 1.);
+        s.rect(hx + 6., fy + 1., 9., 9., 2., hex(0x3e75bd), 1.);
+        s.tri((hx + 6., fy + 7.), (hx + 15., fy + 7.), (hx + 10.5, fy + 14.), hex(0x3e75bd), 1.);
+        s.line(hx + 10.5, fy + 3., hx + 10.5, fy + 10., 1., hex(0xffde73), 1.);
+        s.line(hx + 8., fy + 6., hx + 13., fy + 6., 1., hex(0xffde73), 1.);
+
         // Show the actual open ends that currently spill, not water that
         // appears to cross disconnected or rotating pipe pieces.
         for (x, y, k) in g.leaks() {
@@ -675,6 +757,10 @@ impl Game for Flowline {
         }
     }
     fn loaded(&mut self) -> bool {
+        // A finished older campaign can continue into the appended chapters.
+        if self.s.phase == DONE && self.s.level >= 0 && self.s.level < LEVELS - 1 {
+            self.s.phase = CLEARED;
+        }
         let s = &self.s;
         let n = s.grid.n;
         let ok = s.version == VERSION
@@ -712,18 +798,7 @@ impl Flowline {
         s.shadow(px, py + 4.0, pw, ph, 16.0, 14.0, 0, 0.45);
         s.rect(px - 1.0, py - 1.0, pw + 2.0, ph + 2.0, 17.0, hex(th.text), 0.1);
         s.rect(px, py, pw, ph, 16.0, hex(th.bg), 1.0);
-        let title = tr(&[
-            "Level cleared",
-            "过关",
-            "クリア",
-            "레벨 클리어",
-            "Nivel superado",
-            "Nível concluído",
-            "Niveau réussi",
-            "Level geschafft",
-            "Уровень пройден",
-            "過關",
-        ]);
+        let title = tr(&["Level cleared", "过关", "クリア", "레벨 클리어", "Nivel superado", "Nível concluído", "Niveau réussi", "Level geschafft", "Уровень пройден", "過關"]);
         let title = if self.s.phase == FAILED { tr(&["Try again", "再试一次"]) } else { title };
         s.text_c(title, w / 2.0, py + 34.0, 21.0, hex(th.text), 1.0);
         let score_l = tr(&["Score", "得分", "スコア", "점수", "Puntos", "Pontos", "Score", "Punkte", "Очки", "得分"]);
@@ -736,18 +811,7 @@ impl Flowline {
         let size = s.fit_size(&line, 14.0, pw - 32.0);
         s.text_c(&line, w / 2.0, py + 64.0, size, hex(th.dim), 1.0);
         let b = self.next_box();
-        let label = tr(&[
-            "Next level",
-            "下一关",
-            "次のレベル",
-            "다음 레벨",
-            "Siguiente nivel",
-            "Próximo nível",
-            "Niveau suivant",
-            "Nächstes Level",
-            "Следующий уровень",
-            "下一關",
-        ]);
+        let label = tr(&["Next level", "下一关", "次のレベル", "다음 레벨", "Siguiente nivel", "Próximo nível", "Niveau suivant", "Nächstes Level", "Следующий уровень", "下一關"]);
         let label = if self.s.phase == FAILED { tr(&["Retry level", "重试本关"]) } else { label };
         let hv = self.hover == Hit::Next;
         let fill = hex(th.button);
@@ -761,11 +825,15 @@ impl Flowline {
 /// readers, keyboards and switches.
 impl wg::Board for Flowline {
     fn grid(&self) -> Option<(i32, i32)> {
-        if matches!(self.s.phase, CLEARED | FAILED) { return Some((1, 1)); }
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            return Some((1, 1));
+        }
         Some((self.s.grid.n, self.s.grid.n))
     }
     fn cursor(&self) -> (i32, i32) {
-        if matches!(self.s.phase, CLEARED | FAILED) { return (0, 0); }
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            return (0, 0);
+        }
         (self.s.cx, self.s.cy)
     }
     fn focus(&mut self, x: i32, y: i32) {
@@ -781,7 +849,9 @@ impl wg::Board for Flowline {
         (bx, by, c)
     }
     fn cell_box(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
-        if matches!(self.s.phase, CLEARED | FAILED) { return Some(self.next_box()); }
+        if matches!(self.s.phase, CLEARED | FAILED) {
+            return Some(self.next_box());
+        }
         let (bx, by, _, c) = self.board_box();
         Some((bx + x as f32 * c, by + y as f32 * c, c, c))
     }
@@ -816,11 +886,33 @@ impl wg::Board for Flowline {
         }
         if x == 0 && y == g.tap {
             out.push_str(", ");
-            out.push_str(tr(&["inlet valve on the left", "左边是水龙头", "左に蛇口", "왼쪽에 수도꼭지", "grifo a la izquierda", "torneira à esquerda", "robinet à gauche", "Hahn links", "слева кран", "左邊是水龍頭"]));
+            out.push_str(tr(&[
+                "inlet valve on the left",
+                "左边是水龙头",
+                "左に蛇口",
+                "왼쪽에 수도꼭지",
+                "grifo a la izquierda",
+                "torneira à esquerda",
+                "robinet à gauche",
+                "Hahn links",
+                "слева кран",
+                "左邊是水龍頭",
+            ]));
         }
         if x == g.n - 1 && y == g.drain {
             out.push_str(", ");
-            out.push_str(tr(&["drain on the right", "右边是出水口", "右に排水口", "오른쪽에 배수구", "desagüe a la derecha", "ralo à direita", "évacuation à droite", "Abfluss rechts", "справа сток", "右邊是出水口"]));
+            out.push_str(tr(&[
+                "drain on the right",
+                "右边是出水口",
+                "右に排水口",
+                "오른쪽에 배수구",
+                "desagüe a la derecha",
+                "ralo à direita",
+                "évacuation à droite",
+                "Abfluss rechts",
+                "справа сток",
+                "右邊是出水口",
+            ]));
         }
     }
     fn status(&self, out: &mut String) {
@@ -856,7 +948,18 @@ impl wg::Board for Flowline {
         self.cell(x, y, said);
         if ev != 0 && self.s.through != 0 {
             said.push_str(". ");
-            said.push_str(tr(&["Pipe connected! Press Space for the next level.", "水流通了！按空格进入下一关。", "水が通った！スペースで次のレベル。", "물이 통했습니다! 스페이스로 다음 레벨.", "¡El agua pasa! Espacio para el siguiente nivel.", "A água passou! Espaço para o próximo nível.", "L'eau passe ! Espace pour le niveau suivant.", "Das Wasser fließt durch! Leertaste für das nächste Level.", "Вода прошла! Пробел для следующего уровня.", "水流通了！按空白鍵進入下一關。"]));
+            said.push_str(tr(&[
+                "Pipe connected! Press Space for the next level.",
+                "水流通了！按空格进入下一关。",
+                "水が通った！スペースで次のレベル。",
+                "물이 통했습니다! 스페이스로 다음 레벨.",
+                "¡El agua pasa! Espacio para el siguiente nivel.",
+                "A água passou! Espaço para o próximo nível.",
+                "L'eau passe ! Espace pour le niveau suivant.",
+                "Das Wasser fließt durch! Leertaste für das nächste Level.",
+                "Вода прошла! Пробел для следующего уровня.",
+                "水流通了！按空白鍵進入下一關。",
+            ]));
         }
         ev
     }
@@ -894,6 +997,36 @@ mod tests {
         run(&mut g, 1100);
         assert_eq!(g.wet, wet);
         assert!(!g.moving());
+    }
+
+    #[test]
+    fn turning_a_branch_preserves_upstream_water_and_drains_only_disconnected_pipes() {
+        let mut g = Flowline::new();
+        g.start(1);
+        g.s.grid.pipe.fill(0);
+        g.s.grid.rot.fill(0);
+        g.s.grid.tap = 1;
+        let n = g.s.grid.n;
+        g.s.grid.pipe[n as usize] = puzzle::LEFT | puzzle::RIGHT;
+        g.s.grid.pipe[n as usize + 1] = puzzle::LEFT | puzzle::RIGHT;
+        g.s.grid.pipe[n as usize + 2] = puzzle::LEFT | puzzle::UP;
+        g.s.grid.pipe[2] = puzzle::DOWN | puzzle::LEFT;
+        g.flow(200.);
+        g.flow(200.);
+        g.flow(200.);
+        g.flow(200.);
+        assert_eq!(g.wet[n as usize], 1.);
+        assert_eq!(g.wet[n as usize + 1], 1.);
+        g.turn(2, 1, false);
+        assert_eq!(g.wet[n as usize], 1.);
+        assert_eq!(g.wet[n as usize + 1], 1.);
+        assert_eq!(g.wet[2], 1., "disconnected water drains rather than vanishes on click");
+        g.flow(50.);
+        assert!(g.wet[2] > 0. && g.wet[2] < 1.);
+        assert_eq!(g.wet[n as usize], 1.);
+        g.turn(0, 1, false);
+        g.flow(50.);
+        assert!(g.wet[n as usize + 1] < 1., "cutting inlet must drain its branch");
     }
 
     #[test]
