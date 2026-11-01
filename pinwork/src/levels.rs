@@ -1,8 +1,7 @@
 //! The levels: a dungeon's stone walls and pins, what fills its chambers,
 //! where the knight and the orc stand, and where the gold must land.
 
-pub const LEVELS: i32 = 24;
-pub const LAYOUTS: i32 = 8;
+pub const LEVELS: i32 = 2 * LAYOUT.len() as i32;
 
 /// what a grain is
 pub const GOLD: u8 = 0;
@@ -34,24 +33,19 @@ struct Layout {
     zone: (f32, f32, f32, f32),
 }
 
-const LAYOUT: [Layout; LAYOUTS as usize] = [
-    // one pin over the knight
-    Layout {
-        walls: &[(110.0, 90.0, 110.0, 226.0), (190.0, 90.0, 190.0, 226.0)],
-        pins: &[(104.0, 232.0, 222.0, 232.0)],
-        fills: &[(GOLD, 117.0, 170.0, 183.0, 224.0)],
-        knight: 150.0,
-        orc: None,
-        zone: (FRAME_L, 290.0, FRAME_R, FLOOR),
-    },
-    // gold and lava side by side: only the gold
+const FLOORS: (f32, f32, f32, f32) = (FRAME_L, 290.0, FRAME_R, FLOOR);
+
+/// The layouts, easiest first: played as built, then mirrored needing more
+/// of their gold.
+const LAYOUT: &[Layout] = &[
+    // gold or lava, the lava over the knight
     Layout {
         walls: &[(150.0, 70.0, 150.0, 222.0)],
         pins: &[(156.0, 228.0, 0.0, 228.0), (144.0, 228.0, 300.0, 228.0)],
-        fills: &[(GOLD, 40.0, 190.0, 140.0, 222.0), (LAVA, 170.0, 190.0, 270.0, 222.0)],
-        knight: 70.0,
+        fills: &[(GOLD, 30.0, 180.0, 140.0, 222.0), (LAVA, 160.0, 186.0, 278.0, 222.0)],
+        knight: 215.0,
         orc: None,
-        zone: (FRAME_L, 290.0, FRAME_R, FLOOR),
+        zone: FLOORS,
     },
     // lava on the gold, water above: the water first
     Layout {
@@ -60,16 +54,36 @@ const LAYOUT: [Layout; LAYOUTS as usize] = [
         fills: &[(WATER, 96.0, 80.0, 204.0, 124.0), (LAVA, 96.0, 184.0, 204.0, 220.0), (GOLD, 96.0, 224.0, 204.0, 256.0)],
         knight: 150.0,
         orc: None,
-        zone: (FRAME_L, 290.0, FRAME_R, FLOOR),
+        zone: FLOORS,
     },
-    // an orc behind a gate, lava above it: keep the gate shut
+    // the gold's pin is locked by the water tank's side; lava on the left
+    Layout {
+        walls: &[(110.0, 90.0, 110.0, 226.0), (190.0, 90.0, 190.0, 226.0), (80.0, 60.0, 80.0, 150.0), (222.0, 250.0, 286.0, 250.0)],
+        pins: &[(104.0, 232.0, 204.0, 232.0), (227.0, 246.0, 227.0, 60.0), (86.0, 156.0, 0.0, 156.0)],
+        fills: &[(GOLD, 117.0, 170.0, 183.0, 224.0), (WATER, 233.0, 175.0, 280.0, 244.0), (LAVA, 20.0, 100.0, 74.0, 150.0)],
+        knight: 150.0,
+        orc: None,
+        zone: FLOORS,
+    },
+    // the gold's pin runs into the lava's: the lava first, onto the
+    // orc, and the gate stays shut
     Layout {
         walls: &[(120.0, 70.0, 120.0, 206.0), (190.0, 70.0, 190.0, 206.0)],
-        pins: &[(126.0, 212.0, 0.0, 212.0), (184.0, 212.0, 300.0, 212.0), (150.0, 382.0, 150.0, 300.0)],
-        fills: &[(GOLD, 30.0, 166.0, 112.0, 206.0), (LAVA, 196.0, 166.0, 280.0, 206.0)],
+        pins: &[(6.0, 212.0, 112.0, 212.0), (136.0, 212.0, 300.0, 212.0), (150.0, 382.0, 150.0, 300.0)],
+        fills: &[(GOLD, 24.0, 166.0, 112.0, 206.0), (LAVA, 196.0, 166.0, 280.0, 206.0)],
         knight: 60.0,
         orc: Some((232.0, GROUND)),
         zone: (FRAME_L, 290.0, 150.0, FLOOR),
+    },
+    // the gold's pin is locked by the lava tank's side: water on the
+    // lava first, then the side, then the gold
+    Layout {
+        walls: &[(100.0, 60.0, 100.0, 150.0), (200.0, 50.0, 200.0, 176.0), (120.0, 176.0, 205.0, 176.0), (125.0, 50.0, 125.0, 94.0)],
+        pins: &[(6.0, 156.0, 96.0, 156.0), (125.0, 106.0, 125.0, 172.0), (120.0, 99.0, 206.0, 99.0)],
+        fills: &[(GOLD, 20.0, 100.0, 94.0, 150.0), (WATER, 131.0, 60.0, 194.0, 94.0), (LAVA, 131.0, 120.0, 194.0, 170.0)],
+        knight: 60.0,
+        orc: None,
+        zone: FLOORS,
     },
     // water down a chute onto the lava, then the rest
     Layout {
@@ -78,34 +92,27 @@ const LAYOUT: [Layout; LAYOUTS as usize] = [
         fills: &[(GOLD, 100.0, 110.0, 200.0, 144.0), (WATER, 216.0, 106.0, 280.0, 146.0), (LAVA, 96.0, 238.0, 204.0, 270.0)],
         knight: 150.0,
         orc: None,
-        zone: (FRAME_L, 290.0, FRAME_R, FLOOR),
+        zone: FLOORS,
     },
-    // a slanted pin turns the lava to the orc: leave it in
+    // an orc on the gold over the knight: lava onto the orc, water onto
+    // the lava, then the floor
     Layout {
-        walls: &[(120.0, 60.0, 120.0, 150.0), (200.0, 60.0, 200.0, 150.0), (100.0, 60.0, 100.0, 160.0), (190.0, 330.0, 190.0, 379.0), (108.0, 172.0, 108.0, 200.0)],
-        pins: &[(114.0, 156.0, 226.0, 156.0), (112.0, 200.0, 262.0, 262.0), (106.0, 166.0, 0.0, 166.0)],
-        fills: &[(LAVA, 126.0, 96.0, 194.0, 150.0), (GOLD, 24.0, 120.0, 94.0, 160.0)],
-        knight: 60.0,
-        orc: Some((262.0, GROUND)),
-        zone: (FRAME_L, 290.0, 190.0, FLOOR),
-    },
-    // water over the lava over the orc: the water would save it
-    Layout {
-        walls: &[(190.0, 60.0, 190.0, 236.0), (120.0, 60.0, 120.0, 206.0), (150.0, 320.0, 150.0, 379.0)],
-        pins: &[(126.0, 212.0, 0.0, 212.0), (184.0, 236.0, 300.0, 236.0), (184.0, 140.0, 300.0, 140.0)],
-        fills: &[(GOLD, 30.0, 166.0, 112.0, 206.0), (LAVA, 196.0, 184.0, 280.0, 228.0), (WATER, 196.0, 84.0, 280.0, 134.0)],
-        knight: 60.0,
-        orc: Some((235.0, GROUND)),
-        zone: (FRAME_L, 290.0, 150.0, FLOOR),
-    },
-    // an orc on a pin above the knight, lava above the orc
-    Layout {
-        walls: &[(100.0, 150.0, 100.0, 256.0), (200.0, 150.0, 200.0, 256.0), (100.0, 60.0, 100.0, 140.0), (200.0, 60.0, 200.0, 140.0), (214.0, 60.0, 214.0, 190.0)],
-        pins: &[(94.0, 256.0, 226.0, 256.0), (206.0, 146.0, 74.0, 146.0), (208.0, 196.0, 300.0, 196.0)],
-        fills: &[(LAVA, 106.0, 104.0, 194.0, 140.0), (GOLD, 220.0, 146.0, 280.0, 190.0)],
+        walls: &[(100.0, 50.0, 100.0, 256.0), (200.0, 50.0, 200.0, 256.0)],
+        pins: &[(94.0, 96.0, 226.0, 96.0), (206.0, 146.0, 74.0, 146.0), (94.0, 256.0, 226.0, 256.0)],
+        fills: &[(WATER, 106.0, 60.0, 194.0, 90.0), (LAVA, 106.0, 104.0, 194.0, 140.0), (GOLD, 106.0, 232.0, 194.0, 252.0)],
         knight: 150.0,
-        orc: Some((150.0, 252.5)),
-        zone: (FRAME_L, 290.0, FRAME_R, FLOOR),
+        orc: Some((150.0, 228.0)),
+        zone: FLOORS,
+    },
+    // the gold's pin is locked by the orc's gate: lava onto the orc,
+    // water onto the lava, then the gate and the gold
+    Layout {
+        walls: &[(110.0, 90.0, 110.0, 226.0), (190.0, 90.0, 190.0, 226.0), (222.0, 80.0, 222.0, 130.0), (222.0, 150.0, 222.0, 200.0)],
+        pins: &[(104.0, 232.0, 204.0, 232.0), (227.0, 382.0, 227.0, 222.0), (216.0, 206.0, 300.0, 206.0), (216.0, 136.0, 300.0, 136.0)],
+        fills: &[(GOLD, 117.0, 170.0, 183.0, 224.0), (LAVA, 230.0, 176.0, 280.0, 200.0), (WATER, 230.0, 96.0, 280.0, 130.0)],
+        knight: 150.0,
+        orc: Some((258.0, GROUND)),
+        zone: FLOORS,
     },
 ];
 
@@ -132,12 +139,10 @@ pub const DROP_R: f32 = 2.5;
 /// how far apart rows of drops start: packed as tight as they go
 pub const ROW_RISE: f32 = SPACING * 0.866;
 
-/// Level n: the layouts in turn, then mirrored, then as first with more
-/// gold needed.
+/// Level n, needing a larger share of its gold the further on it is.
 pub fn level(n: i32) -> Level {
-    let round = n / LAYOUTS;
-    let l = &LAYOUT[(n % LAYOUTS) as usize];
-    let flip = round == 1;
+    let l = &LAYOUT[n as usize % LAYOUT.len()];
+    let flip = n as usize >= LAYOUT.len();
     let fx = |x: f32| if flip { 300.0 - x } else { x };
     let seg = |s: &Seg| (fx(s.0), s.1, fx(s.2), s.3);
     let mut walls = vec![(FRAME_L, FRAME_TOP, FRAME_L, FLOOR), (FRAME_R, FRAME_TOP, FRAME_R, FLOOR), (FRAME_L, FLOOR, FRAME_R, FLOOR)];
@@ -162,7 +167,7 @@ pub fn level(n: i32) -> Level {
             row += 1;
         }
     }
-    let share = [0.5, 0.55, 0.65][round as usize];
+    let share = 0.5 + 0.15 * n as f32 / (LEVELS - 1) as f32;
     let (zx0, zy0, zx1, zy1) = l.zone;
     let zone = if flip { (300.0 - zx1, zy0, 300.0 - zx0, zy1) } else { (zx0, zy0, zx1, zy1) };
     Level {
