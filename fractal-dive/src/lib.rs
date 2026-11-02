@@ -12,7 +12,7 @@
 pub mod view;
 
 use view::*;
-use wg::{hex, Game, Input, Pointer, Rng, Screen};
+use wg::{hex, mix, Game, Input, Pointer, Rng, Screen};
 
 const VERSION: u32 = 1;
 pub const O_SET: usize = 0;
@@ -77,7 +77,15 @@ pub struct Dive {
     rest: (f32, f32),
     /// the two-finger pinch in progress: its middle and spread
     pinch: Option<(f32, f32, f32)>,
+    /// Julia mode: a finger or the mouse on the map, choosing the constant
+    picking: bool,
+    /// the map's picture, and the size and colours it was drawn for
+    map: Vec<u32>,
+    map_key: (u32, u32, usize),
 }
+
+/// The part of the Mandelbrot set the map shows: left, top, width, height.
+const MAP: (f64, f64, f64, f64) = (-2.1, -1.2, 2.8, 2.4);
 
 #[derive(Clone, Copy)]
 struct Press {
@@ -152,6 +160,73 @@ impl Dive {
         self.press = None;
         self.button = 0;
         self.pinch = None;
+        self.picking = false;
+    }
+    /// Julia mode's map of the Mandelbrot set, top left: x, y, w, h in
+    /// screen pixels. Each point on it is a Julia set's constant.
+    fn map_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.julia()?;
+        let w = (self.sw.min(self.sh) as f32 * 0.3).clamp(110.0 * self.dpr, 180.0 * self.dpr).min(self.sw as f32 * 0.45).round();
+        let h = (w * (MAP.3 / MAP.2) as f32).round();
+        let m = (10.0 * self.dpr).round();
+        Some((m, m, w, h))
+    }
+    fn on_map(&self, x: f32, y: f32) -> bool {
+        self.map_rect().is_some_and(|(mx, my, mw, mh)| x >= mx && y >= my && x < mx + mw && y < my + mh)
+    }
+    /// The Julia constant at screen point x, y of the map.
+    fn pick(&mut self, x: f32, y: f32) {
+        let Some((mx, my, mw, mh)) = self.map_rect() else {
+            return;
+        };
+        let fx = ((x - mx) / mw).clamp(0.0, 1.0) as f64;
+        let fy = ((y - my) / mh).clamp(0.0, 1.0) as f64;
+        self.s.jr = MAP.0 + fx * MAP.2;
+        self.s.ji = MAP.1 + fy * MAP.3;
+    }
+    /// Draws the map (its picture worked out once per size and colours) and
+    /// where the constant is on it.
+    fn draw_map(&mut self, s: &mut Screen, pal: &Palette) {
+        let Some((mx, my, mw, mh)) = self.map_rect() else {
+            return;
+        };
+        let (w, h) = (mw as u32, mh as u32);
+        let colours = self.s.opt[O_COLOURS].clamp(0, N_COLOURS - 1) as usize;
+        if self.map_key != (w, h, colours) {
+            self.map_key = (w, h, colours);
+            self.map.clear();
+            let mut spent = 0;
+            for j in 0..h {
+                for i in 0..w {
+                    let cr = MAP.0 + (i as f64 + 0.5) / w as f64 * MAP.2;
+                    let ci = MAP.1 + (j as f64 + 0.5) / h as f64 * MAP.3;
+                    let v = escape(cr, ci, None, 160, &mut spent);
+                    self.map.push(if v < 0.0 { pal.inside_colour() } else { pal.at(v * 4.0) });
+                }
+            }
+        }
+        let (sw, sh) = s.size_px();
+        let (x0, y0) = (mx as i32, my as i32);
+        for j in 0..h as i32 {
+            if y0 + j >= sh {
+                break;
+            }
+            let row = s.row_px(y0 + j);
+            for i in 0..(w as i32).min(sw - x0) {
+                // dimmed, so the marker stands out
+                row[(x0 + i) as usize] = mix(self.map[(j as u32 * w + i as u32) as usize], hex(0x120f26), 0.75);
+            }
+        }
+        let ink = hex(0xf4efe6);
+        s.rect(mx - 1.0, my - 1.0, mw + 2.0, 1.5, 0.0, ink, 0.5);
+        s.rect(mx - 1.0, my + mh - 0.5, mw + 2.0, 1.5, 0.0, ink, 0.5);
+        s.rect(mx - 1.0, my - 1.0, 1.5, mh + 2.0, 0.0, ink, 0.5);
+        s.rect(mx + mw - 0.5, my - 1.0, 1.5, mh + 2.0, 0.0, ink, 0.5);
+        let px = mx + ((self.s.jr - MAP.0) / MAP.2) as f32 * mw;
+        let py = my + ((self.s.ji - MAP.1) / MAP.3) as f32 * mh;
+        let r = 5.0 * self.dpr;
+        s.disc(px, py, r * 1.6, hex(0x120f26), 0.5);
+        s.ring(px, py, r, 2.0 * self.dpr, ink, 1.0);
     }
 }
 
@@ -175,6 +250,9 @@ impl Game for Dive {
             budget: BUDGET,
             rest: (0.0, 0.0),
             pinch: None,
+            picking: false,
+            map: Vec::new(),
+            map_key: (0, 0, 0),
         };
         d.start(1);
         d
@@ -243,6 +321,21 @@ impl Game for Dive {
             return 0;
         }
         let (x, y) = (p.x, p.y);
+        if self.picking {
+            if p.held == 0 {
+                self.picking = false;
+            } else {
+                self.pick(x, y);
+            }
+            self.at = (x, y);
+            return 0;
+        }
+        if p.pressed & wg::M_LEFT != 0 && self.on_map(x, y) {
+            self.picking = true;
+            self.pick(x, y);
+            self.at = (x, y);
+            return 0;
+        }
         if p.pressed != 0 {
             self.at = (x, y);
             self.button = self.button_at(x, y);
@@ -282,7 +375,7 @@ impl Game for Dive {
         wg::hash(wg::hash(0, wg::bytes_of(&self.s)), &self.button.to_le_bytes())
     }
     fn moving(&self) -> bool {
-        !self.r.finished(&self.s.view) || self.press.is_some() || self.button != 0 || self.keys != 0 || self.pinch.is_some()
+        !self.r.finished(&self.s.view) || self.press.is_some() || self.button != 0 || self.keys != 0 || self.pinch.is_some() || self.picking
     }
     fn draw(&mut self, s: &mut Screen) {
         let (w, h) = s.size_px();
@@ -301,8 +394,10 @@ impl Game for Dive {
         if self.pal.as_ref().map(|p| p.0) != Some(colours) {
             self.pal = Some((colours, palette(colours)));
         }
-        if let Some((_, pal)) = &self.pal {
-            self.r.paint(s, pal, self.cell);
+        if let Some((c, pal)) = self.pal.take() {
+            self.r.paint(s, &pal, self.cell);
+            self.draw_map(s, &pal);
+            self.pal = Some((c, pal));
         }
         // the zoom buttons
         let ink = hex(0xf4efe6);

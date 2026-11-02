@@ -369,6 +369,10 @@ pub struct Palette {
 
 impl Palette {
     #[inline]
+    pub fn inside_colour(&self) -> u32 {
+        self.inside
+    }
+    #[inline]
     pub fn at(&self, v: f32) -> u32 {
         if v < 0.0 {
             return self.inside;
