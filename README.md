@@ -13,6 +13,7 @@ Original WebAssembly games written for [wasmga.me](https://wasmga.me). Each titl
 | Facets | [wasmga.me/games/facets](https://wasmga.me/games/facets) | [facets/](facets) | Rust |
 | Flipside | [wasmga.me/games/flipside](https://wasmga.me/games/flipside) | [flipside.c](flipside.c) | C |
 | Flowline | [wasmga.me/games/flowline](https://wasmga.me/games/flowline) | [flowline/](flowline) | Rust |
+| Fractal Dive | [wasmga.me/games/fractal-dive](https://wasmga.me/games/fractal-dive) | [fractal-dive/](fractal-dive) | Rust |
 | Greenside | [wasmga.me/games/greenside](https://wasmga.me/games/greenside) | [greenside/](greenside) | Rust |
 | Hexpile | [wasmga.me/games/hexpile](https://wasmga.me/games/hexpile) | [hexpile/](hexpile) | Rust |
 | Higher Floor | [wasmga.me/games/higher-floor](https://wasmga.me/games/higher-floor) | [higher-floor/](higher-floor) | Rust |
@@ -25,6 +26,7 @@ Original WebAssembly games written for [wasmga.me](https://wasmga.me). Each titl
 | Slider | [wasmga.me/games/slider](https://wasmga.me/games/slider) | [slider/](slider) | Rust |
 | Snake | [wasmga.me/games/snake](https://wasmga.me/games/snake) | [snake.c](snake.c) | C |
 | Sourdough Solitaire | [wasmga.me/games/sourdough](https://wasmga.me/games/sourdough) | [sourdough.c](sourdough.c) | C |
+| Starfling | [wasmga.me/games/starfling](https://wasmga.me/games/starfling) | [starfling/](starfling) | Rust |
 | Sudoku | [wasmga.me/games/sudoku](https://wasmga.me/games/sudoku) | [sudoku/](sudoku) | Rust |
 | Tilestack | [wasmga.me/games/tilestack](https://wasmga.me/games/tilestack) | [tilestack/](tilestack) | Rust |
 | Unbolt | [wasmga.me/games/unbolt](https://wasmga.me/games/unbolt) | [unbolt/](unbolt) | Rust |
