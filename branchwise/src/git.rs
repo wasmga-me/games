@@ -82,6 +82,136 @@ pub struct Bisect {
     pub found: Option<usize>,
 }
 
+/// A file open in the text editor (vim, vi, nano or code).
+#[derive(Clone)]
+pub struct Editor {
+    /// the command as typed
+    pub cmd: String,
+    pub name: String,
+    pub lines: Vec<Vec<char>>,
+    /// the lines as opened, so closing without a change writes nothing
+    pub opened: Vec<Vec<char>>,
+    pub row: usize,
+    pub col: usize,
+}
+
+impl Editor {
+    /// The command that saves it: the typed one with the text after
+    /// `#file` as one quoted word (', % and line breaks as %XX).
+    pub fn save_line(&self) -> String {
+        let mut enc = format!("{} #file '", self.cmd);
+        for l in &self.lines {
+            for c in l.iter().chain(&['\n']) {
+                match c {
+                    '\'' => enc.push_str("%27"),
+                    '%' => enc.push_str("%25"),
+                    '\n' => enc.push_str("%0A"),
+                    '\r' => enc.push_str("%0D"),
+                    c => enc.push(*c),
+                }
+            }
+        }
+        enc.push('\'');
+        enc
+    }
+
+    /// A typed key: true when the editor used it.
+    pub fn key(&mut self, code: i32) -> bool {
+        let (n, len) = (self.lines.len(), self.lines[self.row].len());
+        self.col = self.col.min(len);
+        match code {
+            13 if n < 200 => {
+                let rest = self.lines[self.row].split_off(self.col);
+                self.row += 1;
+                self.col = 0;
+                self.lines.insert(self.row, rest);
+            }
+            8 if self.col > 0 => {
+                self.col -= 1;
+                self.lines[self.row].remove(self.col);
+            }
+            8 if self.row > 0 => {
+                let rest = self.lines.remove(self.row);
+                self.row -= 1;
+                self.col = self.lines[self.row].len();
+                self.lines[self.row].extend(rest);
+            }
+            127 if self.col < len => {
+                self.lines[self.row].remove(self.col);
+            }
+            127 if self.row + 1 < n => {
+                let rest = self.lines.remove(self.row + 1);
+                self.lines[self.row].extend(rest);
+            }
+            c if c >= 32 && c != 127 && len < 200 => {
+                if let Some(ch) = char::from_u32(c as u32) {
+                    self.lines[self.row].insert(self.col, ch);
+                    self.col += 1;
+                }
+            }
+            8 | 127 | 13 => {}
+            _ => return false,
+        }
+        true
+    }
+
+    /// Moves the caret by the arrow keys held (wg::UP and the rest),
+    /// wrapping left and right across lines.
+    pub fn arrows(&mut self, dirs: u32) {
+        self.col = self.col.min(self.lines[self.row].len());
+        if dirs & wg::UP != 0 && self.row > 0 {
+            self.row -= 1;
+        }
+        if dirs & wg::DOWN != 0 && self.row + 1 < self.lines.len() {
+            self.row += 1;
+        }
+        let len = self.lines[self.row].len();
+        self.col = self.col.min(len);
+        if dirs & wg::LEFT != 0 {
+            if self.col > 0 {
+                self.col -= 1;
+            } else if self.row > 0 {
+                self.row -= 1;
+                self.col = self.lines[self.row].len();
+            }
+        }
+        if dirs & wg::RIGHT != 0 {
+            if self.col < len {
+                self.col += 1;
+            } else if self.row + 1 < self.lines.len() {
+                self.row += 1;
+                self.col = 0;
+            }
+        }
+    }
+}
+
+/// The text a `#file` word holds.
+pub(crate) fn decode_file(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        match (b[i], s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok())) {
+            (b'%', Some(x)) => {
+                out.push(x);
+                i += 3;
+            }
+            (c, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// A typed line as the player sees it, without what an editor added.
+pub fn shown(line: &str) -> &str {
+    let line = line.split_once(" #todo ").map_or(line, |p| p.0);
+    line.split_once(" #file ").map_or(line, |p| p.0)
+}
+
 /// An interactive rebase's to-do list, open in the editor.
 #[derive(Clone)]
 pub struct Todo {
@@ -192,6 +322,7 @@ pub struct World {
     pub stash: Vec<String>,
     pub bisect: Option<Bisect>,
     pub todo: Option<Todo>,
+    pub editor: Option<Editor>,
     pub out: Vec<(u8, String)>,
     pub(crate) seq: Option<Seq>,
     pub(crate) bis: Option<BisectState>,
@@ -338,6 +469,7 @@ impl World {
             stash: vec![],
             bisect: None,
             todo: None,
+            editor: None,
             out: vec![],
             seq: None,
             bis: None,

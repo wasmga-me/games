@@ -1,6 +1,6 @@
 //! The commands around git: moving between folders and changing files.
 
-use crate::git::{join, pretty, World, FAIL, GOOD, HOME, OUT, R};
+use crate::git::{decode_file, join, pretty, Editor, World, FAIL, GOOD, HOME, OUT, R};
 use crate::vfs;
 
 impl World {
@@ -42,9 +42,9 @@ impl World {
                 }
                 Ok(())
             }
-            "edit" | "nano" | "vim" | "vi" | "code" => {
+            "edit" => {
                 if a.len() < 2 {
-                    return Err(format!("{}: name a file to change, such as {} app.js", a[0], a[0]));
+                    return Err("edit: name a file to change, such as edit app.js".into());
                 }
                 for f in &a[1..] {
                     let p = self.file_arg(f)?;
@@ -58,6 +58,36 @@ impl World {
                     fs.write(&p, &b).map_err(|_| format!("{f}: cannot write"))?;
                 }
                 Ok(())
+            }
+            "nano" | "vim" | "vi" | "code" => {
+                let (files, saved) = match a.iter().position(|w| *w == "#file") {
+                    Some(i) => (&a[1..i], Some(a.get(i + 1).copied().unwrap_or(""))),
+                    None => (&a[1..], None),
+                };
+                let [f] = files else {
+                    return Err(format!("{}: open one file at a time, such as {} app.js", a[0], a[0]));
+                };
+                let p = self.file_arg(f)?;
+                let fs = vfs::cur();
+                if let Some(text) = saved {
+                    return fs.write(&p, &decode_file(text)).map_err(|_| format!("{f}: cannot write"));
+                }
+                let text = String::from_utf8_lossy(&fs.read(&p).unwrap_or_default()).into_owned();
+                let mut lines: Vec<Vec<char>> = text.lines().map(|l| l.chars().collect()).collect();
+                if lines.is_empty() {
+                    lines.push(vec![]);
+                }
+                let quoted = if f.contains([' ', '\t']) { format!("'{f}'") } else { f.to_string() };
+                self.editor = Some(Editor {
+                    cmd: format!("{} {quoted}", a[0]),
+                    name: f.to_string(),
+                    opened: lines.clone(),
+                    lines,
+                    row: 0,
+                    col: 0,
+                });
+                // the editor takes over: commands after it on the line don't run
+                Err(String::new())
             }
             "mkdir" => {
                 let parents = a.contains(&"-p");

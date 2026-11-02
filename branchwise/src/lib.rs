@@ -67,6 +67,7 @@ enum Btn {
     Down,
     Start,
     Abort,
+    Save,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +76,7 @@ enum Hit {
     Chip(String),
     Btn(Btn),
     Todo(usize),
+    Line(usize),
 }
 
 struct Branchwise {
@@ -150,6 +152,21 @@ fn level_of(n: usize, of: usize) -> String {
         wg::ZT => format!("第 {n} 關，共 {of} 關"),
         _ => format!("Level {n} of {of}"),
     }
+}
+
+fn t_cancel() -> &'static str {
+    tr(&[
+        "Cancel",
+        "取消",
+        "中止",
+        "중단",
+        "Cancelar",
+        "Cancelar",
+        "Abandonner",
+        "Abbrechen",
+        "Отмена",
+        "取消",
+    ])
 }
 
 fn t_goal() -> &'static str {
@@ -275,6 +292,7 @@ impl Branchwise {
         }
         self.world.out.clear();
         self.world.todo = None;
+        self.world.editor = None;
     }
 
     fn record(&mut self, line: &str) {
@@ -324,6 +342,7 @@ impl Branchwise {
         self.s.score += score;
         self.s.cleared = self.s.level;
         self.s.cleared_score = score;
+        self.world.editor = None;
         self.s.done += 1;
         self.pending |= wg::EV_LEVEL;
         if self.s.level as usize + 1 >= N {
@@ -409,7 +428,7 @@ impl Branchwise {
                                 .collect();
                             format!("{cmd}, then: {}", acts.join(", "))
                         }
-                        None => l.to_string(),
+                        None => git::shown(l).to_string(),
                     };
                     self.say(HINT, shown);
                 }
@@ -429,19 +448,10 @@ impl Branchwise {
             }
             _ => {}
         }
-        self.world.out.clear();
-        let changed = self.world.run(&line);
-        let out = std::mem::take(&mut self.world.out);
-        if out.iter().any(|o| o.0 == ERR) {
-            self.s.mistakes += 1;
-        }
-        for o in out {
-            self.say(o.0, o.1);
-        }
-        if changed {
-            self.record(&line);
-            self.s.moves += git::split(&line).len() as i32;
-            self.check();
+        self.run_line(line.clone());
+        let last = git::split(&line).pop().unwrap_or_default();
+        if self.world.editor.is_some() && !matches!(last.first().map(String::as_str), Some("nano" | "vim" | "vi" | "code")) {
+            self.say(HINT, "Commands after the editor on that line were skipped.");
         }
     }
 
@@ -457,8 +467,7 @@ impl Branchwise {
             self.record(l);
         }
         self.replay();
-        let shown = last.split(" #todo ").next().unwrap_or(&last).to_string();
-        self.say(HINT, format!("Undid: {shown}"));
+        self.say(HINT, format!("Undid: {}", git::shown(&last)));
     }
 
     fn insert_str(&mut self, w: &str) {
@@ -515,11 +524,53 @@ impl Branchwise {
         true
     }
 
+    /// A rebase to-do list or a file is open over the graph.
+    fn overlay(&self) -> bool {
+        self.world.todo.is_some() || self.world.editor.is_some()
+    }
+
     fn finish_todo(&mut self) {
         let Some(line) = self.world.todo_line() else {
             return;
         };
         self.world.todo = None;
+        self.run_line(line);
+    }
+
+    /// Saves the file in the editor and closes it.
+    fn save_file(&mut self) {
+        let Some(e) = self.world.editor.take() else {
+            return;
+        };
+        if e.lines == e.opened {
+            return;
+        }
+        let line = e.save_line();
+        // a save the level's history can't hold would be lost on undo
+        if self.s.cmds_len as usize + line.len() + 1 > CMDS {
+            self.world.editor = Some(e);
+            self.say(ERR, "This file is too big to save here; make it shorter.");
+            return;
+        }
+        self.run_line(line);
+    }
+
+    fn discard_file(&mut self) {
+        if let Some(e) = self.world.editor.take() {
+            self.say(HINT, format!("Closed {} without saving.", e.name));
+        }
+    }
+
+    fn editor_key(&mut self, code: i32) -> bool {
+        if code == 27 {
+            self.save_file();
+            return true;
+        }
+        self.world.editor.as_mut().is_some_and(|e| e.key(code))
+    }
+
+    /// Runs a line and keeps it when it changed something.
+    fn run_line(&mut self, line: String) {
         self.world.out.clear();
         let changed = self.world.run(&line);
         let out = std::mem::take(&mut self.world.out);
@@ -531,7 +582,7 @@ impl Branchwise {
         }
         if changed {
             self.record(&line);
-            self.s.moves += 1;
+            self.s.moves += git::split(&line).len() as i32;
             self.check();
         }
     }
@@ -539,14 +590,14 @@ impl Branchwise {
     fn press(&mut self, h: Hit) {
         match h {
             Hit::Spot(Spot::Commit(id, msg)) => {
-                if self.world.todo.is_none() && self.s.phase == 0 {
+                if !self.overlay() && self.s.phase == 0 {
                     self.word(&id);
                 }
                 self.tip = Some((format!("{id} {msg}"), 0.0, 0.0));
                 self.tip_ms = 2500;
             }
             Hit::Spot(Spot::Name(n)) => {
-                if self.world.todo.is_none() && self.s.phase == 0 {
+                if !self.overlay() && self.s.phase == 0 {
                     self.word(&n);
                 }
             }
@@ -554,6 +605,12 @@ impl Branchwise {
             Hit::Todo(i) => {
                 if let Some(t) = self.world.todo.as_mut() {
                     t.sel = i.min(t.lines.len().saturating_sub(1));
+                }
+            }
+            Hit::Line(i) => {
+                if let Some(e) = self.world.editor.as_mut() {
+                    e.row = i.min(e.lines.len() - 1);
+                    e.col = e.lines[e.row].len();
                 }
             }
             Hit::Btn(b) => match b {
@@ -585,8 +642,13 @@ impl Branchwise {
                 }
                 Btn::Start => self.finish_todo(),
                 Btn::Abort => {
-                    self.todo_key(27);
+                    if self.world.editor.is_some() {
+                        self.discard_file();
+                    } else {
+                        self.todo_key(27);
+                    }
                 }
+                Btn::Save => self.save_file(),
             },
         }
         self.dirty += 1;
@@ -662,7 +724,9 @@ impl Game for Branchwise {
         let dirs = self.rep.dirs(input);
         if dirs != 0 {
             self.dirty += 1;
-            if self.world.todo.is_some() {
+            if let Some(e) = self.world.editor.as_mut() {
+                e.arrows(dirs);
+            } else if self.world.todo.is_some() {
                 if let Some(t) = self.world.todo.as_mut() {
                     if dirs & wg::UP != 0 && t.sel > 0 {
                         t.sel -= 1;
@@ -710,6 +774,10 @@ impl Game for Branchwise {
                 return true;
             }
             return false;
+        }
+        if self.world.editor.is_some() {
+            // Tab moves on from the editor
+            return code != 9 && self.editor_key(code);
         }
         if self.world.todo.is_some() {
             // Tab moves on from the to-do list
@@ -1277,6 +1345,73 @@ impl Branchwise {
         }
     }
 
+    /// Draws the open to-do list or file, if there is one.
+    fn draw_overlay(&mut self, s: &mut Screen, t: &Theme, a: &Area) -> bool {
+        if self.world.editor.is_some() {
+            self.draw_editor(s, t, a);
+        } else if self.world.todo.is_some() {
+            self.draw_todo(s, t, a);
+        } else {
+            return false;
+        }
+        true
+    }
+
+    fn draw_editor(&mut self, s: &mut Screen, t: &Theme, a: &Area) {
+        let Some(e) = &self.world.editor else {
+            return;
+        };
+        s.rect(a.x, a.y, a.w, a.h, 12.0, hex(t.panel), 1.0);
+        outline(s, a.x, a.y, a.w, a.h, 12.0, 1.2, hex(t.line), 1.0);
+        let fs = if a.w > 500.0 { 16.0 } else { 14.0 };
+        s.text(&e.name, a.x + 16.0, a.y + 22.0, fs * 0.85, hex(t.muted), 1.0);
+        let help = tr(&[
+            "Type to change the file. Esc saves it and closes.",
+            "直接输入来修改文件。按 Esc 保存并关闭。",
+            "入力してファイルを書き換えます。Escで保存して閉じます。",
+            "입력해서 파일을 고칩니다. Esc를 누르면 저장하고 닫습니다.",
+            "Escribe para cambiar el archivo. Esc lo guarda y lo cierra.",
+            "Digite para mudar o arquivo. Esc salva e fecha.",
+            "Tapez pour modifier le fichier. Échap l'enregistre et le ferme.",
+            "Tippen ändert die Datei. Esc speichert und schließt sie.",
+            "Печатайте, чтобы изменить файл. Esc сохраняет его и закрывает.",
+            "直接輸入來修改檔案。按 Esc 儲存並關閉。",
+        ]);
+        let help = wrap_plain(s, help, fs * 0.8, a.w - 32.0);
+        let help_h = fs * 1.2 * help.len() as f32 + 14.0;
+        let lh = fs * 1.6;
+        let y0 = a.y + 40.0;
+        let rows = (((a.y + a.h - help_h - y0) / lh).floor() as usize).max(1);
+        let first = (e.row + 1).saturating_sub(rows);
+        let gutter = fs * 2.4;
+        let tx = a.x + 12.0 + gutter;
+        let room = a.w - 24.0 - gutter;
+        let before: String = e.lines[e.row][..e.col.min(e.lines[e.row].len())].iter().collect();
+        let caret_w = s.text_width(&before, fs);
+        let shift = (caret_w - room + 8.0).max(0.0);
+        for (i, l) in e.lines.iter().enumerate().skip(first).take(rows) {
+            let y = y0 + (i - first) as f32 * lh;
+            let mid = y + lh / 2.0;
+            if i == e.row {
+                s.rect(a.x + 8.0, y, a.w - 16.0, lh, 6.0, hex(t.accent), 0.10);
+            }
+            s.text_r(&(i + 1).to_string(), a.x + 4.0 + gutter, mid, fs * 0.8, hex(t.muted), 0.7);
+            s.set_clip(tx, y, room, lh);
+            let text: String = l.iter().collect();
+            s.text(&text, tx - shift, mid, fs, hex(t.code), 1.0);
+            if i == e.row && (self.ms / 530) % 2 == 0 {
+                s.rect(tx - shift + caret_w, mid - fs * 0.7, 2.0, fs * 1.4, 1.0, hex(t.accent), 1.0);
+            }
+            s.no_clip();
+            self.hits.push((a.x + 8.0, y, a.w - 16.0, lh, Hit::Line(i)));
+        }
+        let mut hy = a.y + a.h - 14.0;
+        for l in help.iter().rev() {
+            s.text(l, a.x + 16.0, hy, fs * 0.8, hex(t.muted), 1.0);
+            hy -= fs * 1.2;
+        }
+    }
+
     fn draw_cleared(&mut self, s: &mut Screen, t: &Theme, a: &Area) {
         let w = a.w.min(420.0);
         let h = 170.0;
@@ -1377,7 +1512,25 @@ impl Branchwise {
         tall: bool,
     ) {
         let mut chips: Vec<(String, Hit)> = vec![];
-        if self.world.todo.is_some() {
+        if self.world.editor.is_some() {
+            chips.push((t_cancel().into(), Hit::Btn(Btn::Abort)));
+            chips.push((
+                tr(&[
+                    "Save",
+                    "保存",
+                    "保存",
+                    "저장",
+                    "Guardar",
+                    "Salvar",
+                    "Enregistrer",
+                    "Speichern",
+                    "Сохранить",
+                    "儲存",
+                ])
+                .into(),
+                Hit::Btn(Btn::Save),
+            ));
+        } else if self.world.todo.is_some() {
             for (k, n) in [
                 (b'p', "pick"),
                 (b's', "squash"),
@@ -1416,21 +1569,7 @@ impl Branchwise {
                 .into(),
                 Hit::Btn(Btn::Down),
             ));
-            chips.push((
-                tr(&[
-                    "Abort",
-                    "取消",
-                    "中止",
-                    "중단",
-                    "Cancelar",
-                    "Cancelar",
-                    "Abandonner",
-                    "Abbrechen",
-                    "Отмена",
-                ])
-                .into(),
-                Hit::Btn(Btn::Abort),
-            ));
+            chips.push((t_cancel().into(), Hit::Btn(Btn::Abort)));
             chips.push((
                 tr(&[
                     "Start",
@@ -1508,7 +1647,7 @@ impl Branchwise {
         for row in rows {
             for (x, label, hit) in row {
                 let w = s.text_width(&label, cfs) + 22.0;
-                let strong = matches!(hit, Hit::Btn(Btn::Start));
+                let strong = matches!(hit, Hit::Btn(Btn::Start | Btn::Save));
                 self.chip_draw(s, t, a.x + x, y, w, ch, &label, hit, strong);
             }
             y += ch + 8.0;
@@ -1525,7 +1664,7 @@ impl Branchwise {
             ih,
             10.0,
             1.5,
-            hex(if self.world.todo.is_none() && self.s.phase == 0 {
+            hex(if !self.overlay() && self.s.phase == 0 {
                 t.accent
             } else {
                 t.line
@@ -1633,7 +1772,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
             0.0
         };
         s.set_clip(tx, iy, room, ih);
-        if text.is_empty() && self.world.todo.is_none() && self.s.phase == 0 {
+        if text.is_empty() && !self.overlay() && self.s.phase == 0 {
             let ph = tr(&[
                 "Type a git command",
                 "输入 git 命令",
@@ -1649,7 +1788,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
             s.text(ph, tx, iy + ih / 2.0, ifs, hex(t.muted), 0.55);
         }
         s.text(&text, tx - shift, iy + ih / 2.0, ifs, hex(t.ink), 1.0);
-        if (self.ms / 530) % 2 == 0 && self.s.phase == 0 && self.world.todo.is_none() {
+        if (self.ms / 530) % 2 == 0 && self.s.phase == 0 && !self.overlay() {
             s.rect(
                 tx - shift + caret_w,
                 iy + ih / 2.0 - ifs * 0.7,
@@ -1863,9 +2002,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
         };
         let score = format!("{} {}", t_score(), self.s.score);
         s.text_r(&score, pw - 24.0, 28.0, 18.0, hex(t.muted), 1.0);
-        if self.world.todo.is_some() {
-            self.draw_todo(s, t, &gra);
-        } else {
+        if !self.draw_overlay(s, t, &gra) {
             self.draw_world(s, t, false, &gra, false, false);
             Self::draw_files(s, t, &self.world, gra.x, gra.y + 4.0, 220.0, false);
             if self.s.phase > 0 {
@@ -1918,9 +2055,7 @@ let head = match r.wts.get(r.cur).map(|w| &w.head) {
             hex(t.panel),
             0.55,
         );
-        if self.world.todo.is_some() {
-            self.draw_todo(s, t, &gra);
-        } else {
+        if !self.draw_overlay(s, t, &gra) {
             let goal = self.show_goal;
             let inner = Area {
                 x: gra.x,
