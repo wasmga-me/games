@@ -17,7 +17,7 @@ use wg::{hex, Game, Input, Pointer, Rng, Screen};
 const VERSION: u32 = 1;
 pub const O_SET: usize = 0;
 pub const O_COLOURS: usize = 1;
-pub const N_COLOURS: i32 = 4;
+pub const N_COLOURS: i32 = 8;
 
 /// Julia constants worth diving into, one picked per run.
 const JULIAS: [(f64, f64); 8] = [
@@ -65,6 +65,18 @@ pub struct Dive {
     keys: u32,
     /// the colours option and its palette, built when it changes
     pal: Option<(usize, Palette)>,
+    /// the screen in pixels, and device pixels per CSS pixel
+    sw: u32,
+    sh: u32,
+    dpr: f32,
+    /// screen pixels per worked-out value (more on dense screens)
+    cell: u32,
+    /// iterations a frame may spend, tuned to keep frames coming on time
+    budget: u64,
+    /// a pan's leftover part of a cell, kept so pans move whole cells
+    rest: (f32, f32),
+    /// the two-finger pinch in progress: its middle and spread
+    pinch: Option<(f32, f32, f32)>,
 }
 
 #[derive(Clone, Copy)]
@@ -82,8 +94,8 @@ impl Dive {
     }
     /// The zoom buttons: centres and radius, bottom right.
     fn buttons(&self) -> [(f32, f32, f32); 2] {
-        let (w, h) = (self.r.w as f32, self.r.h as f32);
-        let r = (w.min(h) * 0.055).clamp(20.0, 30.0);
+        let (w, h) = (self.sw as f32, self.sh as f32);
+        let r = (w.min(h) * 0.055).clamp(20.0 * self.dpr, 30.0 * self.dpr);
         let m = r * 0.6;
         [(w - m - r, h - m - 3.0 * r - m * 0.5, r), (w - m - r, h - m - r, r)]
     }
@@ -96,16 +108,50 @@ impl Dive {
         0
     }
     fn zoom_at(&mut self, x: f32, y: f32, f: f64) {
-        self.s.view.zoom_about(x as f64, y as f64, self.r.w, self.r.h, f);
+        self.s.view.zoom_about(x as f64, y as f64, self.sw, self.sh, f);
     }
+    /// Pans by whole cells, so the values already worked out stay sharp.
     fn pan_by(&mut self, dx: f32, dy: f32) {
-        self.s.view.pan(dx as f64, dy as f64, self.r.h);
+        let c = self.cell as f32;
+        let (x, y) = (self.rest.0 + dx, self.rest.1 + dy);
+        let (cx, cy) = ((x / c).round() * c, (y / c).round() * c);
+        self.rest = (x - cx, y - cy);
+        if cx != 0.0 || cy != 0.0 {
+            // in whole cells of the picture's own grid
+            self.s.view.pan((cx / c) as f64, (cy / c) as f64, self.r.h.max(1));
+        }
+    }
+    /// The mouse wheel, in hundredths of a line (down zooms out).
+    pub fn wheel(&mut self, d: i32) {
+        let (x, y) = if self.at.0 >= 0.0 { self.at } else { (self.sw as f32 / 2.0, self.sh as f32 / 2.0) };
+        self.zoom_at(x, y, 2f64.powf(-d as f64 / 100.0 * 0.2));
+    }
+    /// Two fingers at x, y (their middle) and d apart, in screen pixels;
+    /// d 0 when they lift. They zoom and move the view together.
+    pub fn pinch(&mut self, x: f32, y: f32, d: f32) {
+        if d <= 0.0 {
+            self.pinch = None;
+            return;
+        }
+        self.press = None;
+        self.button = 0;
+        if let Some((px, py, pd)) = self.pinch {
+            self.pan_by(px - x, py - y);
+            self.zoom_at(x, y, (d / pd.max(1.0)) as f64);
+        }
+        self.pinch = Some((x, y, d));
+    }
+    /// Device pixels per CSS pixel, in hundredths: the picture is worked out
+    /// about once per CSS pixel, and the buttons keep their size.
+    pub fn set_dpr(&mut self, d: i32) {
+        self.dpr = (d as f32 / 100.0).clamp(1.0, 4.0);
     }
     /// A new run or a load: no press, and the picture worked out afresh.
     fn forget(&mut self) {
         self.r.reset();
         self.press = None;
         self.button = 0;
+        self.pinch = None;
     }
 }
 
@@ -122,6 +168,13 @@ impl Game for Dive {
             button: 0,
             keys: 0,
             pal: None,
+            sw: 1,
+            sh: 1,
+            dpr: 1.0,
+            cell: 1,
+            budget: BUDGET,
+            rest: (0.0, 0.0),
+            pinch: None,
         };
         d.start(1);
         d
@@ -149,7 +202,12 @@ impl Game for Dive {
             return 0;
         }
         let secs = dt as f64 / 1000.0;
-        let (w, h) = (self.r.w as f32, self.r.h as f32);
+        // spend more while frames keep coming on time, less when they're late
+        if !self.r.finished(&self.s.view) {
+            self.budget = if dt <= 18 { self.budget + self.budget / 8 } else if dt > 24 { self.budget * 3 / 4 } else { self.budget };
+            self.budget = self.budget.clamp(BUDGET / 4, BUDGET * 8);
+        }
+        let (w, h) = (self.sw as f32, self.sh as f32);
         // arrows look around, A dives and B rises, at the centre
         let mut dx = 0.0;
         let mut dy = 0.0;
@@ -198,7 +256,7 @@ impl Game for Dive {
                 // a quick tap zooms in twice as far, centred there
                 if !pr.dragging && !pr.right && pr.ms < HOLD_MS {
                     self.zoom_at(x, y, 2.0);
-                    self.pan_by(x - self.r.w as f32 / 2.0, y - self.r.h as f32 / 2.0);
+                    self.pan_by(x - self.sw as f32 / 2.0, y - self.sh as f32 / 2.0);
                 }
             }
             self.button = 0;
@@ -224,20 +282,27 @@ impl Game for Dive {
         wg::hash(wg::hash(0, wg::bytes_of(&self.s)), &self.button.to_le_bytes())
     }
     fn moving(&self) -> bool {
-        !self.r.finished(&self.s.view) || self.press.is_some() || self.button != 0 || self.keys != 0
+        !self.r.finished(&self.s.view) || self.press.is_some() || self.button != 0 || self.keys != 0 || self.pinch.is_some()
     }
     fn draw(&mut self, s: &mut Screen) {
         let (w, h) = s.size_px();
-        self.r.size(w, h);
+        (self.sw, self.sh) = (w.max(1) as u32, h.max(1) as u32);
+        // about one value per CSS pixel, and at most about a million
+        let mut cell = self.dpr.round().max(1.0) as u32;
+        while (self.sw / cell) * (self.sh / cell) > 1_000_000 {
+            cell += 1;
+        }
+        self.cell = cell;
+        self.r.size(self.sw.div_ceil(cell) as i32, self.sh.div_ceil(cell) as i32);
         let julia = self.julia();
         self.r.follow(&self.s.view);
-        self.r.refine(&self.s.view, julia, BUDGET);
+        self.r.refine(&self.s.view, julia, self.budget);
         let colours = self.s.opt[O_COLOURS].clamp(0, N_COLOURS - 1) as usize;
         if self.pal.as_ref().map(|p| p.0) != Some(colours) {
             self.pal = Some((colours, palette(colours)));
         }
         if let Some((_, pal)) = &self.pal {
-            self.r.paint(s, pal);
+            self.r.paint(s, pal, self.cell);
         }
         // the zoom buttons
         let ink = hex(0xf4efe6);
@@ -253,7 +318,7 @@ impl Game for Dive {
         // how far in
         let z = self.s.view.zoom();
         let label = zoom_label(z);
-        let size = (w.min(h) as f32 * 0.035).clamp(13.0, 18.0);
+        let size = (w.min(h) as f32 * 0.035).clamp(13.0 * self.dpr, 18.0 * self.dpr);
         let tw = s.text_width(&label, size);
         s.rect(10.0, h as f32 - size * 2.2 - 8.0, tw + size * 1.2, size * 2.0, size * 0.5, hex(0x120f26), 0.55);
         s.text(&label, 10.0 + size * 0.6, h as f32 - size * 1.2 - 8.0, size, ink, 0.9);
@@ -285,3 +350,20 @@ fn group(n: u64) -> String {
 }
 
 wg::game!(Dive);
+
+/// The mouse wheel, in hundredths of a line (down is positive).
+#[unsafe(no_mangle)]
+pub extern "C" fn wg_wheel(d: i32) {
+    WG_GAME.get().game.wheel(d)
+}
+/// Two fingers: their middle and how far apart, in screen pixels; 0 apart
+/// when they lift.
+#[unsafe(no_mangle)]
+pub extern "C" fn wg_pinch(x: i32, y: i32, d: i32) {
+    WG_GAME.get().game.pinch(x as f32, y as f32, d as f32)
+}
+/// Device pixels per CSS pixel, in hundredths.
+#[unsafe(no_mangle)]
+pub extern "C" fn wg_dpr(d: i32) {
+    WG_GAME.get().game.set_dpr(d)
+}
