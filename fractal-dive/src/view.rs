@@ -12,6 +12,10 @@ const MIN_SPAN: f64 = 2e-13;
 const MAX_SPAN: f64 = 8.0;
 /// Escape radius squared; large, for smooth colours.
 const ESCAPE: f64 = 256.0 * 256.0;
+/// Solid guessing starts at this pass (block size), and blends only corners
+/// whose escape values differ by less than this.
+const GUESS_FROM: u32 = 4;
+const GUESS_SPREAD: f32 = 0.5;
 
 /// The point at the middle of the screen and the height the screen shows,
 /// in the complex plane.
@@ -115,7 +119,7 @@ pub fn escape(cr: f64, ci: f64, julia: Option<(f64, f64)>, max: u32, spent: &mut
 
 /// Most iterations a pixel gets at this zoom.
 pub fn max_iter(v: &View) -> u32 {
-    (220.0 + 110.0 * v.zoom().max(1.0).log2()).min(12000.0) as u32
+    (400.0 + 140.0 * v.zoom().max(1.0).log2()).min(16000.0) as u32
 }
 
 /// The picture: per screen pixel, the escape value and the size of the
@@ -137,6 +141,9 @@ pub struct Render {
     row: u32,
     /// the colours need painting again
     dirty: bool,
+    /// the iteration limit in use: it follows the zoom in, and holds on the
+    /// way out so slow-escaping detail stays (until well out)
+    cap: u32,
 }
 
 impl Default for Render {
@@ -147,11 +154,12 @@ impl Default for Render {
 
 impl Render {
     pub fn new() -> Render {
-        Render { w: 0, h: 0, vals: Vec::new(), blk: Vec::new(), nv: Vec::new(), nb: Vec::new(), cols: Vec::new(), view: None, julia: None, pass: COARSE, row: 0, dirty: true }
+        Render { w: 0, h: 0, vals: Vec::new(), blk: Vec::new(), nv: Vec::new(), nb: Vec::new(), cols: Vec::new(), view: None, julia: None, pass: COARSE, row: 0, dirty: true, cap: 0 }
     }
     /// Forget the picture (a new run or a load).
     pub fn reset(&mut self) {
         self.blk.fill(u8::MAX);
+        self.cap = 0;
         self.restart(None);
     }
     /// Refining starts over from the coarsest pass, for `view`.
@@ -244,7 +252,11 @@ impl Render {
             self.restart(Some(*view));
         }
         let (w, h) = (self.w, self.h);
-        let max = max_iter(view);
+        let need = max_iter(view);
+        if need > self.cap || need * 4 < self.cap {
+            self.cap = need;
+        }
+        let max = self.cap;
         let k = view.span / h as f64;
         let x0 = view.cx - w as f64 / 2.0 * k;
         let y0 = view.cy - h as f64 / 2.0 * k;
@@ -258,7 +270,13 @@ impl Render {
                 while x < w {
                     let i = (y * w + x) as usize;
                     if self.blk[i] > 1 && self.blk[i] as u32 >= b {
-                        let v = escape(x0 + (x as f64 + 0.5) * k, ci, julia, max, &mut spent);
+                        let v = match self.guess(x, y, b) {
+                            Some(v) => {
+                                spent += 1;
+                                v
+                            }
+                            None => escape(x0 + (x as f64 + 0.5) * k, ci, julia, max, &mut spent),
+                        };
                         self.vals[i] = v;
                         self.blk[i] = 1;
                         // fill the block's other pixels that are coarser
@@ -285,25 +303,57 @@ impl Render {
             self.row = 0;
         }
     }
-    /// Paints the values in the palette's colours: every time, as the zoom
-    /// buttons and label are drawn over it afresh.
-    pub fn paint(&mut self, s: &mut Screen, pal: &Palette) {
+    /// Solid guessing, for the finer passes: a pixel whose surrounding
+    /// corners from the pass before are all inside is inside, and one whose
+    /// corners all escaped at nearly the same count gets their blend.
+    fn guess(&self, x: u32, y: u32, b: u32) -> Option<f32> {
+        if b > GUESS_FROM {
+            return None;
+        }
+        let s = 2 * b;
+        let (gx, gy) = (x - x % s, y - y % s);
+        if gx + s >= self.w || gy + s >= self.h {
+            return None;
+        }
+        let w = self.w as usize;
+        let at = |cx: u32, cy: u32| cy as usize * w + cx as usize;
+        let c = [at(gx, gy), at(gx + s, gy), at(gx, gy + s), at(gx + s, gy + s)];
+        if c.iter().any(|&j| self.blk[j] != 1) {
+            return None;
+        }
+        let v = c.map(|j| self.vals[j]);
+        if v.iter().all(|&v| v < 0.0) {
+            return Some(-1.0);
+        }
+        let (lo, hi) = v.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+        if lo < 0.0 || hi - lo > GUESS_SPREAD {
+            return None;
+        }
+        let (fx, fy) = ((x - gx) as f32 / s as f32, (y - gy) as f32 / s as f32);
+        let top = v[0] + (v[1] - v[0]) * fx;
+        let bottom = v[2] + (v[3] - v[2]) * fx;
+        Some(top + (bottom - top) * fy)
+    }
+    /// Paints the values in the palette's colours, each over a cell of
+    /// `cell` x `cell` screen pixels: every time, as the zoom buttons and
+    /// label are drawn over it afresh.
+    pub fn paint(&mut self, s: &mut Screen, pal: &Palette, cell: u32) {
         self.dirty = false;
-        let (w, h) = (self.w as usize, self.h as usize);
+        let (w, cell) = (self.w as usize, cell.max(1) as usize);
         let (sw, sh) = s.size_px();
-        if sw as usize != w || sh as usize != h {
+        if sw as usize > w * cell || sh as usize > self.h as usize * cell {
             return;
         }
-        for y in 0..h {
-            let row = s.row_px(y as i32);
-            let vals = &self.vals[y * w..(y + 1) * w];
-            let blk = &self.blk[y * w..(y + 1) * w];
-            for x in 0..w {
-                row[x] = if blk[x] == u8::MAX {
-                    pal.inside
-                } else {
-                    pal.at(vals[x])
-                };
+        let mut colours = vec![0u32; w];
+        for y in 0..sh as usize {
+            if y % cell == 0 {
+                let g = y / cell;
+                for (c, (&v, &b)) in colours.iter_mut().zip(self.vals[g * w..(g + 1) * w].iter().zip(&self.blk[g * w..(g + 1) * w])) {
+                    *c = if b == u8::MAX { pal.inside } else { pal.at(v) };
+                }
+            }
+            for (x, px) in s.row_px(y as i32).iter_mut().enumerate() {
+                *px = colours[x / cell];
             }
         }
     }
@@ -330,13 +380,18 @@ impl Palette {
     }
 }
 
-/// Colour themes, in the catalog `setup` order: Ember, Ocean, Neon, Ink.
+/// Colour themes, in the catalog `setup` order: Ember, Ocean, Neon, Ink,
+/// Aurora, Candy, Forest, Gold.
 pub fn palette(i: usize) -> Palette {
     let stops: &[u32] = match i {
         0 => &[0x120f26, 0x5a1030, 0xc2381b, 0xff8a3c, 0xffd166, 0xfff7e8, 0xffc93c, 0x8a2130],
         1 => &[0x061a2e, 0x0b4f6c, 0x2ec4b6, 0xe8fff9, 0xffd166, 0x2a7ab0, 0x0b2d4c],
         2 => &[0x150a33, 0x654ff0, 0xff4fa3, 0xffe066, 0x4fe0d2, 0x2c1a7a],
-        _ => &[0xfff7e8, 0x1a1730, 0x8c86a8, 0xfff7e8],
+        3 => &[0xfff7e8, 0x1a1730, 0x8c86a8, 0xfff7e8],
+        4 => &[0x05101f, 0x0b3d4f, 0x1fa38a, 0x9be36d, 0xe8fff9, 0xb48cff, 0x3a2a7a],
+        5 => &[0x2a0f2e, 0xff6f9f, 0xffd1e8, 0x9ff3e6, 0x5ce1c2, 0xffe066, 0x8a2d6b],
+        6 => &[0x0c1a10, 0x1f4d2b, 0x6a9a3b, 0xd8c97a, 0xfff2cc, 0x8c6a3a, 0x24361c],
+        _ => &[0x140c02, 0x5a3a0a, 0xc28a1b, 0xffe08a, 0xfffaf0, 0xd9a441, 0x6b4a12],
     };
     let inside = match i {
         3 => 0x1a1730,
