@@ -9,6 +9,7 @@
 use crate::lg::{self, Oid, Repo as G};
 use crate::vfs::{self, Fs};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// Output line kinds.
 pub const OUT: u8 = 0;
@@ -198,6 +199,9 @@ pub struct World {
     /// lines found in the setup, by hash: the goal compares which of them a
     /// commit holds, and counts the others
     known: Option<HashSet<u64>>,
+    /// the files, branches, tags and worktrees the start or the goal has:
+    /// the goal ignores any others the player makes
+    scope: Option<Rc<HashSet<String>>>,
     sigs: HashMap<Oid, u64>,
     snap: Snap,
     pub(crate) quiet: bool,
@@ -278,6 +282,17 @@ fn mix(a: u64, b: u64) -> u64 {
     h ^ (h >> 32)
 }
 
+/// A name in a scope: `kind` keeps a file, a ref ('r') and a worktree
+/// with the same name apart.
+fn scoped(kind: char, name: &str) -> String {
+    format!("{kind}:{name}")
+}
+
+/// Whether the goal judges `name` (everything counts until a scope is set).
+fn in_scope(scope: &Option<Rc<HashSet<String>>>, kind: char, name: &str) -> bool {
+    scope.as_ref().map_or(true, |s| s.contains(&scoped(kind, name)))
+}
+
 /// Joins `p` onto `base`, folding . and .. ("~" is home).
 pub fn join(base: &str, p: &str) -> String {
     let full = if p.starts_with('/') {
@@ -328,6 +343,7 @@ impl World {
             bis: None,
             edits: 0,
             known: None,
+            scope: None,
             sigs: HashMap::new(),
             snap: Snap::default(),
             quiet: false,
@@ -459,6 +475,34 @@ impl World {
     }
 
     // ---------- the view ----------
+
+    /// Every name the goal could judge, by kind (see [scoped]): files (in
+    /// the worktree and in commits), refs and worktrees.
+    pub fn names(&mut self) -> HashSet<String> {
+        self.with_fs(|w| {
+            let mut n: HashSet<String> = w.files.iter().map(|f| scoped('f', &f.name)).collect();
+            let mut trees = HashSet::new();
+            for (dir, r) in [(APP, Some(&w.repo)), (ORIGIN, w.origin.as_ref())] {
+                let Some(r) = r else { continue };
+                n.extend(r.branches.iter().chain(&r.tags).chain(&r.remote).map(|(b, _)| scoped('r', b)));
+                n.extend(r.wts.iter().map(|w| scoped('w', &w.path)));
+                let Ok(g) = lg::open(dir) else { continue };
+                for c in r.commits.iter().filter_map(|c| g.commit(&c.oid).ok()) {
+                    if trees.insert(c.tree) {
+                        n.extend(g.tree_files(&c.tree).into_iter().map(|(_, p)| scoped('f', &p)));
+                    }
+                }
+            }
+            n
+        })
+    }
+
+    /// Limits what the goal compares to `names` (see [World::names]).
+    pub fn set_scope(&mut self, names: Rc<HashSet<String>>) {
+        self.scope = Some(names);
+        self.sigs.clear();
+        self.with_fs(|w| w.refresh());
+    }
 
     /// Rebuilds the view (and the goal snapshot) from the repositories.
     fn refresh(&mut self) {
@@ -616,6 +660,9 @@ impl World {
         let mut keep: Vec<(String, u64)> = vec![];
         let mut other = 0u64;
         for (blob, path) in g.tree_files(tree) {
+            if !in_scope(&self.scope, 'f', &path) {
+                continue;
+            }
             let b = g.blob(&blob).unwrap_or_default();
             for l in String::from_utf8_lossy(&b).lines() {
                 let h = fnv(l.as_bytes());
@@ -656,8 +703,11 @@ impl World {
             inited: self.inited,
             ..Default::default()
         };
+        let scope = self.scope.clone();
+        let keep = |kind, n: &str| in_scope(&scope, kind, n);
         let refs = |list: &[(String, usize)], sig: &[u64]| {
-            let mut v: Vec<(String, u64)> = list.iter().map(|(n, c)| (n.clone(), sig[*c])).collect();
+            let mut v: Vec<(String, u64)> =
+                list.iter().filter(|(n, _)| keep('r', n)).map(|(n, c)| (n.clone(), sig[*c])).collect();
             v.sort();
             v
         };
@@ -667,11 +717,12 @@ impl World {
             snap.branches = refs(&r.branches, &sig);
             snap.tags = refs(&r.tags, &sig);
             snap.remote = refs(&r.remote, &sig);
-            snap.upstream = r.upstream.clone();
+            snap.upstream = r.upstream.iter().filter(|(b, _)| keep('r', b)).cloned().collect();
             snap.upstream.sort();
             snap.heads = r
                 .wts
                 .iter()
+                .filter(|w| keep('w', &w.path))
                 .map(|w| {
                     let h = match &w.head {
                         Head::Branch(b) => format!("b:{b}"),
@@ -692,6 +743,7 @@ impl World {
         snap.files = self
             .files
             .iter()
+            .filter(|f| keep('f', &f.name))
             .map(|f| {
                 let k = f.staged as u8 | (f.modified as u8) << 1 | (!f.tracked as u8) << 2 | (f.conflict as u8) << 3;
                 (f.name.clone(), k)

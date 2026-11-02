@@ -3,7 +3,7 @@
 
 use crate::git::ERR;
 use crate::levels::LEVELS;
-use crate::play::{goal, start};
+use crate::play::start_and_goal;
 
 static mut TEXT: String = String::new();
 
@@ -38,13 +38,13 @@ pub extern "C" fn bw_check_levels() -> usize {
 pub extern "C" fn bw_check(i: usize, verbose: i32) -> i32 {
     let l = &LEVELS[i];
     log(&format!("== {i} {}", l.title));
-    let s = start(i);
+    let (s, g) = start_and_goal(i);
     if verbose != 0 {
         for (_, t) in &s.out {
             log(&format!("  setup: {t}"));
         }
     }
-    let g = goal(i).snap();
+    let g = g.snap();
     if s.snap() == g {
         log("starts solved");
         return 1;
@@ -75,15 +75,23 @@ pub extern "C" fn bw_check(i: usize, verbose: i32) -> i32 {
         log(&format!("not at the goal:\n{:?}\n{:?}", w.snap(), g));
         return 1;
     }
+    // things the goal doesn't ask about must not count
+    for c in ["edit zz-stray.txt", "git branch zz-stray", "git tag zz-stray"] {
+        w.run(c);
+        if w.snap() != g {
+            log(&format!("'{c}' after the solution leaves the goal"));
+            return 1;
+        }
+    }
     0
 }
 
-/// Runs typed lines on a level's start, logging the output (for trying
-/// commands from tools/check.mjs).
+/// Runs typed lines on a level's start, logging the output and whether
+/// they reach the goal (for trying commands from tools/check.mjs).
 #[no_mangle]
 pub extern "C" fn bw_try(i: usize, ptr: *const u8, len: usize) {
     let lines = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)) };
-    let mut w = start(i);
+    let (mut w, g) = start_and_goal(i);
     for c in lines.lines() {
         log(&format!("$ {c}"));
         w.run(c);
@@ -92,6 +100,7 @@ pub extern "C" fn bw_try(i: usize, ptr: *const u8, len: usize) {
         }
         w.out.clear();
     }
+    log(if w.snap() == g.snap() { "at the goal" } else { "not at the goal" });
 }
 
 #[no_mangle]

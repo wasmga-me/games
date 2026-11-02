@@ -247,8 +247,7 @@ impl Branchwise {
 
     fn build(&mut self) {
         let l = self.lvl();
-        self.start = play::start(l);
-        self.goal = play::goal(l);
+        (self.start, self.goal) = play::start_and_goal(l);
         self.goal_snap = self.goal.snap();
         self.built_for = l as i32;
         self.motion = Default::default();
@@ -603,8 +602,7 @@ impl Game for Branchwise {
 
     fn new() -> Self {
         wg::add_glyphs(&glyphs::GLYPHS);
-        let start = play::start(0);
-        let goal = play::goal(0);
+        let (start, goal) = play::start_and_goal(0);
         Branchwise {
             s: fresh(),
             world: start.clone(),
