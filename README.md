@@ -44,9 +44,7 @@ Original WebAssembly games written for [wasmga.me](https://wasmga.me). Each titl
 
 `bankshot/`, `boarding/`, `higher-floor/`, `hive-guard/`, `pinwork/`, and `unpark/` use pre-rendered sprites generated from [Kenney](https://kenney.nl)'s CC0 3D kits: each game's `art/jobs.py` defines render jobs processed by `tools/render3d/` (see its `README.md`) to produce `src/art.png`.
 
-`pinwork/art/draw.py` draws Pinwork's knight, orc, chests and coins as SVG;
-`pinwork/art/build.sh` renders them with sharp and packs them into
-`pinwork/src/art.png` with `tools/render3d/pack.py`.
+`pinwork/art/draw.py` generates Pinwork's knight, orc, chest, and coin sprites as SVGs; `pinwork/art/build.sh` rasterizes them with `sharp` and packs them into `pinwork/src/art.png` via `tools/render3d/pack.py`.
 
 `wgdemo/` is a minimal reference game built on the Rust engine, intended as a starter template for new titles.
 

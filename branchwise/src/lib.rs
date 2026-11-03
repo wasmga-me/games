@@ -549,7 +549,7 @@ impl Branchwise {
         // a save the level's history can't hold would be lost on undo
         if self.s.cmds_len as usize + line.len() + 1 > CMDS {
             self.world.editor = Some(e);
-            self.say(ERR, "This file is too big to save here; make it shorter.");
+            self.say(ERR, "This file is too large to save here; please shorten it.");
             return;
         }
         self.run_line(line);
@@ -1366,7 +1366,7 @@ impl Branchwise {
         let fs = if a.w > 500.0 { 16.0 } else { 14.0 };
         s.text(&e.name, a.x + 16.0, a.y + 22.0, fs * 0.85, hex(t.muted), 1.0);
         let help = tr(&[
-            "Type to change the file. Esc saves it and closes.",
+            "Type to edit the file. Press Esc to save and close.",
             "直接输入来修改文件。按 Esc 保存并关闭。",
             "入力してファイルを書き換えます。Escで保存して閉じます。",
             "입력해서 파일을 고칩니다. Esc를 누르면 저장하고 닫습니다.",

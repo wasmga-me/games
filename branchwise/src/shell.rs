@@ -44,7 +44,7 @@ impl World {
             }
             "edit" => {
                 if a.len() < 2 {
-                    return Err("edit: name a file to change, such as edit app.js".into());
+                    return Err("edit: specify a file to modify, e.g. edit app.js".into());
                 }
                 for f in &a[1..] {
                     let p = self.file_arg(f)?;
@@ -65,7 +65,7 @@ impl World {
                     None => (&a[1..], None),
                 };
                 let [f] = files else {
-                    return Err(format!("{}: open one file at a time, such as {} app.js", a[0], a[0]));
+                    return Err(format!("{}: specify a single file to open, e.g. {} app.js", a[0], a[0]));
                 };
                 let p = self.file_arg(f)?;
                 let fs = vfs::cur();
